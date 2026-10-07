@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4; margin: 16mm 14mm 18mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, "Noto Sans Arabic", sans-serif; color: #172033; font-size: 11px; line-height: 1.7; }
+    header { border-bottom: 2px solid #2563eb; padding-bottom: 8px; margin-bottom: 14px; }
+    h1 { font-size: 20px; margin: 0; color: #1d4ed8; }
+    h2 { font-size: 15px; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin: 16px 0 8px; }
+    h3 { font-size: 13px; margin: 0 0 6px; color: #334155; }
+    .clinic-meta, .document-meta { color: #64748b; font-size: 9px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 16px; }
+    .field { break-inside: avoid; }
+    .label { font-weight: 700; color: #475569; }
+    .visit { border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; margin: 10px 0; break-inside: avoid; }
+    ul { margin: 3px 0 7px; padding-right: 18px; }
+    .pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .empty { color: #64748b; font-style: italic; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{ clinic.name }}</h1>
+    <div class="clinic-meta">{{ clinic.address }}{% if clinic.phone %} — {{ clinic.phone }}{% endif %}</div>
+    <div class="document-meta">تقرير مريض #{{ report_data.patient_id }} • {{ report_data.generated_at }} • {{ report_data.timezone }}</div>
+  </header>
+
+  <h2>بيانات المريض</h2>
+  <div class="grid">
+    <div class="field"><span class="label">الاسم:</span> {{ report_data.patient_name }}</div>
+    <div class="field"><span class="label">سنة الميلاد:</span> {{ report_data.dob_year|default:"غير محدد" }}</div>
+    <div class="field"><span class="label">الجنس:</span> {{ report_data.gender }}</div>
+    <div class="field"><span class="label">الرقم الوطني:</span> {{ report_data.national_id }}</div>
+    <div class="field"><span class="label">الهاتف:</span> {{ report_data.phone }}</div>
+    <div class="field"><span class="label">تاريخ الإضافة:</span> {{ report_data.admission_date }}</div>
+    <div class="field"><span class="label">العنوان:</span> {{ report_data.address }}</div>
+    <div class="field"><span class="label">جهة الطوارئ:</span> {{ report_data.emergency_contact }}</div>
+  </div>
+  <div class="field pre"><span class="label">التاريخ العائلي:</span> {{ report_data.family_history }}</div>
+  <div class="field pre"><span class="label">تنبيهات مهمة:</span> {{ report_data.important_notes }}</div>
+
+  <h2>الزيارات</h2>
+  {% for visit in report_data.visits %}
+    <section class="visit">
+      <h3>{{ visit.date }} — العمر: {{ visit.age }}</h3>
+      <div><span class="label">حالة التوثيق:</span> {{ visit.status }} • <span class="label">الحالة السريرية:</span> {{ visit.clinical_status }}</div>
+      <div class="pre"><span class="label">الشكوى:</span> {{ visit.main_complaints|default:"-" }}</div>
+      <div class="pre"><span class="label">القصة المرضية:</span> {{ visit.history_presenting_complaint|default:"-" }}</div>
+      <div><span class="label">التشخيصات:</span> {{ visit.diagnoses|join:"، "|default:"-" }}</div>
+      {% if visit.medications %}
+        <div><span class="label">الأدوية:</span> {% for medication in visit.medications %}{{ medication.name }} {{ medication.dosage }} ({{ medication.schedule }}){% if not forloop.last %}، {% endif %}{% endfor %}</div>
+      {% endif %}
+      {% if visit.lab_values %}
+        <div><span class="label">التحاليل:</span> {% for lab in visit.lab_values %}{{ lab.name }}: {{ lab.value }} {{ lab.unit }} — {{ lab.status }} — {{ lab.date }}{% if not forloop.last %}، {% endif %}{% endfor %}</div>
+      {% endif %}
+      <div class="pre"><span class="label">الخطة العلاجية:</span> {{ visit.treatment_text|default:"-" }}</div>
+      <div class="pre"><span class="label">ملاحظات الطبيب:</span> {{ visit.doctor_notes|default:"-" }}</div>
+      {% for scale in visit.scale_responses %}
+        <div><span class="label">المقياس {{ scale.name }}:</span> الدرجة {{ scale.score }}</div>
+      {% endfor %}
+    </section>
+  {% empty %}
+    <p class="empty">لا توجد زيارات مسجلة.</p>
+  {% endfor %}
+</body>
+</html>

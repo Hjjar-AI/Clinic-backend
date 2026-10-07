@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4; margin: 16mm 14mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, "Noto Sans Arabic", sans-serif; color: #172033; font-size: 12px; line-height: 1.7; }
+    header { display: flex; justify-content: space-between; gap: 20px; border-bottom: 2px solid #2563eb; padding-bottom: 12px; }
+    h1 { color: #1d4ed8; margin: 0; font-size: 22px; }
+    h2 { margin: 20px 0 8px; font-size: 16px; color: #1e3a8a; }
+    .muted { color: #64748b; font-size: 10px; }
+    .meta { margin: 16px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; }
+    .label { color: #475569; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { padding: 9px; border: 1px solid #cbd5e1; text-align: right; vertical-align: top; overflow-wrap: anywhere; }
+    th { background: #eff6ff; }
+    tr { break-inside: avoid; }
+    .diagnoses { margin: 0; padding-right: 18px; }
+    .signatures { display: flex; justify-content: flex-start; gap: 36px; margin-top: 30px; break-inside: avoid; }
+    .signature-box { min-width: 150px; text-align: center; }
+    .signature-box img { display: block; max-width: 150px; max-height: 80px; object-fit: contain; margin: 5px auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>{{ clinic.name }}</h1>
+      <div class="muted">{{ clinic.address }}{% if clinic.phone %} — {{ clinic.phone }}{% endif %}</div>
+    </div>
+    <div>
+      <strong>وصفة طبية</strong>
+      <div class="muted">زيارة #{{ prescription.visit_id }} • إصدار {{ prescription.visit_version }}</div>
+      <div class="muted">{{ prescription.generated_at }} • {{ prescription.timezone }}</div>
+    </div>
+  </header>
+
+  <section class="meta">
+    <div><span class="label">المريض:</span> {{ prescription.patient_name }}</div>
+    <div><span class="label">رقم المريض:</span> {{ prescription.patient_id }}</div>
+    <div><span class="label">العمر:</span> {{ prescription.patient_age }}</div>
+    <div><span class="label">الجنس:</span> {{ prescription.patient_gender }}</div>
+    <div><span class="label">المعرّف الوطني/الطبي:</span> {{ prescription.patient_national_id }}</div>
+    <div><span class="label">تاريخ الزيارة:</span> {{ prescription.visit_date }}</div>
+    <div><span class="label">الطبيب:</span> {{ prescription.doctor_name }}</div>
+    <div><span class="label">القالب:</span> {{ prescription.template_version }}</div>
+  </section>
+
+  {% if prescription.diagnoses %}
+    <h2>التشخيصات</h2>
+    <ul class="diagnoses">
+      {% for diagnosis in prescription.diagnoses %}
+        <li>{{ diagnosis.arabic_name|default:diagnosis.name }}{% if diagnosis.code %} — {{ diagnosis.code }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <h2>الأدوية والتعليمات</h2>
+  <table>
+    <thead><tr><th style="width:30%">الدواء</th><th style="width:20%">الجرعة</th><th>التعليمات</th></tr></thead>
+    <tbody>
+      {% for medication in prescription.medications %}
+        <tr>
+          <td>{{ medication.name }}{% if medication.brand %}<div class="muted">{{ medication.brand }}</div>{% endif %}</td>
+          <td>{{ medication.dosage }}</td>
+          <td>{{ medication.instructions }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="3">لا توجد أدوية مسجلة</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <section class="signatures">
+    <div class="signature-box">
+      <strong>توقيع الطبيب</strong>
+      {% if prescription.signature_data %}<img src="{{ prescription.signature_data }}" alt="توقيع الطبيب">{% endif %}
+    </div>
+    {% if prescription.stamp_data %}
+      <div class="signature-box"><strong>الختم</strong><img src="{{ prescription.stamp_data }}" alt="ختم العيادة"></div>
+    {% endif %}
+  </section>
+  <div class="muted">مولّد المستند: {{ prescription.generator }}</div>
+</body>
+</html>

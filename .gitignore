@@ -1,0 +1,24 @@
+# ----------------------------------------
+# Python
+# ----------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.env
+*.db
+data/
+uploads/
+.pytest_cache
+migrations
+# Generated parser reports
+*_report_part*.txt
+
+# Virtual environment
+venv/
+.venv/
+
+# Bundled platform-specific binaries
+bin/
+.vscode
+!.vscode/extensions.json

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4; margin: 16mm 14mm 18mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, "Noto Sans Arabic", sans-serif; color: #172033; font-size: 11px; line-height: 1.75; }
+    header { border-bottom: 2px solid #2563eb; padding-bottom: 8px; margin-bottom: 14px; }
+    h1 { font-size: 20px; margin: 0; color: #1d4ed8; }
+    h2 { font-size: 15px; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin: 15px 0 7px; }
+    .meta { color: #64748b; font-size: 9px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 16px; }
+    .field { margin: 4px 0; break-inside: avoid; }
+    .label { font-weight: 700; color: #475569; }
+    .pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    table { width: 100%; border-collapse: collapse; margin-top: 5px; break-inside: avoid; }
+    th, td { border: 1px solid #cbd5e1; padding: 5px; text-align: right; vertical-align: top; }
+    th { background: #eff6ff; }
+    .signature { margin-top: 26px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{ clinic.name }}</h1>
+    <div class="meta">{{ clinic.address }}{% if clinic.phone %} — {{ clinic.phone }}{% endif %}</div>
+    <div class="meta">سجل زيارة #{{ data.visit_id }} • الإصدار {{ data.visit_version }} • {{ data.generated_at }} • {{ data.timezone }}</div>
+  </header>
+
+  <div class="grid">
+    <div class="field"><span class="label">المريض:</span> {{ data.patient_name }}</div>
+    <div class="field"><span class="label">تاريخ الزيارة:</span> {{ data.visit_date }}</div>
+    <div class="field"><span class="label">حالة التوثيق:</span> {{ data.status }}</div>
+    <div class="field"><span class="label">الحالة السريرية:</span> {{ data.clinical_status }}</div>
+  </div>
+
+  <h2>التقييم السريري</h2>
+  <div class="field pre"><span class="label">الشكوى الرئيسية:</span> {{ data.main_complaints|default:"-" }}</div>
+  <div class="field pre"><span class="label">القصة المرضية:</span> {{ data.history_presenting_complaint|default:"-" }}</div>
+  <div class="field"><span class="label">التشخيصات:</span> {{ data.diagnoses|join:"، "|default:"-" }}</div>
+  <div class="field pre"><span class="label">الفحص العقلي:</span> {{ data.mse|default:"-" }}</div>
+
+  <h2>الأدوية</h2>
+  <table>
+    <thead><tr><th>الدواء</th><th>الجرعة</th><th>التعليمات</th></tr></thead>
+    <tbody>
+      {% for medication in data.medications %}
+        <tr><td>{{ medication.name }}</td><td>{{ medication.dosage|default:"-" }}</td><td>{{ medication.schedule|default:"-" }}</td></tr>
+      {% empty %}
+        <tr><td colspan="3">لا توجد أدوية مسجلة.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if data.lab_values %}
+    <h2>نتائج التحاليل</h2>
+    <table>
+      <thead><tr><th>التحليل</th><th>النتيجة</th><th>الوحدة</th><th>المجال المرجعي</th><th>الحالة</th><th>التاريخ</th></tr></thead>
+      <tbody>
+        {% for lab in data.lab_values %}
+          <tr><td>{{ lab.name }}</td><td>{{ lab.value }}</td><td>{{ lab.unit|default:"-" }}</td><td>{{ lab.reference_range|default:"-" }}</td><td>{{ lab.status }}</td><td>{{ lab.date }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if data.scale_responses %}
+    <h2>المقاييس السريرية</h2>
+    {% for scale in data.scale_responses %}
+      <div class="field"><span class="label">{{ scale.name }}:</span> الدرجة {{ scale.score }}</div>
+      <div class="field">{% for answer in scale.answers %}{{ answer.label }}: {{ answer.value }}{% if not forloop.last %} • {% endif %}{% endfor %}</div>
+    {% endfor %}
+  {% endif %}
+
+  <h2>الخطة والمخاطر</h2>
+  <div class="field pre"><span class="label">الخطة العلاجية:</span> {{ data.treatment_text|default:"-" }}</div>
+  <div class="field pre"><span class="label">ملاحظات الطبيب:</span> {{ data.doctor_notes|default:"-" }}</div>
+  <div class="grid">
+    <div class="field"><span class="label">خطر الانتحار:</span> {{ data.risk_assessment.suicide_level|default:"-" }}</div>
+    <div class="field"><span class="label">خطر العنف:</span> {{ data.risk_assessment.violence_level|default:"-" }}</div>
+    <div class="field"><span class="label">مستوى الرعاية:</span> {{ data.treatment_plan.level_of_care }}</div>
+    <div class="field"><span class="label">نوع المتابعة:</span> {{ data.treatment_plan.follow_up_type }}</div>
+  </div>
+
+  <div class="signature">
+    <div><span class="label">المؤلف:</span> {{ data.administrative.author|default:"-" }}</div>
+    <div><span class="label">التوقيع:</span> {{ data.administrative.signed_by|default:"-" }}</div>
+  </div>
+</body>
+</html>

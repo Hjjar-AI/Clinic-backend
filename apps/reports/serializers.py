@@ -1,0 +1,1 @@
+# No serializers needed – returns raw data

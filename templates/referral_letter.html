@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4; margin: 18mm 15mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, "Noto Sans Arabic", sans-serif; color: #172033; font-size: 12px; line-height: 1.8; }
+    header { display: flex; justify-content: space-between; gap: 20px; border-bottom: 2px solid #2563eb; padding-bottom: 12px; }
+    h1 { color: #1d4ed8; margin: 0; font-size: 22px; }
+    h2 { font-size: 16px; color: #1e3a8a; margin: 20px 0 8px; }
+    .muted { color: #64748b; font-size: 10px; }
+    .meta { margin: 16px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; }
+    .label { color: #475569; font-weight: 700; }
+    .block { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #cbd5e1; background: #f8fafc; padding: 10px; min-height: 45px; }
+    ul { margin: 0; padding-right: 20px; }
+    li { break-inside: avoid; overflow-wrap: anywhere; }
+    .closing { margin-top: 28px; break-inside: avoid; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>{{ clinic.name }}</h1>
+      <div class="muted">{{ clinic.address }}{% if clinic.phone %} — {{ clinic.phone }}{% endif %}</div>
+    </div>
+    <div>
+      <strong>خطاب تحويل طبي</strong>
+      <div class="muted">زيارة #{{ data.visit_id }} • إصدار {{ data.visit_version }} • {{ data.template_version }}</div>
+      <div class="muted">{{ data.generated_at }} • {{ data.timezone }}</div>
+    </div>
+  </header>
+
+  <section class="meta">
+    <div><span class="label">المريض:</span> {{ data.patient_name }}</div>
+    <div><span class="label">تاريخ الزيارة:</span> {{ data.visit_date }}</div>
+    <div><span class="label">الطبيب المحيل:</span> {{ data.clinician }}</div>
+  </section>
+
+  <h2>سبب التحويل</h2>
+  <div class="block">{{ data.referral_reason }}</div>
+
+  {% if data.main_complaints %}<h2>الشكوى الرئيسية</h2><div class="block">{{ data.main_complaints }}</div>{% endif %}
+
+  {% if data.diagnoses %}
+    <h2>التشخيصات ذات الصلة</h2>
+    <ul>{% for diagnosis in data.diagnoses %}<li>{{ diagnosis.arabic_name|default:diagnosis.name }}{% if diagnosis.code %} — {{ diagnosis.code }}{% endif %}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if data.medications %}
+    <h2>الأدوية الحالية ذات الصلة</h2>
+    <ul>{% for medication in data.medications %}<li>{{ medication.name }} — {{ medication.dosage }} — {{ medication.schedule }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  <section class="closing">
+    <p>يرجى التكرم بتقديم الرعاية اللازمة، مع خالص الشكر والتقدير.</p>
+    <p><strong>الطبيب المعالج:</strong> {{ data.clinician }}</p>
+    <div class="muted">مولّد المستند: {{ data.generator }}</div>
+  </section>
+</body>
+</html>

@@ -1,0 +1,1 @@
+# No models needed for reports – pure service layer aggregations.

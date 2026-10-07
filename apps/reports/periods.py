@@ -21,5 +21,7 @@ def fill_months(rows, start, end):
     while month <= end:
         labels.append(f'{MONTH_NAMES[month.month-1]} {month.year}')
         values.append(counts.get((month.year, month.month), 0))
+        if month.year == 9999 and month.month == 12:
+            break
         month += relativedelta(months=1)
     return labels, values

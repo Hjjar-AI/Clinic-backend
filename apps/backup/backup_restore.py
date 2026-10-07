@@ -19,6 +19,12 @@ from .backup_creator import backup_models
 
 class BackupRestoreService:
     def _read(self, stream, require_media=True):
+        try:
+            return self._parse_backup(stream, require_media)
+        except zipfile.BadZipFile as exc:
+            raise ValueError('Corrupt backup archive') from exc
+
+    def _parse_backup(self, stream, require_media=True):
         stream.seek(0)
         maximum = getattr(settings, 'MAX_BULK_IMPORT_SIZE', 200 * 1024 * 1024)
         raw = stream.read(maximum + 1)
@@ -43,6 +49,8 @@ class BackupRestoreService:
                     if not BackupValidationService().verify_signature(manifest_raw, signature):
                         raise ValueError('Backup manifest signature verification failed')
                     manifest = json.loads(manifest_raw)
+                    if not isinstance(manifest, dict) or not isinstance(manifest.get('members'), dict):
+                        raise ValueError('Invalid backup manifest')
                     expected = manifest['members']
                     if set(expected) != set(names) - {'manifest.json', 'signature.txt'}:
                         raise ValueError('Backup inventory mismatch')

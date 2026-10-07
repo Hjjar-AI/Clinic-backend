@@ -91,7 +91,10 @@ class SettingsService:
                     raise ValidationError({'theme': ['اسم السمة غير صالح']})
                 normalized[key] = value.strip()
             elif key in ranges:
-                if isinstance(value, bool) or str(value) != str(int(value)):
+                try:
+                    if isinstance(value, bool) or str(value) != str(int(value)):
+                        raise ValueError()
+                except (TypeError, ValueError, OverflowError):
                     raise ValidationError({key: ['يلزم عدد صحيح']})
                 minimum, maximum = ranges[key]
                 if not minimum <= int(value) <= maximum:

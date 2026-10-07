@@ -42,7 +42,10 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     status_reason = models.CharField(max_length=500, blank=True, default='')
-    payment_method = models.CharField(max_length=30, blank=True, null=True)
+    payment_method = models.CharField(max_length=30, blank=True, null=True, choices=[
+        ('cash', 'Cash'), ('card', 'Card'), ('bank_transfer', 'Bank transfer'),
+        ('insurance', 'Insurance'), ('other', 'Other'),
+    ])
     issued_date = models.DateField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True, null=True)
@@ -60,6 +63,10 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['issued_date']),
         ]
         constraints = [
+            models.CheckConstraint(
+                check=~models.Q(status='paid') | models.Q(paid_at__isnull=False, paid_by__isnull=False),
+                name='paid_invoice_has_payment_metadata',
+            ),
             models.CheckConstraint(check=models.Q(version__gte=1, status__in=['draft', 'issued', 'paid', 'cancelled']), name='invoice_version_status_valid'),
             models.CheckConstraint(
                 check=(

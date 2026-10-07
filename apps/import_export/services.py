@@ -22,6 +22,13 @@ class ImportTable:
 
 class BulkImportService:
     def _read_file(self, file_stream):
+        import zipfile
+        try:
+            return self._parse_file(file_stream)
+        except (zipfile.BadZipFile, ValueError, UnicodeError) as exc:
+            raise ValidationError('تعذر قراءة الملف؛ يلزم CSV أو XLSX صالح') from exc
+
+    def _parse_file(self, file_stream):
         file_stream.seek(0)
         raw = file_stream.read()
         if raw.startswith(b'PK'):

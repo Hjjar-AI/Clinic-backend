@@ -1,107 +1,106 @@
 from django.core.exceptions import ValidationError
-from .models import (
-    DiagnosisOption,
-    MedicationOption,
-    ClinicalScale,
-    ScaleField,
-    ClinicalNoteTemplate,
-)
+from django.db import transaction
+from core.mutation import check_mutation
+from core.exceptions import ConflictError
+from .models import DiagnosisOption, MedicationOption, ClinicalScale, ScaleField, ClinicalNoteTemplate
+
+
+def _validate(instance):
+    if isinstance(instance, MedicationOption):
+        for key in ('generic_english','generic_arabic','dosage','brand_english','brand_arabic'):
+            value = getattr(instance, key)
+            if value is not None and not isinstance(value, str):
+                raise ValidationError({key: ['يلزم نص']})
+            setattr(instance, key, (value or '').strip())
+    instance.full_clean()
+    if isinstance(instance, MedicationOption):
+        duplicate = MedicationOption.all_objects.filter(
+            generic_english__iexact=instance.generic_english.strip(),
+            dosage__iexact=instance.dosage or '', brand_english__iexact=instance.brand_english or '')
+        if duplicate.exclude(pk=instance.pk).exists():
+            raise ValidationError({'generic_english': ['الدواء موجود؛ أعد تفعيله إن كان متقاعداً']})
+
+
+@transaction.atomic
+def create_catalog(model, data):
+    data = data.copy()
+    data.pop('version', None)
+    data.pop('is_active', None)
+    instance = model(**data)
+    _validate(instance)
+    instance.save()
+    return instance
+
+
+@transaction.atomic
+def update_catalog(model, pk, data, expected_version=None):
+    data = data.copy()
+    expected_version = data.pop('version', expected_version)
+    instance = model.all_objects.select_for_update().get(pk=pk)
+    check_mutation(instance, expected_version)
+    allowed = {f.name for f in model._meta.concrete_fields} - {'id','created_at','updated_at','version','is_active','deleted_at','archived_by','archive_reason'}
+    for key, value in data.items():
+        if key not in allowed:
+            raise ValidationError({key: ['حقل غير قابل للتعديل']})
+        setattr(instance, key, value)
+    _validate(instance)
+    instance.version += 1
+    instance.save()
+    return instance
+
+
+@transaction.atomic
+def archive_catalog(model, pk, version):
+    instance = model.all_objects.select_for_update().get(pk=pk)
+    check_mutation(instance, version)
+    instance.soft_delete()
+    return True
+
+
+@transaction.atomic
+def restore_catalog(instance, version):
+    instance = instance.__class__.all_objects.select_for_update().get(pk=instance.pk)
+    if type(version) is not int or instance.version != version:
+        raise ConflictError('تغير السجل؛ أعد تحميله')
+    if not instance.is_active or instance.deleted_at:
+        instance.restore()
+    return instance
+
 
 class DiagnosisService:
     def create_diagnosis(self, **data):
-        code = data.get('code')
-        english_name = data.get('english_name')
-        arabic_name = data.get('arabic_name')
-        if not code or not english_name or not arabic_name:
-            raise ValidationError(['الكود والاسم الإنجليزي والعربي مطلوبة'])
-        if DiagnosisOption.all_objects.filter(code=code).exists():
-            raise ValidationError(["تشخيص بهذا الكود موجود؛ أعد تفعيله إن كان متقاعداً"])
-        diag = DiagnosisOption.objects.create(
-            code=code,
-            english_name=english_name,
-            arabic_name=arabic_name,
-            is_active=True
-        )
-        return diag
-
-    def update_diagnosis(self, diag_id, **data):
-        diag = DiagnosisOption.all_objects.get(id=diag_id)
-        code = data.get('code', diag.code)
-        english_name = data.get('english_name', diag.english_name)
-        arabic_name = data.get('arabic_name', diag.arabic_name)
-        if code != diag.code and DiagnosisOption.all_objects.filter(code=code).exists():
-            raise ValidationError(["الكود موجود بالفعل"])
-        diag.code = code
-        diag.english_name = english_name
-        diag.arabic_name = arabic_name
-        diag.save()
-        return diag
-
-    def soft_delete(self, diag_id):
-        diag = DiagnosisOption.objects.get(id=diag_id)
-        diag.soft_delete()
-        return True
+        return create_catalog(DiagnosisOption, data)
+    def update_diagnosis(self, diag_id, expected_version=None, **data):
+        return update_catalog(DiagnosisOption, diag_id, data, expected_version)
+    def soft_delete(self, diag_id, expected_version=None):
+        return archive_catalog(DiagnosisOption, diag_id, expected_version)
 
 class MedicationService:
     def create_medication(self, **data):
-        generic_english = data.get('generic_english')
-        generic_arabic = data.get('generic_arabic', '')
-        dosage = data.get('dosage', '')
-        brand_english = data.get('brand_english', '')
-        brand_arabic = data.get('brand_arabic', '')
-        if not generic_english:
-            raise ValidationError(['الاسم العام الإنجليزي مطلوب'])
-        if MedicationOption.all_objects.filter(
-            generic_english=generic_english,
-            dosage=dosage,
-            brand_english=brand_english
-        ).exists():
-            raise ValidationError(["الدواء موجود؛ أعد تفعيله إن كان متقاعداً"])
-        med = MedicationOption.objects.create(
-            generic_english=generic_english,
-            generic_arabic=generic_arabic,
-            dosage=dosage,
-            brand_english=brand_english,
-            brand_arabic=brand_arabic,
-        )
-        return med
-
-    def update_medication(self, med_id, **data):
-        med = MedicationOption.all_objects.get(id=med_id)
-        for k, v in data.items():
-            if hasattr(med, k):
-                setattr(med, k, v)
-        med.save()
-        return med
-
-    def soft_delete(self, med_id):
-        med = MedicationOption.objects.get(id=med_id)
-        med.soft_delete()
-        return True
+        return create_catalog(MedicationOption, data)
+    def update_medication(self, med_id, expected_version=None, **data):
+        return update_catalog(MedicationOption, med_id, data, expected_version)
+    def soft_delete(self, med_id, expected_version=None):
+        return archive_catalog(MedicationOption, med_id, expected_version)
 
 class ScaleService:
-    def add_field(self, scale, data):
-        field = ScaleField.objects.create(scale=scale, **data)
+    @transaction.atomic
+    def add_field(self, scale, data, expected_version=None):
+        scale = ClinicalScale.all_objects.select_for_update().get(pk=scale.pk)
+        check_mutation(scale, expected_version)
+        field = ScaleField(scale=scale, **data)
+        field.full_clean()
+        field.save()
+        scale.version += 1
+        scale.save(update_fields=['version', 'updated_at'])
         return field
-
-    def delete_scale(self, scale_id):
-        scale = ClinicalScale.objects.get(id=scale_id)
-        scale.soft_delete()
-        return True
+    def delete_scale(self, scale_id, expected_version=None):
+        return archive_catalog(ClinicalScale, scale_id, expected_version)
 
 class TemplateService:
     def create_template(self, data):
-        template = ClinicalNoteTemplate.objects.create(**data)
-        return template
-
-    def update_template(self, template_id, data):
-        template = ClinicalNoteTemplate.all_objects.get(id=template_id)
-        for k, v in data.items():
-            setattr(template, k, v)
-        template.save()
-        return template
-
-    def delete_template(self, template_id):
-        template = ClinicalNoteTemplate.objects.get(id=template_id)
-        template.soft_delete()
-        return True
+        return create_catalog(ClinicalNoteTemplate, data)
+    def update_template(self, template_id, data, expected_version=None):
+        return update_catalog(ClinicalNoteTemplate, template_id, data, expected_version)
+    def delete_template(self, template_id, expected_version=None):
+        return archive_catalog(ClinicalNoteTemplate, template_id, expected_version)

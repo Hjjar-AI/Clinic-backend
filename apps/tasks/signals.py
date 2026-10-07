@@ -5,8 +5,12 @@ from .models import UserTask
 
 @receiver(post_save, sender=UserTask)
 def clear_task_cache(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('dashboard')
 
 @receiver(post_delete, sender=UserTask)
 def clear_task_cache_on_delete(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('dashboard')

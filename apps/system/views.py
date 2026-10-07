@@ -65,6 +65,8 @@ class ConfigView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
+        from django.middleware.csrf import get_token
+        get_token(request)
         return Response({
             'data': {
                 'working_hours': {
@@ -128,5 +130,7 @@ class ClearCacheView(APIView):
     permission_classes = [IsAuthenticated, HasManageSettings]
 
     def post(self, request):
-        cache.clear()
+        from core.cache_utils import invalidate_group
+        for group in ('settings', 'dashboard', 'reports', 'context', 'context_users', 'context_doctors', 'context_appointments', 'context_patients', 'tasks', 'patients', 'visits'):
+            invalidate_group(group)
         return Response({'data': {'success': True}})

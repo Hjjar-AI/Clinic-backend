@@ -13,7 +13,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         service = NotificationService()
-        today = timezone.now().date()
+        today = timezone.localdate()
         reminder_days = SettingsService().get_clinic_info()['task_reminder_days']
         due_on = today + timedelta(days=reminder_days)
 
@@ -24,7 +24,7 @@ class Command(BaseCommand):
                 UserTask.objects
                 .select_for_update()
                 .filter(
-                    due_date=due_on,
+                    due_date__lte=due_on,
                     status__in=['open', 'in_progress'],
                     reminder_sent=False,
                 )
@@ -40,4 +40,4 @@ class Command(BaseCommand):
                     dedupe_key=f'task-due:{task.pk}:{task.due_date.isoformat()}',
                 )
                 task.reminder_sent = True
-                task.save(update_fields=['reminder_sent'])
+                task.save(update_fields=['reminder_sent', 'updated_at'])

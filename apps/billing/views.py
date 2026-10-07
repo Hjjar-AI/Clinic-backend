@@ -1,3 +1,4 @@
+from core.mutation import request_version
 # backend/apps/billing/views.py
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
@@ -48,14 +49,8 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Invoice.objects.select_related('patient', 'visit')
-        if user.role == 'admin':
-            pass
-        elif user.role == 'doctor':
-            qs = qs.filter(patient__doctor=user)
-        elif user.role == 'receptionist':
-            qs = qs.filter(patient__created_by=user)
-        else:
-            qs = qs.none()
+        from core.access import accessible_invoices
+        qs = qs.filter(pk__in=accessible_invoices(user).values('pk'))
 
         status_param = self.request.query_params.get('status')
         if status_param == 'overdue':
@@ -111,7 +106,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         serializer.instance = self.service.update_invoice(instance, data, version)
 
     def perform_destroy(self, instance):
-        self.service.delete_invoice(instance)
+        self.service.delete_invoice(instance, request_version(self.request))
 
     @action(detail=True, methods=['put'])
     def transition(self, request, pk=None):
@@ -127,7 +122,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             raise ValidationError({'version': ['رقم الإصدار غير صالح']})
         updated = self.service.transition(
-            invoice, target, request.user, version, request.data.get('reason', '')
+            invoice, target, request.user, version, request.data.get('reason', ''), payment_method=request.data.get('payment_method')
         )
         return Response({'data': self.get_serializer(updated).data})
 
@@ -144,26 +139,21 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         if not patient:
             return error_response(404, 'المريض غير موجود', {})
         user = self.request.user
-        if user.role == 'doctor' and patient.doctor_id != user.id:
+        from core.access import accessible_patients, accessible_visits
+        if not accessible_patients(user).filter(pk=patient.pk).exists():
             return error_response(403, 'غير مصرح', {})
-        if user.role == 'receptionist' and patient.created_by_id != user.id:
-            return error_response(403, 'غير مصرح', {})
-        qs = Visit.objects.filter(patient_id=patient_id)
-        if user.role == 'doctor':
-            qs = qs.filter(patient__doctor=user)
-        elif user.role == 'receptionist':
-            qs = qs.filter(patient__created_by=user)
+        qs = accessible_visits(user).filter(patient_id=patient_id)
         # Billing only needs a small visit selector. Do not expose the full
         # clinical visit serializer (notes, diagnoses, risk data) here.
         visits = list(qs.order_by('-visit_date').values(
-            'id', 'visit_date', 'status', 'main_complaints'
+            'id', 'visit_date', 'status'
         ))
         return Response({'data': {'visits': visits}})
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         invoice = self.get_object()
-        clinic_info = SettingsService().get_clinic_info()
+        clinic_info = invoice.issue_snapshot.get('clinic') or SettingsService().get_clinic_info()
         clinic = {
             'name': clinic_info.get('clinic_name', ''),
             'address': clinic_info.get('clinic_address', ''),
@@ -171,6 +161,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         }
         html = render_to_string('billing/invoice_pdf.html', {
             'invoice': invoice,
+            'billed_patient_name': invoice.issue_snapshot.get('patient_name') or invoice.patient.get_full_name(),
             'clinic': clinic,
             'generated_at': timezone.localtime().strftime('%d/%m/%Y %H:%M'),
             'timezone': timezone.get_current_timezone_name(),

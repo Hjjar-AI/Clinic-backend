@@ -1,8 +1,8 @@
 # backend/apps/visits/models.py
-from django.db import models
+from django.db import models, transaction
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
-from core.models import TimeStampedModel, SoftDeleteModel
+from core.models import TimeStampedModel, SoftDeleteModel, ImmutableModel
 
 class Visit(SoftDeleteModel, TimeStampedModel):
     STATUS_CHOICES = [
@@ -36,7 +36,7 @@ class Visit(SoftDeleteModel, TimeStampedModel):
     ]
     patient = models.ForeignKey(
         'patients.Patient',
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='visits',
     )
     visit_date = models.DateField()
@@ -91,6 +91,15 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         blank=True,
         null=True,
     )
+    signed_at = models.DateTimeField(null=True, blank=True, editable=False)
+    amendment_reason = models.CharField(max_length=500, blank=True, default='')
+    follow_up_outcome = models.CharField(max_length=20, default='pending', choices=[
+        ('pending', 'Pending'), ('completed', 'Completed'), ('missed', 'Missed'),
+        ('cancelled', 'Cancelled'), ('waived', 'Waived'),
+    ])
+    follow_up_completed_at = models.DateTimeField(null=True, blank=True)
+    follow_up_completed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='completed_follow_ups')
     date_signed = models.DateField(null=True, blank=True)
     signed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -124,6 +133,7 @@ class Visit(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['deleted_at']),
         ]
         constraints = [
+            models.CheckConstraint(check=models.Q(version__gte=1, status__in=['draft', 'final', 'amended', 'locked']), name='visit_version_status_valid'),
             models.CheckConstraint(
                 check=(
                     models.Q(pain_level__isnull=True)
@@ -151,37 +161,18 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         return f"Visit {self.id} for {self.patient} on {self.visit_date}"
 
     def get_diagnoses(self):
-        return [
-            {
-                'id': vd.diagnosis.id if vd.diagnosis else None,
-                'code': vd.custom_code or (vd.diagnosis.code if vd.diagnosis else ''),
-                'name': vd.custom_name or (vd.diagnosis.english_name if vd.diagnosis else ''),
-                'arabic_name': vd.custom_arabic or (vd.diagnosis.arabic_name if vd.diagnosis else ''),
-            }
-            for vd in self.visit_diagnoses.all()
-        ]
+        return [{'id': row.diagnosis_id, 'code': row.custom_code, 'name': row.custom_name,
+                 'arabic_name': row.custom_arabic} for row in self.visit_diagnoses.all()]
 
     def get_medications(self):
-        return [
-            {
-                'id': vm.medication.id if vm.medication else None,
-                'name': vm.custom_name or (
-                    (vm.medication.generic_arabic or vm.medication.generic_english)
-                    if vm.medication else ''
-                ),
-                'dosage': vm.custom_dosage or (vm.medication.dosage if vm.medication else ''),
-                'brand': vm.custom_brand or (
-                    (vm.medication.brand_arabic or vm.medication.brand_english)
-                    if vm.medication else ''
-                ),
-                'is_custom': vm.is_custom,
-                'schedule': vm.schedule,
-                'controlled': vm.medication.is_controlled if vm.medication else False,
-            }
-            for vm in self.visit_medications.all()
-        ]
+        return [{'id': row.medication_id, 'name': row.custom_name, 'dosage': row.custom_dosage,
+                 'brand': row.custom_brand, 'is_custom': row.is_custom, 'schedule': row.schedule,
+                 'controlled': row.controlled_snapshot} for row in self.visit_medications.all()]
 
+    @transaction.atomic
     def set_diagnoses(self, diagnoses_list):
+        from .input_validation import normalize_rows
+        diagnoses_list = normalize_rows(diagnoses_list, 'diagnoses', self)
         self.visit_diagnoses.all().delete()
         for idx, d in enumerate(diagnoses_list):
             diagnosis_id = d.get('id') if d.get('id') else None
@@ -194,7 +185,10 @@ class Visit(SoftDeleteModel, TimeStampedModel):
                 order=idx,
             )
 
+    @transaction.atomic
     def set_medications(self, medications_list):
+        from .input_validation import normalize_rows
+        medications_list = normalize_rows(medications_list, 'medications', self)
         self.visit_medications.all().delete()
         for idx, m in enumerate(medications_list):
             medication_id = m.get('id') if m.get('id') else None
@@ -206,6 +200,7 @@ class Visit(SoftDeleteModel, TimeStampedModel):
                 custom_dosage=m.get('dosage', ''),
                 custom_brand=m.get('brand', ''),
                 is_custom=is_custom,
+                controlled_snapshot=m['controlled'],
                 schedule=m.get('schedule', ''),
                 order=idx,
             )
@@ -268,6 +263,7 @@ class VisitMedication(models.Model):
     custom_name = models.CharField(max_length=200, blank=True)
     custom_dosage = models.CharField(max_length=100, blank=True)
     custom_brand = models.CharField(max_length=200, blank=True)
+    controlled_snapshot = models.BooleanField(default=False)
     is_custom = models.BooleanField(default=False)
     schedule = models.CharField(max_length=200, blank=True)
     order = models.PositiveIntegerField(default=0)
@@ -285,6 +281,7 @@ class VisitAttachment(SoftDeleteModel, TimeStampedModel):
     original_filename = models.CharField(max_length=255)
     filepath = models.CharField(max_length=500)
     file_size = models.PositiveBigIntegerField(null=True, blank=True)
+    checksum = models.CharField(max_length=64, blank=True, editable=False)
     mime_type = models.CharField(max_length=100, blank=True, null=True)
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -314,3 +311,17 @@ class VisitScaleResponse(models.Model):
                 name='unique_visit_scale_response',
             ),
         ]
+
+
+class VisitRevision(ImmutableModel):
+    visit = models.ForeignKey(Visit, on_delete=models.PROTECT, related_name='revisions')
+    number = models.PositiveIntegerField()
+    snapshot = models.JSONField()
+    signer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='visit_revisions')
+    signed_at = models.DateTimeField()
+    reason = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ['number']
+        constraints = [models.UniqueConstraint(fields=['visit', 'number'], name='unique_visit_revision')]
+

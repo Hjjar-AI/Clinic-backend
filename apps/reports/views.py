@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from .services import StatisticsService
 from datetime import datetime
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 from core.permissions import (
     HasViewReports,
     HasExportReports,
@@ -69,7 +70,7 @@ class StatisticsView(APIView):
             'female_count': female_count,
             'gender_ratio': round(gender_ratio, 1),
             'avg_age': round(stats.get_average_age(request.user), 1),
-            'avg_visits_per_patient': round(stats.get_avg_visits_per_patient(request.user), 1),
+            'avg_visits_per_patient': round(stats.get_avg_visits_per_patient(request.user, date_from, date_to), 1),
             'top_diagnosis': [top_diag_label, top_diag_count] if top_diag else None,
             'top_medication': [top_med_label, top_med_count] if top_med else None,
             'no_show_rate': round(stats.get_no_show_rate(request.user, date_from, date_to), 1),
@@ -122,8 +123,13 @@ class MonthlySummaryView(APIView):
     service = StatisticsService()
 
     def get(self, request):
-        year = int(request.query_params.get('year', datetime.now().year))
-        month = int(request.query_params.get('month', datetime.now().month))
+        try:
+            year = int(request.query_params.get('year', timezone.localdate().year))
+            month = int(request.query_params.get('month', timezone.localdate().month))
+            if not 1900 <= year <= 9998 or not 1 <= month <= 12:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise ValidationError({'period': ['السنة أو الشهر غير صالح']})
         data = self.service.get_monthly_summary(request.user, year, month)
         return Response({'data': data})
 

@@ -14,12 +14,12 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
     invoice_number = models.CharField(max_length=50, unique=True)
     patient = models.ForeignKey(
         'patients.Patient',
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='invoices',
     )
     visit = models.ForeignKey(
         'visits.Visit',
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name='invoices',
@@ -46,6 +46,10 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
     issued_date = models.DateField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True, null=True)
+    currency = models.CharField(max_length=3, default='SYP')
+    issue_snapshot = models.JSONField(default=dict, blank=True, editable=False)
+    paid_at = models.DateTimeField(null=True, blank=True, editable=False)
+    paid_by = models.ForeignKey('accounts.User', on_delete=models.PROTECT, null=True, blank=True, related_name='paid_invoices')
     version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
 
     class Meta:
@@ -56,6 +60,7 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['issued_date']),
         ]
         constraints = [
+            models.CheckConstraint(check=models.Q(version__gte=1, status__in=['draft', 'issued', 'paid', 'cancelled']), name='invoice_version_status_valid'),
             models.CheckConstraint(
                 check=(
                     models.Q(total_amount__gte=0)
@@ -87,3 +92,16 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
 
     def __str__(self):
         return self.invoice_number
+
+
+class InvoiceLine(models.Model):
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='lines')
+    description = models.CharField(max_length=300)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
+    amount = models.DecimalField(max_digits=10, decimal_places=2, editable=False)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['order', 'pk']
+        constraints = [models.CheckConstraint(check=models.Q(quantity__gt=0, unit_price__gte=0, amount__gte=0), name='invoice_line_amounts_valid')]

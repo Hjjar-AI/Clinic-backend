@@ -13,7 +13,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         service = NotificationService()
-        today = timezone.now().date()
+        today = timezone.localdate()
         reminder_settings = SettingsService().get_clinic_info()
         reminder_days = reminder_settings['appointment_reminder_days']
         reminder_hours = reminder_settings['appointment_reminder_hours']
@@ -32,40 +32,43 @@ class Command(BaseCommand):
                 Appointment.objects
                 .select_for_update()
                 .filter(
-                    appointment_date=reminder_date,
+                    appointment_date__range=(today, reminder_date),
                     status__in=['scheduled', 'confirmed'],
                     reminder_sent=False,
                     deleted_at__isnull=True,
                 )
             )
             for apt in appointments:
+                scheduled = timezone.make_aware(datetime.combine(apt.appointment_date, apt.appointment_time))
+                if scheduled < timezone.now():
+                    continue
                 service.create(
                     apt.doctor_id,
                     f'تذكير موعد: {apt.patient.get_full_name()}',
                     f'لديك موعد بعد {reminder_days} يوم/أيام الساعة {apt.appointment_time}',
                     link=f'/appointments?date={apt.appointment_date}',
                     type='info',
-                    dedupe_key=f'appointment-day:{apt.pk}:{apt.appointment_date.isoformat()}',
+                    dedupe_key=f'appointment-day:{apt.pk}:{apt.appointment_date.isoformat()}:{apt.appointment_time}',
                 )
                 apt.reminder_sent = True
-                apt.save(update_fields=['reminder_sent'])
+                apt.save(update_fields=['reminder_sent', 'updated_at'])
 
         # Hour-before reminders
-        now = timezone.now()
+        now = timezone.localtime()
         hour_later = now + timedelta(hours=reminder_hours)
         with transaction.atomic():
             appointments = (
                 Appointment.objects
                 .select_for_update()
                 .filter(
-                    appointment_date=today,
+                    appointment_date__range=(today, timezone.localdate(hour_later)),
                     status__in=['scheduled', 'confirmed'],
                     reminder_sent_hour=False,
                     deleted_at__isnull=True,
                 )
             )
             for apt in appointments:
-                apt_datetime = datetime.combine(today, apt.appointment_time)
+                apt_datetime = datetime.combine(apt.appointment_date, apt.appointment_time)
                 # D5: single branch — make_aware is idempotent for already-aware
                 # datetimes only if we guard; combine() produces naive, so we always
                 # need the conversion. The old if/else did the same thing twice.
@@ -81,4 +84,4 @@ class Command(BaseCommand):
                         dedupe_key=f'appointment-hour:{apt.pk}:{apt.appointment_date.isoformat()}:{apt.appointment_time}',
                     )
                     apt.reminder_sent_hour = True
-                    apt.save(update_fields=['reminder_sent_hour'])
+                    apt.save(update_fields=['reminder_sent_hour', 'updated_at'])

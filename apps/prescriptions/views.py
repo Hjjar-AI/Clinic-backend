@@ -45,6 +45,8 @@ class PrescriptionGenerateView(APIView):
         result = self.service.generate_prescription_pdf(snapshot, signature_data, stamp_data)
 
         if isinstance(result, bytes):
+            from .issuance import record_document
+            record_document(visit, request.user, 'prescription', snapshot, result, signature_data, stamp_data)
             self.service.save_signature(request.user, visit_id, signature_data, stamp_data)
             self.service.discard_preview(preview_token)
             log_action(request.user.id, 'generate_prescription', 'Visit', visit.id, {

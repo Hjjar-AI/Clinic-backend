@@ -6,10 +6,14 @@ from core.cache_utils import invalidate_group
 
 @receiver(post_save, sender=Invoice)
 def clear_invoice_cache(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('dashboard')
     invalidate_group('reports')
 
 @receiver(post_delete, sender=Invoice)
 def clear_invoice_cache_on_delete(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('dashboard')
     invalidate_group('reports')

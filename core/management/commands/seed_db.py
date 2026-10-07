@@ -185,7 +185,7 @@ class Command(BaseCommand):
                     'assigned_to': None,
                     'description': desc,
                     'priority': priority,
-                    'due_date': timezone.now().date() + timezone.timedelta(days=7),
+                    'due_date': timezone.localdate() + timezone.timedelta(days=7),
                 }
             )
         self.stdout.write(f'Seeded {len(tasks)} tasks')

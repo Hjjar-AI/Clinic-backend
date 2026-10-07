@@ -1,3 +1,5 @@
+from core.mutation import request_version
+from .services import update_catalog, restore_catalog, create_catalog
 # backend/apps/clinical/views.py
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
@@ -57,15 +59,15 @@ class DiagnosisViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        serializer.instance = self.service.update_diagnosis(instance.id, **serializer.validated_data)
+        serializer.instance = self.service.update_diagnosis(instance.id, expected_version=request_version(self.request), **serializer.validated_data)
 
     def perform_destroy(self, instance):
-        self.service.soft_delete(instance.id)
+        self.service.soft_delete(instance.id, request_version(self.request))
 
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
         instance = self.get_object()
-        instance.restore()
+        instance = restore_catalog(instance, request_version(request))
         return Response({'data': self.get_serializer(instance).data})
 
 
@@ -115,15 +117,15 @@ class MedicationViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        serializer.instance = self.service.update_medication(instance.id, **serializer.validated_data)
+        serializer.instance = self.service.update_medication(instance.id, expected_version=request_version(self.request), **serializer.validated_data)
 
     def perform_destroy(self, instance):
-        self.service.soft_delete(instance.id)
+        self.service.soft_delete(instance.id, request_version(self.request))
 
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
         instance = self.get_object()
-        instance.restore()
+        instance = restore_catalog(instance, request_version(request))
         return Response({'data': self.get_serializer(instance).data})
 
 

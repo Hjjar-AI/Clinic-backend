@@ -18,7 +18,7 @@ class UserTask(TimeStampedModel):
     ]
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='created_tasks',
     )
     assigned_to = models.ForeignKey(
@@ -54,6 +54,7 @@ class UserTask(TimeStampedModel):
             models.Index(fields=['due_date']),
         ]
         constraints = [
+            models.CheckConstraint(check=models.Q(version__gte=1, status__in=['open', 'in_progress', 'completed', 'cancelled']), name='usertask_version_status_valid'),
             models.CheckConstraint(
                 check=(
                     models.Q(
@@ -87,15 +88,6 @@ class UserTask(TimeStampedModel):
     def status_display(self):
         return self.status
 
-    def reactivate(self):
-        now = timezone.now()
-        self.status = 'open'
-        self.completed_at = None
-        self.completed_by = None
-        self.cancelled_at = None
-        self.reminder_sent = False
-        self.updated_at = now
-        self.save(update_fields=[
-            'status', 'completed_at', 'completed_by', 'cancelled_at',
-            'reminder_sent', 'updated_at',
-        ])
+    def reactivate(self, actor, expected_version):
+        from .services import TaskService
+        return TaskService().activate_task(self, actor, expected_version)

@@ -88,7 +88,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         serializer.instance = self.service.update_appointment(instance, data, version)
 
     def perform_destroy(self, instance):
-        self.service.archive(instance)
+        self.service.archive(instance, self._required_version(self.request))
 
     def _paginate_queryset(self, qs, request):
         """
@@ -166,7 +166,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 return error_response(400, 'Invalid date format; expected YYYY-MM-DD', {})
         else:
-            date_obj = timezone.now().date()
+            date_obj = timezone.localdate()
         # Validate doctor_id is numeric up-front, but pass the original string
         # through so the response shape is unchanged.
         if doctor_id:
@@ -208,8 +208,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             duration = int(duration_raw)
         except (ValueError, TypeError):
             return error_response(400, 'duration must be an integer', {})
-        if duration < 5 or duration > 480:
-            return error_response(400, 'duration must be between 5 and 480 minutes', {})
+        self.service._validate_duration(duration)
         try:
             date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
         except (ValueError, TypeError):
@@ -249,13 +248,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _required_version(request):
-        version = request.data.get('version')
-        if version is None:
-            raise ValidationError({'version': ['يجب توفير رقم الإصدار']})
-        try:
-            return int(version)
-        except (ValueError, TypeError):
-            raise ValidationError({'version': ['رقم الإصدار غير صالح']})
+        from core.mutation import request_version
+        return request_version(request)
 
     @action(detail=True, methods=['put'])
     def reschedule(self, request, pk=None):
@@ -303,7 +297,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         next_apt = Appointment.objects.filter(
             patient_id=patient_id_int,
             status__in=['scheduled', 'confirmed'],
-            appointment_date__gte=timezone.now().date(),
+            appointment_date__gte=timezone.localdate(),
         ).order_by('appointment_date', 'appointment_time').first()
         if next_apt:
             return Response({'data': {'date': next_apt.appointment_date, 'time': next_apt.appointment_time}})

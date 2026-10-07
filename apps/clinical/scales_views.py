@@ -1,3 +1,5 @@
+from core.mutation import request_version
+from .services import update_catalog, restore_catalog, create_catalog
 # backend/apps/clinical/scales_views.py
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
@@ -55,18 +57,18 @@ class ScaleViewSet(viewsets.ModelViewSet):
         return queryset.prefetch_related('fields')
 
     def perform_create(self, serializer):
-        serializer.save()
+        serializer.instance = create_catalog(ClinicalScale, serializer.validated_data)
 
     def perform_update(self, serializer):
-        serializer.save()
+        serializer.instance = update_catalog(ClinicalScale, serializer.instance.pk, serializer.validated_data, request_version(self.request))
 
     def perform_destroy(self, instance):
-        instance.soft_delete()
+        self.service.delete_scale(instance.pk, request_version(self.request))
 
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
         instance = self.get_object()
-        instance.restore()
+        instance = restore_catalog(instance, request_version(request))
         return Response({'data': self.get_serializer(instance).data})
 
     @action(detail=True, methods=['post'], url_path='add-field')
@@ -74,5 +76,6 @@ class ScaleViewSet(viewsets.ModelViewSet):
         scale = self.get_object()
         serializer = ScaleFieldSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        field = self.service.add_field(scale, serializer.validated_data)
-        return Response(ScaleFieldSerializer(field).data, status=status.HTTP_201_CREATED)
+        field = self.service.add_field(scale, serializer.validated_data, request_version(request))
+        scale.refresh_from_db(fields=['version'])
+        return Response(ScaleFieldSerializer(field).data, status=status.HTTP_201_CREATED, headers={'X-Resource-Version': str(scale.version)})

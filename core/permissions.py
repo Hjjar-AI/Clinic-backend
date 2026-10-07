@@ -207,57 +207,23 @@ CanViewDoctors = HasViewDoctors
 
 class CanAccessPatient(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        user = request.user
-        if user.has_perm(PERM_VIEW_PATIENTS):
-            if user.role == 'admin':
-                return True
-            if user.role == 'doctor':
-                return obj.doctor_id == user.id
-            if user.role == 'receptionist':
-                return obj.doctor_id == user.id or obj.created_by_id == user.id
-        return False
+        from .access import accessible_patients
+        return accessible_patients(request.user, True).filter(pk=obj.pk).exists()
 
 class CanAccessVisit(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        if obj.deleted_at:
-            return False
-        user = request.user
-        if user.has_perm(PERM_VIEW_VISITS) or user.has_perm(PERM_EDIT_VISIT):
-            if user.role == 'admin':
-                return True
-            if user.role == 'doctor':
-                return obj.patient.doctor_id == user.id or obj.author_id == user.id
-            if user.role == 'receptionist':
-                return obj.patient.created_by_id == user.id
-        return False
+        from .access import accessible_visits
+        return accessible_visits(request.user).filter(pk=obj.pk).exists()
 
 class CanAccessAppointment(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        if obj.deleted_at:
-            return False
-        user = request.user
-        if user.has_perm(PERM_VIEW_APPOINTMENTS) or user.has_perm(PERM_MANAGE_APPOINTMENTS):
-            if user.role == 'admin':
-                return True
-            if user.role == 'doctor':
-                return obj.doctor_id == user.id
-            if user.role == 'receptionist':
-                return obj.patient.created_by_id == user.id
-        return False
+        from .access import accessible_appointments
+        return accessible_appointments(request.user).filter(pk=obj.pk).exists()
 
 class CanAccessInvoice(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        if obj.deleted_at:
-            return False
-        user = request.user
-        if user.has_perm(PERM_VIEW_BILLING) or user.has_perm(PERM_MANAGE_BILLING):
-            if user.role == 'admin':
-                return True
-            if user.role == 'doctor':
-                return obj.patient.doctor_id == user.id
-            if user.role == 'receptionist':
-                return obj.patient.created_by_id == user.id
-        return False
+        from .access import accessible_invoices
+        return accessible_invoices(request.user).filter(pk=obj.pk).exists()
 
 # Aliases for backward compatibility (if any)
 def has_permission(user, perm_name):

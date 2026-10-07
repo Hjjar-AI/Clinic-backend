@@ -1,3 +1,4 @@
+import math
 from django.core.exceptions import ValidationError
 
 from apps.clinical.models import ClinicalScale
@@ -7,13 +8,12 @@ def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None)
     """Validate scale answers and persist an immutable definition snapshot."""
     if not isinstance(item, dict):
         raise ValidationError({'scale_responses': ['استجابة المقياس غير صالحة']})
-    try:
-        scale_id = int(item.get('scale_id'))
-    except (TypeError, ValueError):
+    scale_id = item.get('scale_id')
+    if type(scale_id) is not int or scale_id <= 0:
         raise ValidationError({'scale_responses': ['معرّف المقياس غير صالح']})
 
     scale = ClinicalScale.all_objects.prefetch_related('fields').filter(pk=scale_id).first()
-    if not scale:
+    if not scale or (not definition_snapshot and (not scale.is_active or scale.deleted_at)):
         raise ValidationError({'scale_responses': ['تعريف المقياس غير موجود']})
     responses = item.get('responses')
     if not isinstance(responses, dict):
@@ -35,7 +35,9 @@ def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None)
         field_id = field_value('id')
         if field_id is None:
             raise ValidationError({'scale_responses': ['تعريف سؤال المقياس غير صالح']})
-        label = str(field_value('label', ''))[:200]
+        label = field_value('label', '')
+        if not isinstance(label, str) or len(label) > 200:
+            raise ValidationError({'scale_responses': ['عنوان سؤال غير صالح']})
         field_type = field_value('field_type', 'slider')
         minimum = float(field_value('min_val', 0))
         maximum = float(field_value('max_val', 10))
@@ -43,17 +45,29 @@ def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None)
             raise ValidationError({'scale_responses': [f'نطاق غير صالح للسؤال: {label}']})
         default = field_value('default', minimum)
         key = str(field_id)
-        value = responses.get(key, responses.get(field_id, default))
+        value = responses.get(key, responses.get(field_id))
+        if value is None:
+            raise ValidationError({'scale_responses': [f'الإجابة مطلوبة: {label}']})
         if field_type == 'slider':
             try:
+                if isinstance(value, bool): raise ValueError()
                 value = float(value)
             except (TypeError, ValueError):
                 raise ValidationError({'scale_responses': [f'قيمة غير رقمية للسؤال: {label}']})
+            step = float(field_value('step', 1))
+            if not all(math.isfinite(v) for v in (value, minimum, maximum, step)) or step <= 0:
+                raise ValidationError({'scale_responses': ['قيمة رقمية غير صالحة']})
+            increments = (value - minimum) / step
+            if not math.isclose(increments, round(increments), abs_tol=1e-7):
+                raise ValidationError({'scale_responses': [f'القيمة لا تطابق الخطوة: {label}']})
             if value < minimum or value > maximum:
                 raise ValidationError({'scale_responses': [f'قيمة السؤال خارج النطاق: {label}']})
             score += value
+            if not math.isfinite(score):
+                raise ValidationError({'scale_responses': ['مجموع المقياس خارج النطاق']})
         else:
-            value = str(value or '')
+            if not isinstance(value, str):
+                raise ValidationError({'scale_responses': ['يلزم جواب نصي']})
             if len(value) > 5000:
                 raise ValidationError({'scale_responses': [f'إجابة السؤال طويلة جداً: {label}']})
         normalized[key] = value

@@ -1,5 +1,7 @@
 # backend/apps/reports/visit_statistics.py
-from django.db.models import Count, Q
+from django.db.models import Count, Q, OuterRef, Subquery
+from collections import Counter
+from .periods import monthly_period, fill_months
 from django.db.models.functions import TruncMonth, ExtractWeekDay
 from django.utils import timezone
 from dateutil.relativedelta import relativedelta
@@ -16,52 +18,38 @@ class VisitStatisticsService(BaseStatisticsService):
         return qs.count()
 
     def get_monthly_visits(self, user, months=12, date_from=None, date_to=None):
-        visits = self.get_accessible_visits(user)
-        if date_from:
-            visits = visits.filter(visit_date__gte=date_from)
-        if date_to:
-            visits = visits.filter(visit_date__lte=date_to)
-        today = timezone.now().date()
-        start_date = today - relativedelta(months=months)
-        visits = visits.filter(visit_date__gte=start_date)
+        start, end = monthly_period(months, date_from, date_to)
+        visits = self.get_accessible_visits(user, start, end)
+        rows = visits.annotate(month=TruncMonth('visit_date')).values('month').annotate(count=Count('id')).order_by('month')
+        return fill_months(rows, start, end)
 
-        monthly = visits.annotate(month=TruncMonth('visit_date')).values('month').annotate(count=Count('id')).order_by('month')
-        labels = []
-        counts = []
-        month_names = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
-        for entry in monthly:
-            month_date = entry['month']
-            labels.append(f"{month_names[month_date.month-1]} {month_date.year}")
-            counts.append(entry['count'])
-        return labels, counts
+    @staticmethod
+    def _top(rows, kind, limit):
+        counts, names = Counter(), {}
+        for row in rows.order_by('visit__visit_date', 'visit_id', 'order', 'pk'):
+            if kind == 'diagnosis':
+                name = row.custom_arabic or row.custom_name or row.custom_code or 'غير محدد'
+                key = ('catalog', row.diagnosis_id) if row.diagnosis_id else ('custom', row.custom_code.casefold(), name.casefold())
+            else:
+                name = row.custom_name or 'غير محدد'
+                key = ('catalog', row.medication_id) if row.medication_id else ('custom', name.casefold(), (row.custom_dosage or '').casefold())
+            counts[key] += 1
+            names[key] = name
+        return [(names[key], count) for key, count in counts.most_common(limit)]
 
     def get_top_diagnoses(self, user, limit=5, date_from=None, date_to=None):
         visits = self.get_accessible_visits(user, date_from, date_to)
-        diagnoses = VisitDiagnosis.objects.filter(visit__in=visits)
-        top = diagnoses.values('diagnosis__arabic_name', 'diagnosis__english_name', 'custom_arabic', 'custom_name') \
-            .annotate(count=Count('id')).order_by('-count')[:limit]
-        result = []
-        for entry in top:
-            name = entry['diagnosis__arabic_name'] or entry['diagnosis__english_name'] or entry['custom_arabic'] or entry['custom_name'] or 'غير محدد'
-            result.append((name, entry['count']))
-        return result
+        return self._top(VisitDiagnosis.objects.filter(visit__in=visits), 'diagnosis', limit)
 
     def get_top_medications(self, user, limit=5, date_from=None, date_to=None):
         visits = self.get_accessible_visits(user, date_from, date_to)
-        meds = VisitMedication.objects.filter(visit__in=visits)
-        top = meds.values('medication__generic_arabic', 'medication__generic_english', 'custom_name') \
-            .annotate(count=Count('id')).order_by('-count')[:limit]
-        result = []
-        for entry in top:
-            name = entry['medication__generic_arabic'] or entry['medication__generic_english'] or entry['custom_name'] or 'غير محدد'
-            result.append((name, entry['count']))
-        return result
+        return self._top(VisitMedication.objects.filter(visit__in=visits), 'medication', limit)
 
     def get_followup_stats(self, user, date_from=None, date_to=None):
         visits = self.get_accessible_visits(user, date_from, date_to)
-        today = timezone.now().date()
-        completed = visits.filter(follow_up_date__isnull=False, follow_up_completed=True).count()
-        overdue = visits.filter(follow_up_date__lt=today, follow_up_completed=False).count()
+        today = timezone.localdate()
+        completed = visits.filter(follow_up_date__isnull=False, follow_up_outcome='completed').count()
+        overdue = visits.filter(follow_up_date__lt=today, follow_up_outcome__in=['pending', 'missed']).count()
         total = overdue + completed
         adherence = (completed / total * 100) if total > 0 else 0
         return completed, overdue, adherence
@@ -84,18 +72,18 @@ class VisitStatisticsService(BaseStatisticsService):
                 counts.append(r['count'])
         return labels, counts
 
-    def get_avg_visits_per_patient(self, user):
+    def get_avg_visits_per_patient(self, user, date_from=None, date_to=None):
         total_patients = self.get_total_patients(user)
         if total_patients == 0:
             return 0
-        return self.get_total_visits(user) / total_patients
+        return self.get_total_visits(user, date_from, date_to) / total_patients
 
     def get_high_risk_patients(self, user, limit=20):
         patients = self.get_accessible_patients(user)
-        high_risk_visit_ids = Visit.objects.filter(
-            patient__in=patients,
-        ).filter(Q(suicide_risk_level='High') | Q(violence_risk_level='High')).values('patient_id').distinct()
-        return patients.filter(id__in=high_risk_visit_ids)[:limit]
+        latest = self.get_accessible_visits(user).filter(patient_id=OuterRef('pk')).exclude(status='draft').order_by('-visit_date', '-pk')
+        return patients.annotate(latest_suicide=Subquery(latest.values('suicide_risk_level')[:1]),
+            latest_violence=Subquery(latest.values('violence_risk_level')[:1])).filter(
+            Q(latest_suicide='High') | Q(latest_violence='High')).order_by('pk')[:limit]
 
     def get_level_of_care_distribution(self, user, date_from=None, date_to=None):
         visits = self.get_accessible_visits(user, date_from, date_to)
@@ -112,21 +100,12 @@ class VisitStatisticsService(BaseStatisticsService):
         visits = self.get_accessible_visits(user).filter(visit_date__year=year, visit_date__month=month)
         total_visits = visits.count()
 
-        diagnoses = VisitDiagnosis.objects.filter(visit__in=visits)
-        diag_counts = diagnoses.values('diagnosis__arabic_name', 'diagnosis__english_name', 'custom_arabic', 'custom_name') \
-            .annotate(count=Count('id')).order_by('-count')
-        diag_list = [{
-            'name': (d['diagnosis__arabic_name'] or d['diagnosis__english_name'] or d['custom_arabic'] or d['custom_name'] or 'غير محدد'),
-            'count': d['count']
-        } for d in diag_counts]
-
-        medications = VisitMedication.objects.filter(visit__in=visits)
-        med_counts = medications.values('medication__generic_arabic', 'medication__generic_english', 'custom_name') \
-            .annotate(count=Count('id')).order_by('-count')
-        med_list = [{
-            'name': (m['medication__generic_arabic'] or m['medication__generic_english'] or m['custom_name'] or 'غير محدد'),
-            'count': m['count']
-        } for m in med_counts]
+        from datetime import date
+        from dateutil.relativedelta import relativedelta
+        start = date(year, month, 1)
+        end = start + relativedelta(months=1, days=-1)
+        diag_list = [dict(name=name, count=count) for name, count in self.get_top_diagnoses(user, 1000, start, end)]
+        med_list = [dict(name=name, count=count) for name, count in self.get_top_medications(user, 1000, start, end)]
 
         return {
             'year': year,

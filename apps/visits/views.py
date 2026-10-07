@@ -44,7 +44,7 @@ class VisitViewSet(viewsets.ModelViewSet):
             permission_classes = [permissions.IsAuthenticated, HasEditVisit, CanAccessVisit]
         elif self.action == 'destroy':
             permission_classes = [permissions.IsAuthenticated, HasDeleteVisit, CanAccessVisit]
-        elif self.action in ['retrieve', 'list_attachments']:
+        elif self.action in ['retrieve', 'list_attachments', 'revisions', 'issued_documents']:
             permission_classes = [permissions.IsAuthenticated, HasViewVisits, CanAccessVisit]
         elif self.action in ['attachments', 'attachment_detail']:
             permission_classes = [permissions.IsAuthenticated, HasManagePatientDocuments, CanAccessVisit]
@@ -65,14 +65,8 @@ class VisitViewSet(viewsets.ModelViewSet):
             'visit_medications__medication',
             'scale_responses',
         )
-        if user.role == 'admin':
-            pass
-        elif user.role == 'doctor':
-            qs = qs.filter(patient__doctor=user)
-        elif user.role == 'receptionist':
-            qs = qs.filter(patient__created_by=user)
-        else:
-            qs = qs.none()
+        from core.access import accessible_visits
+        qs = qs.filter(pk__in=accessible_visits(user).values('pk'))
 
         status_param = self.request.query_params.get('status')
         if status_param:
@@ -130,10 +124,8 @@ class VisitViewSet(viewsets.ModelViewSet):
         return items, total, limit, offset
 
     def _check_patient_access(self, patient):
-        user = self.request.user
-        if user.role == 'doctor' and patient.doctor_id != user.id:
-            self.permission_denied(self.request)
-        if user.role == 'receptionist' and patient.created_by_id != user.id:
+        from core.access import accessible_patients
+        if not accessible_patients(self.request.user).filter(pk=patient.pk).exists():
             self.permission_denied(self.request)
 
     def perform_create(self, serializer):
@@ -168,7 +160,7 @@ class VisitViewSet(viewsets.ModelViewSet):
         serializer.instance = updated
 
     def perform_destroy(self, instance):
-        self.service.soft_delete_visit(instance)
+        self.service.soft_delete_visit(instance, self._required_version(self.request))
 
     @action(detail=True, methods=['put'])
     def transition(self, request, pk=None):
@@ -187,18 +179,13 @@ class VisitViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _required_version(request):
-        version = request.data.get('version')
-        if version is None:
-            raise ValidationError({'version': ['يجب توفير رقم الإصدار']})
-        try:
-            return int(version)
-        except (ValueError, TypeError):
-            raise ValidationError({'version': ['رقم الإصدار غير صالح']})
+        from core.mutation import request_version
+        return request_version(request)
 
     @action(detail=True, methods=['put'])
     def complete_follow_up(self, request, pk=None):
         visit = self.get_object()
-        updated = self.service.complete_follow_up(visit)
+        updated = self.service.complete_follow_up(visit, request.user, self._required_version(request), request.data.get('outcome', 'completed'))
         return Response({'data': self.get_serializer(updated).data, 'message': 'تم إكمال المتابعة'})
 
     @action(detail=False, methods=['post'], url_path='mark-all-overdue')
@@ -216,9 +203,10 @@ class VisitViewSet(viewsets.ModelViewSet):
             validate_upload(file)
         except ValidationError as e:
             return error_response(400, str(e), {})
-        attachment = VisitAttachmentService().upload_attachment(visit, file, request.user)
+        attachment = VisitAttachmentService().upload_attachment(visit, file, request.user, self._required_version(request))
         serializer = VisitAttachmentSerializer(attachment)
-        return Response({'data': serializer.data}, status=201)
+        visit.refresh_from_db(fields=['version'])
+        return Response({'data': serializer.data}, status=201, headers={'X-Resource-Version': str(visit.version)})
 
     @action(detail=True, methods=['get'])
     def list_attachments(self, request, pk=None):
@@ -246,12 +234,13 @@ class VisitViewSet(viewsets.ModelViewSet):
             deleted_at__isnull=True,
         )
         if request.method == 'DELETE':
-            VisitAttachmentService().soft_delete_attachment(attachment)
+            VisitAttachmentService().soft_delete_attachment(attachment, self._required_version(request))
             log_action(request.user.id, 'archive', 'VisitAttachment', attachment.id, {
                 'summary': f'Archived visit attachment {attachment.original_filename}',
                 'visit_id': visit.id,
             })
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            visit.refresh_from_db(fields=['version'])
+            return Response(status=status.HTTP_204_NO_CONTENT, headers={'X-Resource-Version': str(visit.version)})
         if not default_storage.exists(attachment.filepath):
             return error_response(404, 'الملف غير موجود في التخزين', {})
         log_action(request.user.id, 'download_attachment', 'VisitAttachment', attachment.id, {
@@ -264,3 +253,16 @@ class VisitViewSet(viewsets.ModelViewSet):
             filename=attachment.original_filename,
             content_type=attachment.mime_type or 'application/octet-stream',
         )
+
+    @action(detail=True, methods=['get'])
+    def revisions(self, request, pk=None):
+        visit = self.get_object()
+        return Response({'data': list(visit.revisions.order_by('number').values(
+            'id', 'number', 'snapshot', 'signer_id', 'signed_at', 'reason'))})
+
+    @action(detail=True, methods=['get'], url_path='issued-documents')
+    def issued_documents(self, request, pk=None):
+        visit = self.get_object()
+        from apps.prescriptions.models import IssuedDocument
+        return Response({'data': list(IssuedDocument.objects.filter(revision__visit=visit).values(
+            'id', 'document_type', 'revision_id', 'issued_by_id', 'issued_at', 'checksum', 'snapshot'))})

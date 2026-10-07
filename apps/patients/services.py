@@ -1,7 +1,8 @@
+from core.mutation import check_mutation
 # backend/apps/patients/services.py
 import os
 from django.db import IntegrityError, transaction
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
 from django.db.models import Q
 from datetime import date
@@ -134,6 +135,7 @@ class PatientService:
     @transaction.atomic
     def update_patient(self, patient, data, current_user, expected_version=None):
         patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        check_mutation(patient, expected_version)
         data = self._normalize(data)
         if expected_version is None:
             raise ValidationError(['يجب توفير رقم الإصدار'])
@@ -164,58 +166,36 @@ class PatientService:
         return patient
 
     @transaction.atomic
-    def soft_delete_patient(self, patient, user):
+    def soft_delete_patient(self, patient, user, expected_version=None):
         if user.role != 'admin':
             raise ValidationError(['غير مصرح لك بهذا الإجراء'])
-        dependencies = {
-            'visits': patient.visits.filter(deleted_at__isnull=True).count(),
-            'appointments': patient.appointments.filter(deleted_at__isnull=True).count(),
-            'invoices': patient.invoices.filter(deleted_at__isnull=True).count(),
-            'documents': patient.documents.filter(deleted_at__isnull=True).count(),
-        }
-        if any(dependencies.values()):
-            summary = '، '.join(f'{key}: {value}' for key, value in dependencies.items() if value)
-            raise ValidationError({
-                'patient': [f'لا يمكن حذف المريض لوجود سجلات مرتبطة ({summary}). استخدم الأرشفة أو إخفاء الهوية.']
-            })
-        patient.soft_delete()
+        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        check_mutation(patient, expected_version)
+        patient.soft_delete(user, 'Patient archived; clinical history retained')
         return True
 
     @transaction.atomic
-    def anonymize(self, patient, user):
+    def anonymize(self, patient, user, expected_version=None):
+        # Identity restriction is pseudonymization, not erasure of signed history.
         if user.role != 'admin':
             raise ValidationError(['غير مصرح لك بهذا الإجراء'])
+        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        check_mutation(patient, expected_version)
         patient.first_name = 'مجهول'
-        patient.father_name = ''
-        patient.surname = 'مجهول'
-        patient.mother_name = ''
-        patient.national_id = None
-        patient.phone = None
-        patient.emergency_contact_name = ''
-        patient.emergency_contact_phone = ''
-        patient.permanent_address = ''
-        patient.family_history = None
-        patient.important_notes = None
-        patient.doctor = None
-        patient.created_by = None
-        patient.deleted_at = timezone.now()
-        patient.is_active = False
+        patient.surname = str(patient.pk)
+        for field in ('father_name', 'mother_name', 'national_id', 'phone', 'permanent_address',
+                      'emergency_contact_name', 'emergency_contact_phone', 'occupation'):
+            setattr(patient, field, None)
         patient.version += 1
         patient.save()
+        patient.soft_delete(user, 'Identity restricted; signed historical records retained')
         return True
 
     def list_patients(self, user, filters=None):
-        include_archived = bool(filters and filters.get('include_archived') == 'true' and user.role == 'admin')
+        include_archived = bool(filters and filters.get('include_archived') == 'true')
         manager = Patient.all_objects if include_archived else Patient.objects
-        qs = manager.select_related('doctor')
-        if user.role == 'admin':
-            pass
-        elif user.role == 'doctor':
-            qs = qs.filter(doctor=user)
-        elif user.role == 'receptionist':
-            qs = qs.filter(Q(doctor=user) | Q(created_by=user))
-        else:
-            qs = qs.none()
+        from core.access import accessible_patients
+        qs = accessible_patients(user, include_archived).select_related('doctor')
 
         search = filters.get('search', '') if filters else ''
         if search:
@@ -281,6 +261,19 @@ class PatientService:
             return qs.none()
         return qs.filter(strong).select_related('doctor').order_by('-updated_at')[:10]
 
+    @transaction.atomic
+    def restore_patient(self, patient, user, expected_version):
+        if user.role != 'admin':
+            raise PermissionDenied('الاستعادة مخصصة للمدير')
+        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        if type(expected_version) is not int or patient.version != expected_version:
+            raise ConflictError('تغير السجل؛ أعد تحميله')
+        patient.is_active = True
+        patient.deleted_at = None
+        patient.full_clean()
+        patient.restore()
+        return patient
+
     def get_care_team(self, patient):
         return patient.care_team.select_related('user').all()
 
@@ -305,20 +298,28 @@ class PatientService:
 class PatientDocumentService:
     @transaction.atomic
     def upload_document(self, patient, file, uploaded_by, category='other', description=''):
+        patient = Patient.objects.select_for_update().get(pk=patient.pk)
+        from core.upload_security import validate_upload
+        validate_upload(file)
+        if not isinstance(category, str) or len(category) > 50:
+            raise ValidationError({'category': ['فئة غير صالحة']})
         path = save_uploaded_file(file, 'patient_docs', patient.id)
-        doc = PatientDocument.objects.create(
-            patient=patient,
-            filename=os.path.basename(path),
-            original_filename=file.name,
-            filepath=path,
-            file_size=file.size,
-            mime_type=file.content_type,
-            category=category,
-            description=description,
-            uploaded_by=uploaded_by,
-        )
-        return doc
+        try:
+            doc = PatientDocument(patient=patient, filename=os.path.basename(path), original_filename=file.name,
+                filepath=path, file_size=file.verified_size, mime_type=file.verified_mime,
+                checksum=file.verified_checksum, category=category, description=description, uploaded_by=uploaded_by)
+            doc.full_clean(exclude=['uploaded_by'])
+            doc.save()
+            return doc
+        except Exception:
+            from django.core.files.storage import default_storage
+            default_storage.delete(path)
+            raise
 
+    @transaction.atomic
     def soft_delete_document(self, doc):
+        doc = PatientDocument.all_objects.select_for_update().get(pk=doc.pk)
+        if not doc.is_active or doc.deleted_at:
+            raise ConflictError('المستند مؤرشف')
         doc.soft_delete()
         return True

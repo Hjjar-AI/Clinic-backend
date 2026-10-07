@@ -25,13 +25,13 @@ class DashboardService:
         return visits
 
     def get_summary(self, user):
-        return {
+        return self._permitted(user, {
             'total_patients': self.stats.get_total_patients(user),
             'total_visits': self.stats.get_total_visits(user),
             'appointments_today': self.stats.get_appointments_today(user),
             'pending_tasks': self.stats.get_pending_tasks_count(user),
             '_meta': self._meta(),
-        }
+        })
 
     def _meta(self, date_from=None, date_to=None):
         return {
@@ -48,7 +48,7 @@ class DashboardService:
         }
 
     def get_dashboard_data(self, user, date_from=None, date_to=None):
-        today = timezone.now().date()
+        today = timezone.localdate()
         next_week = today + timedelta(days=7)
 
         visits_for_period = self._get_accessible_visits(user, date_from, date_to)
@@ -58,13 +58,13 @@ class DashboardService:
 
         overdue_followups = visits_for_period.filter(
             follow_up_date__lt=today,
-            follow_up_completed=False
+            follow_up_outcome='pending'
         ).order_by('follow_up_date')[:50]
 
         upcoming_followups = visits_for_period.filter(
             follow_up_date__gte=today,
             follow_up_date__lte=next_week,
-            follow_up_completed=False
+            follow_up_outcome='pending'
         ).order_by('follow_up_date')[:50]
 
         pending_tasks = UserTask.objects.filter(
@@ -76,7 +76,8 @@ class DashboardService:
                 status__in=['open', 'in_progress']
             ).order_by('due_date', 'created_at')[:5]
 
-        upcoming_appointments = Appointment.objects.filter(
+        from core.access import accessible_appointments
+        upcoming_appointments = accessible_appointments(user).filter(
             status__in=['scheduled', 'confirmed'],
             appointment_date__gte=today,
             appointment_date__lte=next_week,
@@ -86,15 +87,10 @@ class DashboardService:
         if date_to:
             upcoming_appointments = upcoming_appointments.filter(appointment_date__lte=date_to)
 
-        if user.role == 'doctor':
-            upcoming_appointments = upcoming_appointments.filter(doctor=user)
-        elif user.role == 'receptionist':
-            patient_ids = self._get_accessible_patients(user).values_list('id', flat=True)
-            upcoming_appointments = upcoming_appointments.filter(patient_id__in=patient_ids)
         upcoming_appointments = upcoming_appointments.order_by('appointment_date', 'appointment_time')[:10]
 
         # Today's appointments: apply date filters if provided; otherwise show all today's appointments
-        today_appointments = Appointment.objects.filter(
+        today_appointments = accessible_appointments(user).filter(
             status__in=['scheduled', 'confirmed', 'arrived'],
             appointment_date=today,
         )
@@ -103,14 +99,9 @@ class DashboardService:
         if date_to:
             today_appointments = today_appointments.filter(appointment_date__lte=date_to)
 
-        if user.role == 'doctor':
-            today_appointments = today_appointments.filter(doctor=user)
-        elif user.role == 'receptionist':
-            patient_ids = self._get_accessible_patients(user).values_list('id', flat=True)
-            today_appointments = today_appointments.filter(patient_id__in=patient_ids)
         today_appointments = today_appointments.order_by('appointment_time')[:50]
 
-        return {
+        return self._permitted(user, {
             'total_patients': self.stats.get_total_patients(user),
             'total_visits': self.stats.get_total_visits(user, date_from, date_to),
             'recent_patients': self._serialize_patients(recent_patients),
@@ -123,7 +114,22 @@ class DashboardService:
             'appointments_today': self.stats.get_appointments_today(user),
             'pending_tasks_count': self.stats.get_pending_tasks_count(user),
             '_meta': self._meta(date_from, date_to),
+        })
+
+    @staticmethod
+    def _permitted(user, data):
+        groups = {
+            'view_patients': ('total_patients', 'recent_patients'),
+            'view_visits': ('total_visits', 'overdue_followups', 'upcoming_followups', 'high_risk_patients'),
+            'view_appointments': ('appointments_today', 'today_appointments', 'upcoming_appointments'),
+            'manage_tasks': ('pending_tasks', 'pending_tasks_count'),
         }
+        for permission, keys in groups.items():
+            if not user.has_perm(permission):
+                for key in keys:
+                    if key in data:
+                        data[key] = [] if isinstance(data[key], list) else None
+        return data
 
     def get_chart_data(self, user, date_from=None, date_to=None):
         months_labels, visits_counts = self.stats.get_monthly_visits(user, months=12, date_from=date_from, date_to=date_to)
@@ -158,6 +164,7 @@ class DashboardService:
     def _serialize_visits(self, qs):
         return [{
             'id': v.id,
+            'version': v.version,
             'patient_id': v.patient_id,
             'patient_name': v.patient.get_full_name(),
             'visit_date': v.visit_date.isoformat() if v.visit_date else None,
@@ -181,6 +188,7 @@ class DashboardService:
     def _serialize_appointments(self, qs):
         return [{
             'id': a.id,
+            'version': a.version,
             'patient_id': a.patient_id,
             'patient_name': a.patient.get_full_name(),
             'appointment_date': a.appointment_date.isoformat() if a.appointment_date else None,

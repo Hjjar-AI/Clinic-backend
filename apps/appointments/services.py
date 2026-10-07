@@ -1,3 +1,4 @@
+from core.mutation import check_mutation
 # backend/apps/appointments/services.py
 from django.db import transaction
 from django.core.exceptions import ValidationError
@@ -49,7 +50,7 @@ class AppointmentService:
     def _get_occupied_intervals(self, doctor_id, date_obj, exclude_id=None):
         appointments = Appointment.objects.filter(
             doctor_id=doctor_id,
-            appointment_date=date_obj,
+            appointment_date__range=(date_obj - timedelta(days=1), date_obj),
             status__in=['scheduled', 'confirmed', 'arrived'],
         )
 
@@ -58,9 +59,9 @@ class AppointmentService:
 
         occupied = []
         for apt in appointments:
-            start = apt.appointment_time
+            start = datetime.combine(apt.appointment_date, apt.appointment_time)
             duration = apt.duration_minutes or 30
-            end = (datetime.combine(date_obj, start) + timedelta(minutes=duration)).time()
+            end = start + timedelta(minutes=duration)
             occupied.append((start, end))
         return occupied
 
@@ -75,8 +76,7 @@ class AppointmentService:
 
         occupied = self._get_occupied_intervals(doctor_id, date_obj, exclude_id)
         for occ_start, occ_end in occupied:
-            occ_start_dt = datetime.combine(date_obj, occ_start)
-            occ_end_dt = datetime.combine(date_obj, occ_end)
+            occ_start_dt, occ_end_dt = occ_start, occ_end
             if not (new_end_dt <= occ_start_dt or new_start_dt >= occ_end_dt):
                 return False
         return True
@@ -96,8 +96,7 @@ class AppointmentService:
             time_obj = current_dt.time()
             available = True
             for occ_start, occ_end in occupied:
-                occ_start_dt = datetime.combine(date_obj, occ_start)
-                occ_end_dt = datetime.combine(date_obj, occ_end)
+                occ_start_dt, occ_end_dt = occ_start, occ_end
                 if not (current_dt + timedelta(minutes=duration) <= occ_start_dt or current_dt >= occ_end_dt):
                     available = False
                     break
@@ -120,8 +119,10 @@ class AppointmentService:
         if isinstance(doctor, int):
             doctor = User.objects.filter(id=doctor, is_active=True).first()
 
-        if not patient:
-            raise ValidationError(['المريض غير موجود'])
+        if patient:
+            patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        if not patient or not patient.is_active or patient.deleted_at:
+            raise ValidationError(['المريض غير موجود أو مؤرشف'])
         if not doctor or not doctor.is_active or doctor.role not in ['doctor', 'admin']:
             raise ValidationError(['الطبيب غير صالح'])
 
@@ -170,6 +171,7 @@ class AppointmentService:
     @transaction.atomic
     def update_appointment(self, appointment, data, expected_version=None):
         appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
+        check_mutation(appointment, expected_version)
         if expected_version is None:
             raise ValidationError(['يجب توفير رقم الإصدار'])
         if appointment.version != expected_version:
@@ -209,6 +211,11 @@ class AppointmentService:
             if target_status in {'cancelled', 'no-show'} and not str(data.get('status_reason') or '').strip():
                 raise ValidationError({'status_reason': ['سبب الإلغاء أو عدم الحضور مطلوب']})
 
+        self._validate_duration(new_duration)
+        data['duration_minutes'] = new_duration
+        if schedule_changed:
+            appointment.reminder_sent = False
+            appointment.reminder_sent_hour = False
         # Check availability if date/time/duration changed. Lock the doctor's
         # schedule row before re-checking so this read is serialized against
         # concurrent bookings for the same slot.
@@ -237,6 +244,7 @@ class AppointmentService:
     @transaction.atomic
     def reschedule(self, appointment, new_date_str, new_time, expected_version=None):
         appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
+        check_mutation(appointment, expected_version)
         if expected_version is None:
             raise ValidationError(['يجب توفير رقم الإصدار'])
         if appointment.version != expected_version:
@@ -278,6 +286,7 @@ class AppointmentService:
     @transaction.atomic
     def transition(self, appointment, target_status, expected_version=None, reason=''):
         appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
+        check_mutation(appointment, expected_version)
         if expected_version is None:
             raise ValidationError({'version': ['يجب توفير رقم الإصدار']})
         if appointment.version != expected_version:
@@ -316,8 +325,9 @@ class AppointmentService:
         return self.transition(appointment, 'completed', expected_version)
 
     @transaction.atomic
-    def archive(self, appointment):
+    def archive(self, appointment, expected_version=None):
         appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
+        check_mutation(appointment, expected_version)
         if appointment.status != 'cancelled':
             raise ValidationError({
                 'status': ['لا يمكن أرشفة الموعد قبل إلغائه مع تسجيل السبب'],
@@ -326,32 +336,16 @@ class AppointmentService:
         return appointment
 
     def get_accessible_appointments(self, user):
-        qs = Appointment.objects.select_related('patient', 'doctor')
-        if user.role == 'admin':
-            pass
-        elif user.role == 'doctor':
-            qs = qs.filter(doctor=user)
-        elif user.role == 'receptionist':
-            qs = qs.filter(patient__created_by=user)
-        else:
-            qs = qs.none()
-        return qs
+        from core.access import accessible_appointments
+        return accessible_appointments(user).select_related('patient', 'doctor')
 
     def get_calendar(self, user, view, date_obj, doctor_id=None):
-        if user.role == 'doctor':
-            doctor_id = user.id
-        if doctor_id:
-            if user.role != 'admin' and int(doctor_id) != user.id:
-                qs = self.get_accessible_appointments(user)
-            else:
-                qs = Appointment.objects.filter(
-                    doctor_id=doctor_id,
-                ).exclude(status='cancelled')
-        else:
-            if user.role != 'admin':
-                qs = self.get_accessible_appointments(user)
-            else:
-                qs = Appointment.objects.all().exclude(status='cancelled')
+        qs = self.get_accessible_appointments(user).exclude(status='cancelled')
+        if doctor_id is not None:
+            try:
+                qs = qs.filter(doctor_id=int(doctor_id))
+            except (TypeError, ValueError):
+                raise ValidationError({'doctor_id': ['طبيب غير صالح']})
 
         if view == 'day':
             start = date_obj

@@ -4,6 +4,7 @@ from django.utils import timezone
 from dateutil.relativedelta import relativedelta
 from django.db.models.functions import TruncMonth
 from .base import BaseStatisticsService
+from .periods import monthly_period, fill_months
 
 class PatientStatisticsService(BaseStatisticsService):
     def get_total_patients(self, user):
@@ -21,27 +22,18 @@ class PatientStatisticsService(BaseStatisticsService):
         patients = self.get_accessible_patients(user)
         avg_year = patients.aggregate(avg_year=Avg('dob_year'))['avg_year']
         if avg_year:
-            return timezone.now().year - avg_year
+            return timezone.localdate().year - avg_year
         return 0
 
     def get_monthly_patients_acquired(self, user, months=12, date_from=None, date_to=None):
-        patients = self.get_accessible_patients(user)
-        if date_from:
-            patients = patients.filter(created_at__date__gte=date_from)
-        if date_to:
-            patients = patients.filter(created_at__date__lte=date_to)
-        today = timezone.now().date()
-        start_date = today - relativedelta(months=months)
-        patients = patients.filter(created_at__gte=start_date)
-        monthly = patients.annotate(month=TruncMonth('created_at')).values('month').annotate(count=Count('id')).order_by('month')
-        month_names = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-                       'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر']
-        labels = [f"{month_names[entry['month'].month - 1]} {entry['month'].year}" for entry in monthly]
-        return labels, [entry['count'] for entry in monthly]
+        start, end = monthly_period(months, date_from, date_to)
+        patients = self.get_accessible_patients(user).filter(created_at__date__gte=start, created_at__date__lte=end)
+        rows = patients.annotate(month=TruncMonth('created_at')).values('month').annotate(count=Count('id')).order_by('month')
+        return fill_months(rows, start, end)
 
     def get_age_distribution(self, user):
         patients = self.get_accessible_patients(user)
-        current_year = timezone.now().year
+        current_year = timezone.localdate().year
         age_groups = {
             '0-18': patients.filter(dob_year__gte=current_year-18).count(),
             '19-30': patients.filter(dob_year__lt=current_year-18, dob_year__gte=current_year-30).count(),

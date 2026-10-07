@@ -17,6 +17,10 @@ IDEMPOTENT_PATH_PREFIXES = [
     '/api/v1/bulk-import/',
     '/api/v1/settings/',
     '/api/v1/auth/users/',
+    '/api/v1/options/',
+    '/api/v1/scales/',
+    '/api/v1/templates/',
+    '/api/v1/referrals/',
 ]
 
 def should_enforce_idempotency(path):
@@ -27,51 +31,96 @@ class RequestContextMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        import hashlib
+        import re
+        from django.db import transaction, IntegrityError
+        from django.utils import timezone
+        from django.http import HttpResponse
+        from .models import IdempotencyOperation
         set_current_request(request)
         try:
-            # Idempotency check for unsafe methods on specific endpoints
-            if request.method in ('POST', 'PUT', 'PATCH', 'DELETE') and should_enforce_idempotency(request.path):
-                idempotency_key = request.headers.get('X-Idempotency-Key')
-                if not idempotency_key:
-                    return JsonResponse(
-                        {'error': {
-                            'code': 'idempotency_key_required',
-                            'message': 'X-Idempotency-Key header is required for this operation',
-                            'errors': {},
-                        }},
-                        status=400,
-                    )
-                if idempotency_key:
-                    user_id = getattr(request.user, 'id', None)
-                    if user_id:
-                        cache_key = f'idempotent:{user_id}:{idempotency_key}'
-                    else:
-                        session_key = request.session.session_key or request.META.get('REMOTE_ADDR')
-                        cache_key = f'idempotent:anon:{session_key}:{idempotency_key}'
-
-                    # cache.add() is atomic: SET NX on Redis, add() on
-                    # memcached, lock-guarded on LocMemCache. It returns True
-                    # only if the key did not already exist. The previous
-                    # cache.get() -> cache.set() pair had a window in which
-                    # two concurrent requests with the same key could both
-                    # pass the get before either set, so both proceeded and
-                    # the double-submit guard did nothing.
-                    if not cache.add(cache_key, True, timeout=3600):
-                        return JsonResponse(
-                            {'error': {'code': 'duplicate_request', 'message': 'Request already processed'}},
-                            status=409,
-                        )
-                    try:
-                        response = self.get_response(request)
-                        if not (200 <= response.status_code < 300):
-                            cache.delete(cache_key)
-                        return response
-                    except Exception:
-                        cache.delete(cache_key)
-                        raise
-
-            response = self.get_response(request)
-            return response
+            user = getattr(request, 'user', None)
+            if user and user.is_authenticated and user.force_password_change:
+                allowed = {'/api/v1/auth/me/', '/api/v1/auth/change-password/', '/api/v1/auth/logout/'}
+                if request.path.startswith('/api/v1/') and request.path not in allowed:
+                    return JsonResponse({'error': {'code': 'password_change_required',
+                        'message': 'يجب تغيير كلمة المرور أولاً', 'errors': {}}}, status=403)
+            unsafe = request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}
+            if not unsafe or not should_enforce_idempotency(request.path) or not user or not user.is_authenticated:
+                return self.get_response(request)
+            key = request.headers.get('X-Idempotency-Key', '')
+            if not re.fullmatch(r'[A-Za-z0-9_.:-]{8,100}', key):
+                return JsonResponse({'error': {'code': 'idempotency_key_required',
+                    'message': 'A valid X-Idempotency-Key header is required', 'errors': {}}}, status=400)
+            # Cache raw bytes before CSRF inspects POST, then fingerprint form
+            # values and file bytes independently of multipart boundary strings.
+            raw_body = request.body
+            if request.content_type == 'multipart/form-data':
+                import json
+                body_digest = hashlib.sha256()
+                body_digest.update(json.dumps(sorted((k, request.POST.getlist(k)) for k in request.POST), ensure_ascii=False).encode())
+                for name in sorted(request.FILES):
+                    for file in request.FILES.getlist(name):
+                        body_digest.update(json.dumps([name, file.name, file.content_type]).encode())
+                        for chunk in file.chunks(): body_digest.update(chunk)
+                        file.seek(0)
+                body_hash = body_digest.digest()
+            elif request.content_type == 'application/json':
+                import json
+                try:
+                    body_hash = hashlib.sha256(json.dumps(json.loads(raw_body), sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()).digest()
+                except (ValueError, UnicodeError):
+                    body_hash = hashlib.sha256(raw_body).digest()
+            else:
+                body_hash = hashlib.sha256(raw_body).digest()
+            from django.middleware.csrf import CsrfViewMiddleware
+            checker = CsrfViewMiddleware(lambda req: None)
+            checker.process_request(request)
+            csrf_error = checker.process_view(request, lambda req: None, (), {})
+            if csrf_error:
+                return csrf_error
+            fingerprint = hashlib.sha256(request.method.encode() + b'\0' +
+                request.get_full_path().encode() + b'\0' + body_hash).hexdigest()
+            try:
+                with transaction.atomic():
+                    operation = IdempotencyOperation.objects.create(user=user, key=key,
+                        fingerprint=fingerprint, expires_at=timezone.now() + timezone.timedelta(days=30))
+            except IntegrityError:
+                operation = IdempotencyOperation.objects.get(user=user, key=key)
+                if operation.fingerprint != fingerprint:
+                    return JsonResponse({'error': {'code': 'idempotency_key_reused',
+                        'message': 'Key was used for a different request', 'errors': {}}}, status=409)
+                if operation.state != 'completed':
+                    return JsonResponse({'error': {'code': 'request_in_progress',
+                        'message': 'Request is still processing; retry with the same key', 'errors': {}}}, status=409)
+                response = HttpResponse(bytes(operation.response_body), status=operation.response_status)
+                for name, value in operation.response_headers.items():
+                    response[name] = value
+                response['X-Idempotency-Replayed'] = 'true'
+                return response
+            try:
+                from contextlib import nullcontext
+                # Recovery controls their own snapshot/media transaction boundaries.
+                boundary = nullcontext() if request.path.startswith('/api/v1/backup/') else transaction.atomic()
+                with boundary:
+                    response = self.get_response(request)
+                    if not 200 <= response.status_code < 300 and not request.path.startswith('/api/v1/backup/'):
+                        transaction.set_rollback(True)
+                    if 200 <= response.status_code < 300:
+                        if getattr(response, 'streaming', False):
+                            raise RuntimeError('Idempotent writes must return a buffered response')
+                        IdempotencyOperation.objects.filter(pk=operation.pk).update(
+                            state='completed', response_body=response.content,
+                            response_status=response.status_code,
+                            response_headers={name: value for name, value in response.items()
+                                if name.lower() in {'content-type', 'content-disposition', 'location',
+                                    'x-backup-sha256', 'x-backup-type', 'x-resource-version'}})
+                if not 200 <= response.status_code < 300:
+                    IdempotencyOperation.objects.filter(pk=operation.pk).delete()
+                return response
+            except Exception:
+                IdempotencyOperation.objects.filter(pk=operation.pk).delete()
+                raise
         finally:
             set_current_request(None)
 

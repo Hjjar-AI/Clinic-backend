@@ -56,6 +56,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = []
 
     class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(version__gte=1), name='user_version_positive')]
         indexes = [
             models.Index(fields=['role', 'is_active']),
         ]

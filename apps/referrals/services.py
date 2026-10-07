@@ -20,10 +20,8 @@ class ReferralService:
         ).filter(id=visit_id).first()
 
     def build_snapshot(self, visit, requested_version, referral_reason):
-        if visit.status == 'draft':
-            raise ValidationError({
-                'visit': ['لا يمكن إنشاء خطاب تحويل من زيارة غير معتمدة'],
-            })
+        from apps.prescriptions.issuance import finalized_revision
+        revision = finalized_revision(visit)
 
         try:
             requested_version = int(requested_version)
@@ -44,17 +42,19 @@ class ReferralService:
 
         generated_at = timezone.localtime()
         return {
+            'clinic': SettingsService().get_clinic_info(),
+            'revision_id': revision.pk,
             'visit_id': visit.id,
             'visit_version': visit.version,
             'template_version': self.TEMPLATE_VERSION,
-            'patient_name': visit.patient.get_full_name(),
+            'patient_name': revision.snapshot['patient']['name'],
             'visit_date': visit.visit_date.strftime('%d/%m/%Y'),
-            'main_complaints': visit.main_complaints or '',
-            'diagnoses': visit.get_diagnoses(),
-            'medications': visit.get_medications(),
+            'main_complaints': revision.snapshot['fields']['main_complaints'] or '',
+            'diagnoses': revision.snapshot['diagnoses'],
+            'medications': revision.snapshot['medications'],
             # Referral documents deliberately exclude unrestricted doctor notes.
             'referral_reason': referral_reason,
-            'clinician': visit.author.full_name if visit.author else 'الطبيب',
+            'clinician': revision.snapshot['clinician']['name'],
             'generated_at': generated_at.strftime('%Y-%m-%d %H:%M'),
             'timezone': settings.TIME_ZONE,
             'generator': 'Clinic referral renderer',
@@ -62,7 +62,7 @@ class ReferralService:
 
     def generate_pdf(self, visit, requested_version, referral_reason, user_id):
         snapshot = self.build_snapshot(visit, requested_version, referral_reason)
-        clinic_info = SettingsService().get_clinic_info()
+        clinic_info = snapshot['clinic']
         html = render_to_string('referral_letter.html', {
             'data': snapshot,
             'clinic': {
@@ -73,6 +73,9 @@ class ReferralService:
         })
         pdf = render_pdf_from_html(html)
         if pdf:
+            from apps.accounts.models import User
+            from apps.prescriptions.issuance import record_document
+            record_document(visit, User.objects.get(pk=user_id), 'referral', snapshot, pdf)
             log_action(user_id, 'generate_referral', 'Visit', visit.id, {
                 'summary': f'Generated referral from visit version {visit.version}',
                 'visit_version': visit.version,

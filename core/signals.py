@@ -24,7 +24,8 @@ AUDIT_FIELDS = {
     'Patient': ['first_name', 'father_name', 'surname', 'dob_year', 'gender', 'national_id',
                 'phone', 'doctor_id', 'admission_date', 'is_active', 'deleted_at'],
     'Visit': ['visit_date', 'status', 'status_reason', 'follow_up_date', 'follow_up_completed',
-              'suicide_risk_level', 'violence_risk_level', 'signed_by_id', 'version',
+              'follow_up_outcome', 'follow_up_completed_at', 'follow_up_completed_by_id',
+              'suicide_risk_level', 'violence_risk_level', 'signed_by_id', 'signed_at', 'version',
               'is_active', 'deleted_at'],
     'Appointment': ['appointment_date', 'appointment_time', 'duration_minutes', 'status',
                     'status_reason', 'doctor_id', 'version', 'is_active', 'deleted_at'],
@@ -104,6 +105,8 @@ def _get_current_user_id():
 
 @receiver(post_save)
 def log_model_save(sender, instance, created, **kwargs):
+    if kwargs.get('raw'):
+        return
     if sender == AuditLog:
         return
     if sender.__name__ not in AUDIT_MODELS:
@@ -116,6 +119,8 @@ def log_model_save(sender, instance, created, **kwargs):
             for field, value in after.items()
             if created or before.get(field) != value
         }
+        if not created and not changes:
+            return
         action = 'create' if created else 'update'
         if not created and 'status' in changes:
             action = 'status_transition'
@@ -137,6 +142,8 @@ def log_model_save(sender, instance, created, **kwargs):
 
 @receiver(pre_save)
 def capture_model_before_save(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
     if sender.__name__ not in AUDIT_MODELS or not getattr(instance, 'pk', None):
         instance._audit_before = {}
         return
@@ -149,6 +156,8 @@ def capture_model_before_save(sender, instance, **kwargs):
 
 @receiver(post_delete)
 def log_model_delete(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
     if sender == AuditLog:
         return
     if sender.__name__ not in AUDIT_MODELS:

@@ -7,6 +7,8 @@ from core.normalization import normalized_search_text
 
 @receiver(pre_save, sender=Patient)
 def update_normalised_full_name(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
     parts = [instance.first_name]
     if instance.father_name:
         parts.append(instance.father_name)
@@ -16,12 +18,16 @@ def update_normalised_full_name(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Patient)
 def clear_patient_cache(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('dashboard')
     invalidate_group('reports')
     invalidate_group('context_patients')
 
 @receiver(post_delete, sender=Patient)
 def clear_patient_cache_on_delete(sender, instance, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('dashboard')
     invalidate_group('reports')
     invalidate_group('context_patients')

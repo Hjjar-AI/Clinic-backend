@@ -15,7 +15,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'username', 'full_name', 'role', 'is_active', 'force_password_change', 'stamp_data', 'preferences', 'permissions', 'password', 'version']
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'force_password_change']
         extra_kwargs = {
             'is_active': {'read_only': False},  # allow write but view will strip for non-superuser
             'is_staff': {'read_only': True},    # never writable via API (handled separately if needed)
@@ -29,11 +29,8 @@ class UserSerializer(serializers.ModelSerializer):
             self.fields['password'].required = True
 
     def get_permissions(self, obj):
-        perms = set()
-        for group in obj.groups.all():
-            perms.update(group.permissions.values_list('codename', flat=True))
-        perms.update(obj.user_permissions.values_list('codename', flat=True))
-        return list(perms)
+        from core.permissions import ALL_PERMISSIONS
+        return sorted(codename for codename in ALL_PERMISSIONS if obj.has_perm(codename))
 
     def validate_stamp_data(self, value):
         if not value:

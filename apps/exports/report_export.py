@@ -1,3 +1,4 @@
+from core.spreadsheets import text_cells
 # backend/apps/exports/report_export.py
 from openpyxl import Workbook
 from django.http import HttpResponse
@@ -25,5 +26,6 @@ class ReportExportService(BaseExportService):
             ])
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="clinic_reports_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+        text_cells(ws)
         wb.save(response)
         return self.stamp_response(response)

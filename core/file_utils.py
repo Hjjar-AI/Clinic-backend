@@ -1,7 +1,8 @@
 # backend/core/file_utils.py
 import os
 import re
-import time
+import uuid
+import hashlib
 
 import magic
 from django.core.files.base import ContentFile
@@ -53,6 +54,10 @@ def save_uploaded_file(file, directory, prefix_id):
     Returns the stored file path.
     """
     ext = _resolve_extension(file)
-    unique_name = f"{prefix_id}_{int(time.time())}{ext}"
-    path = default_storage.save(f'{directory}/{unique_name}', ContentFile(file.read()))
+    unique_name = f'{prefix_id}_{uuid.uuid4().hex}{ext}'
+    content = file.read()
+    file.verified_size = len(content)
+    file.verified_checksum = hashlib.sha256(content).hexdigest()
+    file.seek(0)
+    path = default_storage.save(f'{directory}/{unique_name}', ContentFile(content))
     return path

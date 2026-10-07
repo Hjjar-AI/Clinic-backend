@@ -1,3 +1,4 @@
+import math
 from rest_framework import serializers
 from .models import (
     DiagnosisOption,
@@ -11,21 +12,23 @@ from .models import (
 class DiagnosisOptionSerializer(serializers.ModelSerializer):
     usage_count = serializers.IntegerField(read_only=True, default=0)
     class Meta:
+        read_only_fields = ['is_active']
         model = DiagnosisOption
         fields = [
             'id', 'code', 'english_name', 'arabic_name',
-            'order', 'is_active', 'usage_count'
+            'order', 'is_active', 'version', 'usage_count'
         ]
 
 
 class MedicationOptionSerializer(serializers.ModelSerializer):
     usage_count = serializers.IntegerField(read_only=True, default=0)
     class Meta:
+        read_only_fields = ['is_active']
         model = MedicationOption
         fields = [
             'id', 'generic_english', 'generic_arabic', 'dosage',
             'brand_english', 'brand_arabic', 'order', 'is_active',
-            'is_controlled', 'usage_count'
+            'is_controlled', 'version', 'usage_count'
         ]
 
 
@@ -43,6 +46,9 @@ class ScaleFieldSerializer(serializers.ModelSerializer):
         maximum = attrs.get('max_val', getattr(self.instance, 'max_val', 10))
         step = attrs.get('step', getattr(self.instance, 'step', 1))
         default = attrs.get('default', getattr(self.instance, 'default', minimum))
+        if not all(math.isfinite(v) for v in (minimum, maximum, step, default)):
+            raise serializers.ValidationError('يجب إدخال أرقام محدودة')
+        attrs['default'] = default
         if maximum <= minimum:
             raise serializers.ValidationError({'max_val': 'يجب أن تكون النهاية أكبر من البداية'})
         if step <= 0 or step > (maximum - minimum):
@@ -58,8 +64,8 @@ class ClinicalScaleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ClinicalScale
-        fields = ['id', 'name', 'description', 'fields', 'is_active', 'usage_count', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'description', 'fields', 'is_active', 'usage_count', 'created_at', 'updated_at', 'version']
+        read_only_fields = ['id', 'is_active', 'created_at', 'updated_at', 'version']
 
     def get_usage_count(self, obj):
         annotated = getattr(obj, 'usage_count_value', None)
@@ -76,9 +82,9 @@ class ClinicalNoteTemplateSerializer(serializers.ModelSerializer):
         model = ClinicalNoteTemplate
         fields = [
             'id', 'name', 'description', 'category', 'content', 'is_active',
-            'usage_count', 'created_at', 'updated_at',
+            'usage_count', 'created_at', 'updated_at', 'version',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'is_active', 'created_at', 'updated_at', 'version']
 
     def get_usage_count(self, obj):
         from apps.visits.models import Visit

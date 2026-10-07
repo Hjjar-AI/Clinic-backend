@@ -1,5 +1,4 @@
 import logging
-from weasyprint import HTML
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -10,6 +9,7 @@ def render_pdf_from_html(html: str, base_url: str = None) -> bytes:
     Returns PDF bytes, or None on failure.
     """
     try:
+        from weasyprint import HTML
         # Set a default base_url to resolve static files (fonts, CSS).
         # The frontend is a sibling of the backend project root.
         if base_url is None:

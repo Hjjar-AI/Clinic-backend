@@ -30,7 +30,7 @@
     </div>
   </header>
   <section class="meta">
-    <div><span class="label">المريض:</span> {{ invoice.patient.get_full_name }}</div>
+    <div><span class="label">المريض:</span> {{ billed_patient_name }}</div>
     <div><span class="label">رقم المريض:</span> {{ invoice.patient_id }}</div>
     <div><span class="label">الزيارة:</span> {% if invoice.visit_id %}#{{ invoice.visit_id }} — {{ invoice.visit.visit_date }}{% else %}-{% endif %}</div>
     <div><span class="label">الحالة:</span> {{ status_label }}</div>
@@ -49,5 +49,5 @@
   <div><span class="label">طريقة الدفع:</span> {{ invoice.payment_method|default:"-" }}</div>
   <h3>ملاحظات</h3>
   <div class="notes">{{ invoice.notes|default:"-" }}</div>
-</body>
+<table><thead><tr><th>الخدمة</th><th>الكمية</th><th>السعر</th><th>المجموع ({{ invoice.currency }})</th></tr></thead><tbody>{% for line in invoice.lines.all %}<tr><td>{{ line.description }}</td><td>{{ line.quantity }}</td><td>{{ line.unit_price }}</td><td>{{ line.amount }}</td></tr>{% endfor %}</tbody></table></body>
 </html>

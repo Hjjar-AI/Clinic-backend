@@ -168,7 +168,7 @@ class OptionsImportView(APIView):
                 return error_response(400, 'طريقة الدمج غير صالحة', {})
             digest = _file_digest(file)
             if request.data.get('preview') == 'true':
-                result = self.service.preview_diagnoses(file)
+                result = self.service.preview_diagnoses(file, merge_mode)
                 token = secrets.token_urlsafe(24)
                 cache.set(f'options-import-preview:{token}', {
                     'user_id': request.user.id,
@@ -215,14 +215,9 @@ class MedicationUploadView(APIView):
             validate_spreadsheet_upload(file)
         except ValidationError as e:
             return error_response(400, str(e), {})
-        import pandas as pd
-        try:
-            df = pd.read_excel(file, dtype=str, keep_default_na=False)
-        except Exception:
-            file.seek(0)
-            df = pd.read_csv(file, dtype=str, keep_default_na=False)
-        columns = [f"عمود {i+1} (مثال: {str(df.iloc[0, i])[:30]})" for i in range(len(df.columns))]
-        preview_rows = df.head(5).values.tolist()
+        table = self.service._read_file(file)
+        columns = [f"عمود {i+1} (مثال: {table.rows[0][i][:30]})" for i in range(len(table.columns))]
+        preview_rows = table.rows[:5]
         token = secrets.token_urlsafe(24)
         cache.set(f'options-import-preview:{token}', {
             'user_id': request.user.id,
@@ -272,6 +267,14 @@ class MedicationMapView(APIView):
             })
         if merge_mode not in {'merge', 'overwrite'}:
             return error_response(400, 'طريقة الدمج غير صالحة', {})
+        if request.data.get('preview') == 'true':
+            result = self.service.preview_medications(file, column_map, merge_mode)
+            token = secrets.token_urlsafe(24)
+            cache.set(f'options-import-preview:{token}', {**preview, 'column_map':column_map, 'merge_mode':merge_mode}, timeout=1800)
+            result['preview_token'] = token
+            return Response({'data':result})
+        if preview.get('column_map') != column_map or preview.get('merge_mode') != merge_mode:
+            return error_response(409, 'أعد معاينة خريطة الأعمدة وخيارات الدمج', {})
         result = self.service.import_medications(file, column_map, merge_mode)
         cache.delete(f'options-import-preview:{preview_token}')
         log_action(request.user.id, 'import', 'MedicationOption', 0, {

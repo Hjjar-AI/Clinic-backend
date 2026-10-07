@@ -1,3 +1,5 @@
+from core.mutation import request_version
+from .services import update_catalog, restore_catalog, create_catalog
 # backend/apps/clinical/templates_views.py
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
@@ -55,13 +57,13 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        serializer.instance = self.service.update_template(instance.id, serializer.validated_data)
+        serializer.instance = self.service.update_template(instance.id, serializer.validated_data, request_version(self.request))
 
     def perform_destroy(self, instance):
-        self.service.delete_template(instance.id)
+        self.service.delete_template(instance.id, request_version(self.request))
 
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
         instance = self.get_object()
-        instance.restore()
+        instance = restore_catalog(instance, request_version(request))
         return Response({'data': self.get_serializer(instance).data})

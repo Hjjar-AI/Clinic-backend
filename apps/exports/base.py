@@ -104,12 +104,12 @@ class BaseExportService:
                     'plan_discussed': 'نعم' if visit.plan_discussed else 'لا',
                 },
                 'formulation': {
-                    'predisposing': getattr(visit, 'formulation_predisposing', ''),
-                    'precipitating': getattr(visit, 'formulation_precipitating', ''),
-                    'perpetuating': getattr(visit, 'formulation_perpetuating', ''),
-                    'protective': getattr(visit, 'formulation_protective', ''),
+                    'predisposing': visit.clinical_data.get('formulation', {}).get('predisposing', ''),
+                    'precipitating': visit.clinical_data.get('formulation', {}).get('precipitating', ''),
+                    'perpetuating': visit.clinical_data.get('formulation', {}).get('perpetuating', ''),
+                    'protective': visit.clinical_data.get('formulation', {}).get('protective', ''),
                 },
-                'mse': getattr(visit, 'mse', ''),
+                'mse': visit.clinical_data.get('mse', ''),
             }
             visits_data.append(visit_data)
 
@@ -169,12 +169,12 @@ class BaseExportService:
                 'author': visit.author.full_name if visit.author else '',
             },
             'formulation': {
-                'predisposing': getattr(visit, 'formulation_predisposing', ''),
-                'precipitating': getattr(visit, 'formulation_precipitating', ''),
-                'perpetuating': getattr(visit, 'formulation_perpetuating', ''),
-                'protective': getattr(visit, 'formulation_protective', ''),
+                'predisposing': visit.clinical_data.get('formulation', {}).get('predisposing', ''),
+                'precipitating': visit.clinical_data.get('formulation', {}).get('precipitating', ''),
+                'perpetuating': visit.clinical_data.get('formulation', {}).get('perpetuating', ''),
+                'protective': visit.clinical_data.get('formulation', {}).get('protective', ''),
             },
-            'mse': getattr(visit, 'mse', ''),
+            'mse': visit.clinical_data.get('mse', ''),
         }
         return data
 

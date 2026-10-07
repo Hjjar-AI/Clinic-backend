@@ -1,3 +1,4 @@
+from core.mutation import request_version
 # backend/apps/patients/views.py
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
@@ -40,13 +41,16 @@ class PatientViewSet(viewsets.ModelViewSet):
             permission_classes = [permissions.IsAuthenticated, HasEditPatient]
         elif self.action in ['update', 'partial_update']:
             permission_classes = [permissions.IsAuthenticated, HasEditPatient, CanAccessPatient]
-        elif self.action == 'destroy':
+        elif self.action in ['destroy', 'archive', 'restore']:
             permission_classes = [permissions.IsAuthenticated, HasDeletePatient, CanAccessPatient]
         elif self.action == 'anonymize':
             permission_classes = [permissions.IsAuthenticated, HasDeletePatient, CanAccessPatient]
         elif self.action in ['list', 'search', 'all_light']:
             permission_classes = [permissions.IsAuthenticated, HasViewPatients]
-        elif self.action in ['retrieve', 'risk_history', 'timeline', 'care_team']:
+        elif self.action in ['risk_history', 'timeline']:
+            from core.permissions import HasViewVisits
+            permission_classes = [permissions.IsAuthenticated, HasViewPatients, HasViewVisits, CanAccessPatient]
+        elif self.action in ['retrieve', 'care_team']:
             permission_classes = [permissions.IsAuthenticated, HasViewPatients, CanAccessPatient]
         elif self.action in ['care_team_add', 'care_team_remove']:
             permission_classes = [permissions.IsAuthenticated, HasManageUsers, CanAccessPatient]
@@ -57,6 +61,9 @@ class PatientViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         if user.has_perm(PERM_VIEW_PATIENTS):
+            if self.action == 'restore':
+                from core.access import accessible_patients
+                return accessible_patients(user, include_archived=True)
             return self.service.list_patients(user, self.request.query_params)
         return Patient.objects.none()
 
@@ -98,7 +105,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         serializer.instance = updated
 
     def perform_destroy(self, instance):
-        self.service.soft_delete_patient(instance, self.request.user)
+        self.service.soft_delete_patient(instance, self.request.user, request_version(self.request))
 
     @action(detail=False, methods=['post'])
     def duplicates(self, request):
@@ -141,8 +148,19 @@ class PatientViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def anonymize(self, request, pk=None):
         patient = self.get_object()
-        self.service.anonymize(patient, request.user)
-        return Response({'message': 'تم إخفاء هوية المريض'})
+        self.service.anonymize(patient, request.user, request_version(request))
+        return Response({'message': 'تم تقييد الهوية؛ تحتفظ المستندات المعتمدة ببياناتها التاريخية'})
+
+    @action(detail=True, methods=['post'])
+    def archive(self, request, pk=None):
+        patient = self.get_object()
+        self.service.soft_delete_patient(patient, request.user, request_version(request))
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        patient = self.service.restore_patient(self.get_object(), request.user, request_version(request))
+        return Response({'data': self.get_serializer(patient).data})
 
     @action(detail=True, methods=['get'])
     def risk_history(self, request, pk=None):

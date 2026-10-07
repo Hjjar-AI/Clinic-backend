@@ -3,15 +3,11 @@ from django.utils import timezone
 from datetime import timedelta
 from .base import BaseStatisticsService
 from apps.appointments.models import Appointment
+from core.access import accessible_appointments
 
 class AppointmentStatisticsService(BaseStatisticsService):
     def get_total_appointments(self, user, date_from=None, date_to=None):
-        qs = Appointment.objects.exclude(status='cancelled')
-        if user.role == 'doctor':
-            qs = qs.filter(doctor=user)
-        elif user.role == 'receptionist':
-            patient_ids = self.get_accessible_patients(user).values_list('id', flat=True)
-            qs = qs.filter(patient_id__in=patient_ids)
+        qs = accessible_appointments(user).exclude(status='cancelled')
         if date_from:
             qs = qs.filter(appointment_date__gte=date_from)
         if date_to:
@@ -19,12 +15,7 @@ class AppointmentStatisticsService(BaseStatisticsService):
         return qs.count()
 
     def get_no_show_rate(self, user, date_from=None, date_to=None):
-        qs = Appointment.objects.all()
-        if user.role == 'doctor':
-            qs = qs.filter(doctor=user)
-        elif user.role == 'receptionist':
-            patient_ids = self.get_accessible_patients(user).values_list('id', flat=True)
-            qs = qs.filter(patient_id__in=patient_ids)
+        qs = accessible_appointments(user)
         if date_from:
             qs = qs.filter(appointment_date__gte=date_from)
         if date_to:
@@ -36,29 +27,19 @@ class AppointmentStatisticsService(BaseStatisticsService):
         return no_show / total * 100
 
     def get_appointments_today(self, user):
-        today = timezone.now().date()
-        qs = Appointment.objects.filter(
+        today = timezone.localdate()
+        qs = accessible_appointments(user).filter(
             appointment_date=today,
             status__in=['scheduled', 'confirmed', 'arrived', 'completed'],
         )
-        if user.role == 'doctor':
-            qs = qs.filter(doctor=user)
-        elif user.role == 'receptionist':
-            patient_ids = self.get_accessible_patients(user).values_list('id', flat=True)
-            qs = qs.filter(patient_id__in=patient_ids)
         return qs.count()
 
     def get_appointments_week(self, user):
-        today = timezone.now().date()
+        today = timezone.localdate()
         end_date = today + timedelta(days=7)
-        qs = Appointment.objects.filter(
+        qs = accessible_appointments(user).filter(
             appointment_date__gte=today,
             appointment_date__lte=end_date,
             status__in=['scheduled', 'confirmed', 'arrived', 'completed'],
         )
-        if user.role == 'doctor':
-            qs = qs.filter(doctor=user)
-        elif user.role == 'receptionist':
-            patient_ids = self.get_accessible_patients(user).values_list('id', flat=True)
-            qs = qs.filter(patient_id__in=patient_ids)
         return qs.count()

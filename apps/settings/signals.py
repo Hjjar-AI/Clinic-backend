@@ -7,4 +7,6 @@ from core.cache_utils import invalidate_group
 @receiver(post_save, sender=ClinicSetting)
 @receiver(post_delete, sender=ClinicSetting)
 def clear_settings_cache(sender, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('settings')

@@ -18,6 +18,8 @@ def _safe_url(path, **params):
 
 @receiver(post_save, sender=Appointment)
 def appointment_reminders(sender, instance, created, **kwargs):
+    if kwargs.get('raw'):
+        return
     service = NotificationService()
     if instance.status not in {'scheduled', 'confirmed'}:
         service.retire_related(f'appointment-day:{instance.pk}:')
@@ -39,6 +41,8 @@ def appointment_reminders(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=UserTask)
 def task_reminders(sender, instance, created, **kwargs):
+    if kwargs.get('raw'):
+        return
     service = NotificationService()
     reminder_prefix = f'task-due:{instance.pk}:'
     target_user_id = instance.assigned_to_id or instance.user_id
@@ -50,7 +54,7 @@ def task_reminders(sender, instance, created, **kwargs):
             service.retire_related(reminder_prefix)
     if created and instance.due_date:
         reminder_days = SettingsService().get_clinic_info()['task_reminder_days']
-        reminder_date = timezone.now().date() + timedelta(days=reminder_days)
+        reminder_date = timezone.localdate() + timedelta(days=reminder_days)
         if instance.due_date == reminder_date and not instance.completed_at and not instance.cancelled_at:
             service.create(
                 target_user_id,

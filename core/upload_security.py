@@ -27,6 +27,7 @@ def validate_mime(file, allowed_mime_types=None):
     mime = magic.from_buffer(file.read(2048), mime=True)
     file.seek(0)
     allowed = allowed_mime_types or ALLOWED_MIME_TYPES
+    file.verified_mime = mime
     if mime not in allowed:
         raise ValidationError(f'Unsupported file type: {mime}')
 
@@ -64,7 +65,7 @@ def validate_spreadsheet_upload(file):
             f'File exceeds the {settings.MAX_BULK_IMPORT_SIZE // (1024 * 1024)} MB import limit'
         )
     filename = (getattr(file, 'name', '') or '').lower()
-    if not filename.endswith(('.csv', '.xls', '.xlsx')):
+    if not filename.endswith(('.csv', '.xlsx')):
         raise ValidationError('Unsupported spreadsheet extension')
     validate_mime(file, SPREADSHEET_MIME_TYPES)
     detect_macros(file)

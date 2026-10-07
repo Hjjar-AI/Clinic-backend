@@ -20,10 +20,10 @@ class PrescriptionService:
     PREVIEW_TTL_SECONDS = 15 * 60
 
     def build_snapshot(self, visit):
-        if visit.status == 'draft':
-            raise ValidationError({'visit': ['لا يمكن إنشاء وصفة من زيارة غير معتمدة']})
+        from .issuance import finalized_revision
+        revision = finalized_revision(visit)
         patient = visit.patient
-        medications = visit.get_medications()
+        medications = revision.snapshot['medications']
 
         invalid = [
             index + 1 for index, med in enumerate(medications)
@@ -37,14 +37,17 @@ class PrescriptionService:
             })
 
         return {
+            'clinic': SettingsService().get_clinic_info(),
+            'revision_id': revision.pk,
+            'patient_version': patient.version,
             'visit_id': visit.id,
             'visit_version': visit.version,
             'template_version': self.TEMPLATE_VERSION,
             'patient_id': patient.id,
-            'patient_name': patient.get_full_name(),
-            'patient_age': self._calculate_age(patient, visit.visit_date),
-            'patient_gender': patient.gender or 'غير محدد',
-            'patient_national_id': patient.national_id or 'غير محدد',
+            'patient_name': revision.snapshot['patient']['name'],
+            'patient_age': visit.visit_date.year - revision.snapshot['patient']['dob_year'] if revision.snapshot['patient']['dob_year'] else 'غير محدد',
+            'patient_gender': revision.snapshot['patient']['gender'] or 'غير محدد',
+            'patient_national_id': revision.snapshot['patient']['national_id'] or 'غير محدد',
             'visit_date': visit.visit_date.strftime('%d/%m/%Y'),
             'medications': [
                 {
@@ -56,8 +59,8 @@ class PrescriptionService:
                 }
                 for med in medications
             ],
-            'diagnoses': visit.get_diagnoses(),
-            'doctor_name': visit.author.full_name if visit.author else 'الطبيب',
+            'diagnoses': revision.snapshot['diagnoses'],
+            'doctor_name': revision.snapshot['clinician']['name'],
             'generated_at': timezone.localtime().strftime('%Y-%m-%d %H:%M'),
             'timezone': settings.TIME_ZONE,
             'generator': 'Clinic prescription renderer',
@@ -86,6 +89,9 @@ class PrescriptionService:
             raise ConflictError('تغير قالب الوصفة؛ أعد فتح المعاينة قبل الإنشاء')
         if snapshot.get('visit_version') != visit.version:
             raise ConflictError('تغيرت الزيارة بعد المعاينة؛ راجع البيانات المحدثة قبل إنشاء الوصفة')
+        from .issuance import finalized_revision
+        if finalized_revision(visit).pk != snapshot.get('revision_id') or visit.patient.version != snapshot.get('patient_version'):
+            raise ConflictError('تغيرت بيانات الزيارة أو المريض؛ أعد المعاينة')
         return snapshot
 
     def generate_prescription_pdf(self, snapshot, signature_data=None, stamp_data=None):
@@ -96,7 +102,7 @@ class PrescriptionService:
             'signature_data': signature_data,
             'stamp_data': stamp_data,
         }
-        clinic_info = SettingsService().get_clinic_info()
+        clinic_info = snapshot['clinic']
         context = {
             'prescription': prescription,
             'clinic': {
@@ -122,8 +128,7 @@ class PrescriptionService:
     def save_signature(self, user, visit_id, signature_data, stamp_data):
         validate_embedded_image(signature_data, 'signature', required=True)
         validate_embedded_image(stamp_data, 'stamp')
-        sig, created = PrescriptionSignature.objects.update_or_create(
-            user=user, visit_id=visit_id,
-            defaults={'signature_data': signature_data, 'stamp_data': stamp_data}
+        sig, created = PrescriptionSignature.objects.get_or_create(
+            user=user, visit_id=visit_id, signature_data=signature_data, stamp_data=stamp_data
         )
         return sig

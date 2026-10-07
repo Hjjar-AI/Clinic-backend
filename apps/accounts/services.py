@@ -16,7 +16,10 @@ from core.signals import log_action
 class AuthService:
 
     def login(self, request, username, password, remember=False):
+        username = User.normalize_username(username).strip()
         user = User.objects.filter(username=username).first()
+        if user is None:
+            User().set_password(password)
         if not user or not user.check_password(password):
             if user:
                 user.increment_failed_attempts()
@@ -53,7 +56,9 @@ class AuthService:
         logout(request)
         request.session.flush()
 
+    @transaction.atomic
     def change_password(self, user, current_password, new_password, request=None):
+        user = User.objects.select_for_update().get(pk=user.pk)
         if not user.check_password(current_password):
             raise ValidationError(['كلمة المرور الحالية غير صحيحة'])
         try:
@@ -62,6 +67,7 @@ class AuthService:
             raise ValidationError(e.messages)
 
         user.set_password(new_password)
+        user.version += 1
         user.force_password_change = False
         user.session_revoked_at = timezone.now()
         user.save()
@@ -82,9 +88,10 @@ class UserService:
                 codename=codename,
                 defaults={'name': label},
             )
-        group, _ = Group.objects.get_or_create(name=role)
-        codenames = DEFAULT_PERMISSIONS.get(role, [])
-        group.permissions.set(Permission.objects.filter(codename__in=codenames))
+        group, created = Group.objects.get_or_create(name=role)
+        if created:
+            codenames = DEFAULT_PERMISSIONS.get(role, [])
+            group.permissions.set(Permission.objects.filter(content_type=content_type, codename__in=codenames))
         user.groups.set([group])
 
     @transaction.atomic
@@ -138,6 +145,7 @@ class UserService:
             user.force_password_change = True
             user.session_revoked_at = timezone.now()
 
+        data.pop('force_password_change', None)
         old_role = user.role
         for k, v in data.items():
             if k != 'version':  # Exclude version from direct assignment
@@ -159,11 +167,13 @@ class UserService:
         return user
 
     @transaction.atomic
-    def deactivate_user(self, user, actor):
+    def deactivate_user(self, user, actor, expected_version=None):
         active_admin_ids = list(User.objects.select_for_update().filter(
             role='admin', is_active=True
         ).order_by('pk').values_list('pk', flat=True))
         user = User.objects.select_for_update().get(pk=user.pk)
+        from core.mutation import check_mutation
+        check_mutation(user, expected_version)
         if user.pk == actor.pk:
             raise ValidationError({'user': ['لا يمكنك تعطيل حسابك الحالي']})
         if user.role == 'admin':

@@ -71,6 +71,7 @@ class Patient(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['dob_year']),
         ]
         constraints = [
+            models.CheckConstraint(check=models.Q(version__gte=1), name='patient_version_positive'),
             models.UniqueConstraint(
                 fields=['national_id'],
                 condition=Q(deleted_at__isnull=True, is_active=True),
@@ -122,13 +123,14 @@ class Patient(SoftDeleteModel, TimeStampedModel):
 class PatientDocument(SoftDeleteModel, TimeStampedModel):
     patient = models.ForeignKey(
         Patient,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='documents',
     )
     filename = models.CharField(max_length=255)
     original_filename = models.CharField(max_length=255)
     filepath = models.CharField(max_length=500)
     file_size = models.PositiveBigIntegerField(null=True, blank=True)
+    checksum = models.CharField(max_length=64, blank=True, editable=False)
     mime_type = models.CharField(max_length=100, blank=True, null=True)
     category = models.CharField(max_length=50, blank=True, null=True)
     description = models.CharField(max_length=200, blank=True, null=True)
@@ -146,12 +148,12 @@ class PatientDocument(SoftDeleteModel, TimeStampedModel):
 class PatientCareTeam(TimeStampedModel):
     patient = models.ForeignKey(
         Patient,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='care_team',
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='care_teams',
     )
     role = models.CharField(max_length=50)

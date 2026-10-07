@@ -1,4 +1,6 @@
-import pandas as pd
+import csv
+import io
+from django.utils import timezone
 from datetime import datetime
 from django.db import transaction
 from django.core.exceptions import ValidationError
@@ -7,13 +9,57 @@ from apps.clinical.models import DiagnosisOption, MedicationOption
 from apps.accounts.models import User
 from core.normalization import normalize_digits, normalize_identifier, normalize_name, normalize_phone
 
+class TableRow(dict):
+    @property
+    def iloc(self):
+        return list(self.values())
+
+class ImportTable:
+    def __init__(self, columns, rows):
+        self.columns, self.rows = columns, rows
+    def iterrows(self):
+        return enumerate(TableRow(zip(self.columns, row)) for row in self.rows)
+
 class BulkImportService:
     def _read_file(self, file_stream):
-        try:
-            return pd.read_excel(file_stream, dtype=str, keep_default_na=False)
-        except Exception:
-            file_stream.seek(0)
-            return pd.read_csv(file_stream, dtype=str, keep_default_na=False)
+        file_stream.seek(0)
+        raw = file_stream.read()
+        if raw.startswith(b'PK'):
+            import zipfile
+            from django.conf import settings
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                if sum(info.file_size for info in archive.infolist()) > getattr(settings, 'MAX_BULK_IMPORT_SIZE', 200*1024*1024)*5:
+                    raise ValidationError('الملف بعد فك الضغط يتجاوز الحد المسموح')
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=False)
+            try:
+                values = wb.active.iter_rows(values_only=True)
+                headers = next(values, None)
+                rows = []
+                if headers is None:
+                    raise ValidationError('الملف فارغ')
+                for row in values:
+                    if len(rows) >= 100_000:
+                        raise ValidationError('عدد الصفوف يتجاوز الحد المسموح')
+                    if any(isinstance(v, str) and v.startswith('=') for v in row):
+                        raise ValidationError('استبدل الصيغ في ملف الاستيراد بقيم نصية')
+                    rows.append(['' if v is None else v.isoformat() if isinstance(v, datetime) else str(v) for v in row])
+            finally:
+                wb.close()
+        else:
+            try:
+                rows = list(csv.reader(io.StringIO(raw.decode('utf-8-sig'))))
+            except UnicodeError as exc:
+                raise ValidationError('يلزم ملف CSV بترميز UTF-8 أو XLSX') from exc
+            headers = rows.pop(0) if rows else None
+        if not headers or not rows or len(rows) > 100_000:
+            raise ValidationError('الملف فارغ أو يتجاوز الحد المسموح')
+        columns = [str(h or '').strip() for h in headers]
+        if len(set(columns)) != len(columns) or not all(columns):
+            raise ValidationError('عناوين الأعمدة مفقودة أو مكررة')
+        if any(len(row) != len(columns) for row in rows):
+            raise ValidationError('عدد الأعمدة غير متسق')
+        return ImportTable(columns, rows)
 
     def _patient_kwargs(self, row, doctor_id, created_by_id):
         national_id = normalize_identifier(row.get('الرقم الوطني', ''))
@@ -30,283 +76,163 @@ class BulkImportService:
                 raise ValueError('تاريخ الإضافة غير صالح')
         raw_dob_year = (normalize_digits(row.get('سنة الميلاد', '')) or '').strip()
         dob_year = int(raw_dob_year) if raw_dob_year else None
-        if dob_year is not None and not (1900 <= dob_year <= datetime.now().year):
+        if dob_year is not None and not (1900 <= dob_year <= timezone.localdate().year):
             raise ValueError('سنة الميلاد غير صالحة')
         return {
-            'first_name': normalize_name(row.get('الاسم الأول', ''))[:100],
-            'father_name': normalize_name(row.get('اسم الأب', ''))[:100] or None,
-            'surname': normalize_name(row.get('اللقب', ''))[:100] or None,
-            'mother_name': normalize_name(row.get('اسم الأم', ''))[:100] or None,
+            'first_name': normalize_name(row.get('الاسم الأول', '')),
+            'father_name': normalize_name(row.get('اسم الأب', '')) or None,
+            'surname': normalize_name(row.get('اللقب', '')) or None,
+            'mother_name': normalize_name(row.get('اسم الأم', '')) or None,
             'dob_year': dob_year,
             'gender': row.get('الجنس', ''),
             'national_id': national_id,
-            'marital_status': row.get('الحالة الاجتماعية', '')[:50],
-            'occupation': row.get('المهنة', '')[:100],
+            'marital_status': row.get('الحالة الاجتماعية', ''),
+            'occupation': row.get('المهنة', ''),
             'phone': normalize_phone(row.get('الهاتف', '')),
-            'permanent_address': row.get('العنوان', '')[:500],
-            'emergency_contact_name': row.get('جهة اتصال للطوارئ (الاسم)', '')[:100],
-            'emergency_contact_relation': row.get('صلة القرابة', '')[:50],
+            'permanent_address': row.get('العنوان', ''),
+            'emergency_contact_name': row.get('جهة اتصال للطوارئ (الاسم)', ''),
+            'emergency_contact_relation': row.get('صلة القرابة', ''),
             'emergency_contact_phone': normalize_phone(row.get('هاتف جهة الاتصال', '')),
-            'family_history': row.get('التاريخ العائلي', '')[:500],
-            'important_notes': row.get('ملاحظات هامة', '')[:500],
+            'family_history': row.get('التاريخ العائلي', ''),
+            'important_notes': row.get('ملاحظات هامة', ''),
             'admission_date': admission_date,
             'doctor_id': doctor_id,
             'created_by_id': created_by_id,
         }
 
-    def preview_patients(self, file_stream, doctor_id, created_by_id):
+    def _patients(self, file_stream, doctor_id, created_by_id, execute=False):
+        if not User.objects.filter(pk=doctor_id, is_active=True, role__in=['doctor','admin']).exists():
+            raise ValidationError('الطبيب غير صالح')
         results = {'added': 0, 'skipped': 0, 'failed': 0, 'errors': [], 'warnings': [], 'rows': []}
-        df = self._read_file(file_stream)
-        seen_national_ids = set()
-        seen_phones = set()
-
-        for idx, source_row in df.iterrows():
-            row = {
-                key.strip(): value.strip() if isinstance(value, str) else value
-                for key, value in source_row.items()
-            }
-            if not row.get('الاسم الأول'):
-                results['failed'] += 1
-                results['errors'].append(f'الصف {idx + 2}: الاسم الأول مفقود')
-                results['rows'].append({'row': idx + 2, 'outcome': 'failed', 'reason': 'الاسم الأول مفقود'})
-                continue
-
+        seen_ids, seen_phones = set(), set()
+        for idx, source in self._read_file(file_stream).iterrows():
+            row = {k.strip(): v.strip() for k, v in source.items()}
             national_id = normalize_identifier(row.get('الرقم الوطني', ''))
             phone = normalize_phone(row.get('الهاتف', ''))
-            is_duplicate = bool(
-                (national_id and (
-                    national_id in seen_national_ids
-                    or Patient.objects.filter(national_id=national_id).exists()
-                ))
-                or (phone and (
-                    phone in seen_phones
-                    or Patient.objects.filter(phone=phone).exists()
-                ))
-            )
-            if is_duplicate:
+            if national_id and (national_id in seen_ids or Patient.objects.filter(national_id=national_id).exists()):
                 results['skipped'] += 1
-                results['warnings'].append(
-                    f'الصف {idx + 2}: تطابق مع مريض آخر بالرقم الوطني أو الهاتف'
-                )
-                results['rows'].append({'row': idx + 2, 'outcome': 'duplicate', 'reason': 'تطابق الهوية أو الهاتف'})
+                results['rows'].append({'row': idx+2, 'outcome': 'duplicate', 'reason': 'الرقم الوطني مكرر'})
                 continue
-
+            if phone and (phone in seen_phones or Patient.objects.filter(phone=phone).exists()):
+                results['warnings'].append(f'الصف {idx+2}: الهاتف مشترك مع مريض آخر؛ لن يتم حذف الصف')
             try:
-                patient = Patient(**self._patient_kwargs(row, doctor_id, created_by_id))
+                kwargs = self._patient_kwargs(row, doctor_id, created_by_id)
+                from apps.patients.services import PatientService
+                PatientService()._validate(kwargs)
+                patient = Patient(**kwargs)
                 patient.full_clean()
+                if execute:
+                    with transaction.atomic():
+                        patient.save()
                 results['added'] += 1
-                results['rows'].append({'row': idx + 2, 'outcome': 'ready', 'reason': ''})
-                if national_id:
-                    seen_national_ids.add(national_id)
-                if phone:
-                    seen_phones.add(phone)
+                if national_id: seen_ids.add(national_id)
+                if phone: seen_phones.add(phone)
+                results['rows'].append({'row': idx+2, 'outcome': 'created' if execute else 'ready', 'reason': ''})
             except (ValidationError, ValueError, TypeError) as exc:
-                message = getattr(exc, 'message_dict', str(exc))
-                results['errors'].append(f'الصف {idx + 2}: {message}')
                 results['failed'] += 1
-                results['rows'].append({'row': idx + 2, 'outcome': 'failed', 'reason': str(message)})
+                results['errors'].append(f'الصف {idx+2}: {exc}')
+                results['rows'].append({'row': idx+2, 'outcome': 'failed', 'reason': str(exc)})
         return results
+
+    def preview_patients(self, file_stream, doctor_id, created_by_id):
+        return self._patients(file_stream, doctor_id, created_by_id)
 
     @transaction.atomic
     def import_patients(self, file_stream, doctor_id, created_by_id):
-        results = {'added': 0, 'skipped': 0, 'failed': 0, 'errors': [], 'warnings': [], 'rows': []}
-        df = self._read_file(file_stream)
-        seen_national_ids = set()
-        seen_phones = set()
+        return self._patients(file_stream, doctor_id, created_by_id, True)
 
-        for idx, row in df.iterrows():
-            row = {k.strip(): v.strip() if isinstance(v, str) else v for k, v in row.items()}
-            if not row.get('الاسم الأول'):
-                results['failed'] += 1
-                results['errors'].append(f'الصف {idx + 2}: الاسم الأول مفقود')
-                results['rows'].append({'row': idx + 2, 'outcome': 'failed', 'reason': 'الاسم الأول مفقود'})
-                continue
-            national_id = normalize_identifier(row.get('الرقم الوطني', ''))
-            phone = normalize_phone(row.get('الهاتف', ''))
-            if (
-                (national_id and (national_id in seen_national_ids or Patient.objects.filter(national_id=national_id).exists()))
-                or (phone and (phone in seen_phones or Patient.objects.filter(phone=phone).exists()))
-            ):
-                results['skipped'] += 1
-                results['warnings'].append(f"الصف {idx+2}: تطابق مع مريض آخر بالرقم الوطني أو الهاتف")
-                results['rows'].append({'row': idx + 2, 'outcome': 'duplicate', 'reason': 'تطابق الهوية أو الهاتف'})
-                continue
+class OptionsImportService(BulkImportService):
+    def _catalog_rows(self, file_stream, kind, column_map=None):
+        model = DiagnosisOption if kind == 'diagnosis' else MedicationOption
+        keys = ('code', 'english_name', 'arabic_name') if kind == 'diagnosis' else ('generic_english', 'generic_arabic', 'dosage', 'brand_english', 'brand_arabic')
+        table = self._read_file(file_stream)
+        if column_map is not None:
+            if not isinstance(column_map, dict) or any(key not in keys for key in column_map):
+                raise ValidationError('خريطة أعمدة غير صالحة')
+            for value in column_map.values():
+                if value not in (None, '') and (type(value) is not int or not 0 <= value < len(table.columns)):
+                    raise ValidationError('رقم العمود خارج نطاق الملف')
+        result, seen = [], set()
+        for idx, row in table.iterrows():
             try:
-                patient = Patient(**self._patient_kwargs(row, doctor_id, created_by_id))
-                patient.full_clean()
-                # A per-row savepoint keeps one database-level failure from
-                # poisoning the transaction for all following rows.
-                with transaction.atomic():
-                    patient.save()
-                results['added'] += 1
-                if national_id:
-                    seen_national_ids.add(national_id)
-                if phone:
-                    seen_phones.add(phone)
-                results['rows'].append({'row': idx + 2, 'outcome': 'created', 'reason': ''})
-            except Exception as e:
-                results['errors'].append(f"الصف {idx+2}: {str(e)}")
-                results['failed'] += 1
-                results['rows'].append({'row': idx + 2, 'outcome': 'failed', 'reason': str(e)})
-        return results
-
-class OptionsImportService:
-    @staticmethod
-    def _read_file(file_stream):
-        try:
-            return pd.read_excel(file_stream, dtype=str, keep_default_na=False)
-        except Exception:
-            file_stream.seek(0)
-            return pd.read_csv(file_stream, dtype=str, keep_default_na=False)
-
-    def preview_diagnoses(self, file_stream):
-        df = self._read_file(file_stream)
-        rows = []
-        seen_codes = set()
-        for idx, row in df.iterrows():
-            code = str(row.iloc[0]).strip() if len(row) > 0 else ''
-            english = str(row.iloc[1]).strip() if len(row) > 1 else ''
-            if not code or not english:
-                rows.append({'row': idx + 2, 'outcome': 'failed', 'reason': 'الكود والاسم الإنجليزي مطلوبان'})
-            elif code in seen_codes:
-                rows.append({'row': idx + 2, 'outcome': 'duplicate', 'reason': 'كود مكرر داخل الملف'})
-            else:
-                existing = DiagnosisOption.all_objects.filter(code=code).first()
-                outcome = 'update' if existing and existing.is_active else 'reactivate' if existing else 'create'
-                rows.append({'row': idx + 2, 'outcome': outcome, 'reason': ''})
-                seen_codes.add(code)
-        return self._summarize(rows)
+                data = {}
+                for index, key in enumerate(keys):
+                    mapped = column_map.get(key) if column_map is not None else index
+                    data[key] = row.iloc[mapped].strip() if type(mapped) is int and mapped < len(row) else ''
+                required = keys if kind == 'diagnosis' else ('generic_english',)
+                if any(not data[key] for key in required):
+                    raise ValidationError('الأعمدة المطلوبة مفقودة')
+                identity = (data['code'],) if kind == 'diagnosis' else tuple(data[k].casefold() for k in ('generic_english','dosage','brand_english'))
+                if identity in seen:
+                    result.append({'row': idx+2, 'outcome': 'duplicate', 'reason': 'صف مكرر'})
+                    continue
+                lookup = {'code': data['code']} if kind == 'diagnosis' else {k+'__iexact': data[k] for k in ('generic_english','dosage','brand_english')}
+                existing = model.all_objects.filter(**lookup).first()
+                was_inactive = existing and (existing.deleted_at is not None or not existing.is_active)
+                instance = existing or model()
+                for key, value in data.items(): setattr(instance,key,value)
+                instance.is_active=True
+                instance.deleted_at=None
+                instance.full_clean()
+                seen.add(identity)
+                result.append({'row':idx+2, 'outcome': 'reactivate' if was_inactive else 'update' if existing else 'create',
+                    'reason':'', '_data':data, '_pk':existing.pk if existing else None})
+            except (ValidationError, ValueError, TypeError) as exc:
+                result.append({'row':idx+2, 'outcome':'failed', 'reason':str(exc)})
+        return result
 
     @staticmethod
     def _summarize(rows):
-        counts = {'create': 0, 'update': 0, 'reactivate': 0, 'duplicate': 0, 'failed': 0}
+        counts = {key:sum(r['outcome']==key for r in rows) for key in ('create','update','reactivate','duplicate','failed')}
+        return {'rows':[{k:v for k,v in r.items() if not k.startswith('_')} for r in rows], 'counts':counts, 'total':len(rows)}
+
+    def preview_diagnoses(self, file_stream, merge_mode='merge'):
+        result = self._summarize(self._catalog_rows(file_stream, 'diagnosis'))
+        valid_ids = [r['_pk'] for r in self._catalog_rows(file_stream, 'diagnosis') if r.get('_pk')]
+        result['will_retire_existing'] = DiagnosisOption.objects.exclude(pk__in=valid_ids).count() if merge_mode == 'replace' else 0
+        return result
+
+    def preview_medications(self, file_stream, column_map, merge_mode='merge'):
+        result = self._summarize(self._catalog_rows(file_stream, 'medication', column_map))
+        valid_ids = [r['_pk'] for r in self._catalog_rows(file_stream, 'medication', column_map) if r.get('_pk')]
+        result['will_retire_existing'] = MedicationOption.objects.exclude(pk__in=valid_ids).count() if merge_mode == 'overwrite' else 0
+        return result
+
+    @transaction.atomic
+    def _import_catalog(self, file_stream, kind, column_map=None, merge_mode='merge'):
+        allowed = {'merge','replace'} if kind == 'diagnosis' else {'merge','overwrite'}
+        if merge_mode not in allowed: raise ValidationError('طريقة الدمج غير صالحة')
+        rows = self._catalog_rows(file_stream, kind, column_map)
+        valid = [r for r in rows if '_data' in r]
+        if not valid: raise ValidationError('لا توجد صفوف صالحة؛ لم تتغير القائمة')
+        # Replacement is all-or-nothing; never retire records for a partially invalid file.
+        if merge_mode != 'merge' and any(r['outcome']=='failed' for r in rows):
+            raise ValidationError('صحح جميع الصفوف قبل استبدال القائمة')
+        model = DiagnosisOption if kind == 'diagnosis' else MedicationOption
+        list(model.all_objects.select_for_update().order_by('pk'))
+        if merge_mode != 'merge':
+            for instance in model.objects.all(): instance.soft_delete(reason='Catalog replacement import')
+        result = {'added':0,'updated':0,'reactivated':0,'rows':[]}
         for row in rows:
-            counts[row['outcome']] = counts.get(row['outcome'], 0) + 1
-        return {'rows': rows, 'counts': counts, 'total': len(rows)}
+            if '_data' not in row:
+                result['rows'].append({k:v for k,v in row.items() if not k.startswith('_')})
+                continue
+            with transaction.atomic():
+                instance = model.all_objects.get(pk=row['_pk']) if row['_pk'] else model()
+                was_inactive = not instance.is_active or instance.deleted_at is not None
+                for key,value in row['_data'].items(): setattr(instance,key,value)
+                instance.is_active=True
+                instance.deleted_at=None
+                instance.version += int(instance.pk is not None)
+                instance.full_clean()
+                instance.save()
+                outcome = 'reactivated' if row['outcome'] == 'reactivate' else 'updated' if row['_pk'] else 'added'
+                result[outcome] += 1
+                result['rows'].append({'row':row['row'], 'outcome':outcome, 'reason':''})
+        return result
 
-    @transaction.atomic
     def import_diagnoses(self, file_stream, merge_mode='merge'):
-        df = self._read_file(file_stream)
-        added = 0
-        reactivated = 0
-        updated = 0
-        rows = []
-        seen_codes = set()
+        return self._import_catalog(file_stream, 'diagnosis', merge_mode=merge_mode)
 
-        if merge_mode == 'replace':
-            # Retire existing options instead of deleting rows referenced by
-            # historical visits. Imported matches are reactivated below.
-            from django.utils import timezone
-            DiagnosisOption.objects.update(is_active=False, deleted_at=timezone.now())
-
-        for idx, row in df.iterrows():
-            if len(row) < 3:
-                rows.append({'row': idx + 2, 'outcome': 'failed', 'reason': 'يلزم ثلاثة أعمدة'})
-                continue
-            code = str(row.iloc[0]).strip()
-            english = str(row.iloc[1]).strip()
-            arabic = str(row.iloc[2]).strip()
-            if not code or not english:
-                rows.append({'row': idx + 2, 'outcome': 'failed', 'reason': 'الكود والاسم الإنجليزي مطلوبان'})
-                continue
-            if code in seen_codes:
-                rows.append({'row': idx + 2, 'outcome': 'duplicate', 'reason': 'كود مكرر داخل الملف'})
-                continue
-            seen_codes.add(code)
-            # Use all_objects to include soft-deleted records
-            existing = DiagnosisOption.all_objects.filter(code=code).first()
-            if existing:
-                if not existing.is_active:
-                    existing.is_active = True
-                    existing.deleted_at = None
-                    reactivated += 1
-                    outcome = 'reactivated'
-                else:
-                    updated += 1
-                    outcome = 'updated'
-                existing.english_name = english
-                existing.arabic_name = arabic
-                existing.save()
-            else:
-                DiagnosisOption.objects.create(code=code, english_name=english, arabic_name=arabic)
-                added += 1
-                outcome = 'created'
-            rows.append({'row': idx + 2, 'outcome': outcome, 'reason': ''})
-        return {'added': added, 'updated': updated, 'reactivated': reactivated, 'rows': rows}
-
-    @transaction.atomic
     def import_medications(self, file_stream, column_map=None, merge_mode='merge'):
-        df = self._read_file(file_stream)
-        added = 0
-        reactivated = 0
-        updated = 0
-        rows = []
-        seen_keys = set()
-
-        if merge_mode in ('replace', 'overwrite'):
-            from django.utils import timezone
-            MedicationOption.objects.update(is_active=False, deleted_at=timezone.now())
-
-        for idx, row in df.iterrows():
-            if column_map:
-                def mapped_value(key, default_index):
-                    raw_index = column_map.get(key, default_index)
-                    if raw_index is None:
-                        return ''
-                    try:
-                        index = int(raw_index)
-                    except (TypeError, ValueError):
-                        raise ValidationError({key: ['رقم العمود غير صالح']})
-                    if index < 0 or index >= len(row):
-                        raise ValidationError({key: ['رقم العمود خارج نطاق الملف']})
-                    return str(row.iloc[index]).strip()
-
-                generic_en = mapped_value('generic_english', 0)
-                generic_ar = mapped_value('generic_arabic', 1)
-                dosage = mapped_value('dosage', 2)
-                brand_en = mapped_value('brand_english', 3)
-                brand_ar = mapped_value('brand_arabic', 4)
-            else:
-                generic_en = str(row.iloc[0]).strip() if len(row) > 0 else ''
-                generic_ar = str(row.iloc[1]).strip() if len(row) > 1 else ''
-                dosage = str(row.iloc[2]).strip() if len(row) > 2 else ''
-                brand_en = str(row.iloc[3]).strip() if len(row) > 3 else ''
-                brand_ar = str(row.iloc[4]).strip() if len(row) > 4 else ''
-            if not generic_en:
-                rows.append({'row': idx + 2, 'outcome': 'failed', 'reason': 'الاسم العام الإنجليزي مطلوب'})
-                continue
-            key = (generic_en.casefold(), dosage.casefold(), brand_en.casefold())
-            if key in seen_keys:
-                rows.append({'row': idx + 2, 'outcome': 'duplicate', 'reason': 'دواء مكرر داخل الملف'})
-                continue
-            seen_keys.add(key)
-            # Use all_objects to include soft-deleted records
-            existing = MedicationOption.all_objects.filter(
-                generic_english=generic_en,
-                dosage=dosage,
-                brand_english=brand_en
-            ).first()
-            if existing:
-                if not existing.is_active:
-                    existing.is_active = True
-                    existing.deleted_at = None
-                    reactivated += 1
-                    outcome = 'reactivated'
-                else:
-                    updated += 1
-                    outcome = 'updated'
-                existing.generic_arabic = generic_ar
-                existing.brand_arabic = brand_ar
-                existing.save()
-            else:
-                MedicationOption.objects.create(
-                    generic_english=generic_en,
-                    generic_arabic=generic_ar,
-                    dosage=dosage,
-                    brand_english=brand_en,
-                    brand_arabic=brand_ar,
-                )
-                added += 1
-                outcome = 'created'
-            rows.append({'row': idx + 2, 'outcome': outcome, 'reason': ''})
-        return {'added': added, 'updated': updated, 'reactivated': reactivated, 'rows': rows}
+        return self._import_catalog(file_stream, 'medication', column_map, merge_mode)

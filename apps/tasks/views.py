@@ -1,3 +1,4 @@
+from core.mutation import request_version
 # backend/apps/tasks/views.py
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
@@ -53,7 +54,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         serializer.instance = self.service.update_task(instance, data, version, actor=self.request.user)
 
     def perform_destroy(self, instance):
-        self.service.delete_task(instance)
+        self.service.delete_task(instance, request_version(self.request))
 
     @action(detail=True, methods=['put'])
     def complete(self, request, pk=None):

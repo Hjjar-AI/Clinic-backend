@@ -1,357 +1,216 @@
-# backend/apps/backup/backup_restore.py
+import io
 import json
+import hashlib
 import zipfile
-from datetime import datetime
-from django.db import transaction, connection
+from pathlib import PurePosixPath
 from django.conf import settings
-from django.utils.dateparse import parse_datetime
-from apps.patients.models import Patient
-from apps.clinical.models import DiagnosisOption, MedicationOption
-from apps.visits.models import Visit, VisitDiagnosis, VisitMedication, VisitAttachment, VisitScaleResponse
-from apps.accounts.models import User
+from django.core import serializers
+from django.core.serializers.base import DeserializationError
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+from django.core.management.color import no_style
+from django.core.exceptions import ValidationError
+from django.db import connection, transaction
+from django.contrib.sessions.models import Session
+from django.utils import timezone
 from .backup_validation import BackupValidationService
-
-
-def _coerce_bool(value, default=False):
-    """Coerce a user-supplied backup value to a real bool."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        return value.strip().lower() in ('1', 'true', 'yes', 'y', 'on')
-    return bool(value)
-
-
-def _coerce_datetime(value):
-    """Coerce a user-supplied backup value to a datetime or None."""
-    if value is None or value == '':
-        return None
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        try:
-            return parse_datetime(value)
-        except (ValueError, TypeError):
-            return None
-    return None
+from .backup_creator import backup_models
 
 
 class BackupRestoreService:
-
-    def __init__(self):
-        self.validation = BackupValidationService()
-
-    def _load_backup_data(self, file_stream):
-        """Load and parse backup data from a file stream.
-        Returns (signed_data, raw_json_bytes) for signature verification."""
-        if file_stream.name.endswith('.zip'):
-            with zipfile.ZipFile(file_stream, 'r') as zf:
-                raw = zf.read('backup.json')
-        else:
-            file_stream.seek(0)
-            raw = file_stream.read()
-            if isinstance(raw, str):
-                raw = raw.encode('utf-8')
-        backup_data = json.loads(raw)
-        signed = backup_data.get('data', backup_data)
-        return signed, raw
-
-    def _verify_backup(self, file_stream):
-        """Verify the backup signature. Raises ValueError on failure."""
-        if file_stream.name.endswith('.zip'):
-            with zipfile.ZipFile(file_stream, 'r') as zf:
-                raw = zf.read('backup.json')
+    def _read(self, stream, require_media=True):
+        stream.seek(0)
+        maximum = getattr(settings, 'MAX_BULK_IMPORT_SIZE', 200 * 1024 * 1024)
+        raw = stream.read(maximum + 1)
+        if len(raw) > maximum:
+            raise ValueError('Backup exceeds upload limit')
+        media = {}
+        if zipfile.is_zipfile(io.BytesIO(raw)):
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                infos = archive.infolist()
+                if len(infos) > 100_000 or sum(info.file_size for info in infos) > maximum * 5:
+                    raise ValueError('Expanded backup exceeds limit')
+                names = [info.filename for info in infos]
+                if len(names) != len(set(names)):
+                    raise ValueError('Duplicate backup members')
+                for name in names:
+                    path = PurePosixPath(name)
+                    if path.is_absolute() or '..' in path.parts or '\\' in name or not name:
+                        raise ValueError('Unsafe backup member')
                 try:
-                    signature_bytes = zf.read('signature.txt')
-                    signature = signature_bytes.decode('utf-8').strip()
-                except KeyError:
-                    raise ValueError('Backup archive is missing signature.txt')
+                    manifest_raw = archive.read('manifest.json')
+                    signature = archive.read('signature.txt').decode().strip()
+                    if not BackupValidationService().verify_signature(manifest_raw, signature):
+                        raise ValueError('Backup manifest signature verification failed')
+                    manifest = json.loads(manifest_raw)
+                    expected = manifest['members']
+                    if set(expected) != set(names) - {'manifest.json', 'signature.txt'}:
+                        raise ValueError('Backup inventory mismatch')
+                    for name, info in expected.items():
+                        content = archive.read(name)
+                        if len(content) != info['size'] or hashlib.sha256(content).hexdigest() != info['sha256']:
+                            raise ValueError('Backup member checksum mismatch')
+                        if name.startswith('media/'):
+                            media[name[6:]] = content
+                        elif name != 'backup.json':
+                            raise ValueError('Unsupported backup member')
+                    envelope = json.loads(archive.read('backup.json'))
+                except (KeyError, UnicodeError, TypeError) as exc:
+                    raise ValueError('Incomplete or invalid full backup') from exc
         else:
-            file_stream.seek(0)
-            raw = file_stream.read()
-            if isinstance(raw, str):
-                raw = raw.encode('utf-8')
-            backup_data = json.loads(raw)
-            signature = backup_data.get('signature')
-            if not signature:
-                raise ValueError('Backup file is missing its signature')
-
-        if not self.validation.verify_signature(raw, signature):
-            raise ValueError('Backup signature verification failed — file may be tampered')
-
-        file_stream.seek(0)
-
-    def preview_restore(self, file_stream):
+            try:
+                envelope = json.loads(raw)
+            except (ValueError, UnicodeError) as exc:
+                raise ValueError('Invalid backup JSON') from exc
+        data = BackupValidationService().verify_envelope(envelope)
+        metadata = data.get('metadata', {})
+        if not isinstance(metadata, dict):
+            raise ValueError('Invalid backup metadata')
+        if metadata.get('format_version') != 2 or metadata.get('schema') != 'complete-records':
+            raise ValueError('Backup uses an incomplete legacy schema; full recovery is unsupported')
+        models = {model._meta.label_lower: model for model in backup_models()}
+        records = data.get('records')
+        if not isinstance(records, list) or set(metadata.get('counts', {})) != set(models):
+            raise ValueError('Backup schema does not match this installation')
+        identifiers = set()
+        objects = []
         try:
-            self._verify_backup(file_stream)
-        except ValueError:
+            for obj in serializers.deserialize('python', records):
+                model = obj.object.__class__
+                label = model._meta.label_lower
+                key = (label, obj.object.pk)
+                if label not in models or key in identifiers or type(obj.object.pk) is not int or obj.object.pk <= 0:
+                    raise ValueError('Invalid or duplicate record identifier')
+                identifiers.add(key)
+                obj.object.clean_fields(exclude=[field.name for field in model._meta.fields if field.is_relation])
+                if label == 'visits.visit':
+                    from apps.visits.input_validation import clinical_object
+                    from apps.visits.lab_validation import normalize_lab_values
+                    clinical_object(obj.object.clinical_data)
+                    normalize_lab_values(obj.object.lab_values)
+                objects.append(obj)
+        except (ValidationError, DeserializationError, TypeError, KeyError) as exc:
+            raise ValueError('Backup record validation failed') from exc
+        counts = {label: sum(obj.object._meta.label_lower == label for obj in objects) for label in models}
+        if counts != metadata['counts']:
+            raise ValueError('Backup record counts do not match inventory')
+        for obj in objects:
+            for field in obj.object._meta.fields:
+                if field.is_relation and field.many_to_one:
+                    value = getattr(obj.object, field.attname)
+                    if value is not None and (field.remote_field.model._meta.label_lower, value) not in identifiers:
+                        raise ValueError('Backup contains a dangling reference')
+            for name, values in (obj.m2m_data or {}).items():
+                related = obj.object._meta.get_field(name).remote_field.model._meta.label_lower
+                if any((related, value) not in identifiers for value in values):
+                    raise ValueError('Backup contains a dangling membership')
+        for obj in objects:
+            if obj.object._meta.label_lower in {'patients.patientdocument', 'visits.visitattachment'}:
+                path = obj.object.filepath
+                if not path or PurePosixPath(path).is_absolute() or '..' in PurePosixPath(path).parts or '\\' in path:
+                    raise ValueError('Invalid attachment path')
+                if require_media and path not in media and not default_storage.exists(path):
+                    raise ValueError('Backup references missing files; use a complete ZIP backup with media')
+        return data, objects, media
+
+    def _verify_backup(self, stream):
+        self._read(stream)
+        stream.seek(0)
+
+    def preview_restore(self, stream, restore_patients=True, restore_diagnoses=True, restore_medications=True):
+        if restore_patients and not (restore_diagnoses and restore_medications):
+            raise ValueError('Patient recovery requires the complete related dataset')
+        if not any((restore_patients, restore_diagnoses, restore_medications)):
+            raise ValueError('Select a restore scope')
+        data, objects, media = self._read(stream, require_media=restore_patients)
+        counts = data['metadata']['counts']
+        return {'patients_count': counts.get('patients.patient', 0),
+                'visits_count': counts.get('visits.visit', 0),
+                'diagnoses_count': counts.get('clinical.diagnosisoption', 0),
+                'medications_count': counts.get('clinical.medicationoption', 0),
+                'media_files_count': len(media), 'created_at': data['metadata']['created_at'],
+                'format_version': 2, 'compatible': True, 'counts': counts,
+                'will_replace': sorted(counts) if restore_patients else [],
+                'will_merge': ([] if restore_patients else
+                    (['clinical.diagnosisoption'] if restore_diagnoses else []) +
+                    (['clinical.medicationoption'] if restore_medications else [])),
+                'restores_media': restore_patients and bool(media),
+                'sessions_will_be_revoked': restore_patients}
+
+    def execute_restore(self, stream, restore_patients=True, restore_diagnoses=True, restore_medications=True):
+        data, objects, media = self._read(stream, require_media=restore_patients)
+        full = restore_patients and restore_diagnoses and restore_medications
+        if restore_patients and not full:
+            raise ValueError('Patient recovery requires the complete related dataset')
+        if not full:
+            # Catalog-only recovery preserves IDs and existing historical references.
+            selected = set()
+            if restore_diagnoses:
+                selected.add('clinical.diagnosisoption')
+            if restore_medications:
+                selected.add('clinical.medicationoption')
+            with transaction.atomic():
+                for obj in objects:
+                    if obj.object._meta.label_lower not in selected:
+                        continue
+                    model = obj.object.__class__
+                    values = {f.name: getattr(obj.object, f.attname) for f in model._meta.fields if not f.primary_key}
+                    if model._meta.model_name == 'diagnosisoption':
+                        lookup = {'code': values.pop('code')}
+                    else:
+                        lookup = {key: values.pop(key) for key in ('generic_english', 'dosage', 'brand_english')}
+                    values.pop('version', None)
+                    values['archived_by'] = None
+                    existing = model._base_manager.select_for_update().filter(**lookup).first()
+                    if existing:
+                        for key, value in values.items(): setattr(existing, key, value)
+                        existing.version += 1
+                        existing.save()
+                    else:
+                        model._base_manager.create(**lookup, **values)
+            return True
+        # Restore media with compensation if database loading fails. Existing unrelated
+        # files are retained; no whole-directory deletion is needed for recovery.
+        previous, written = {}, []
+        try:
+            for path, content in media.items():
+                if default_storage.exists(path):
+                    with default_storage.open(path, 'rb') as old:
+                        previous[path] = old.read()
+                    default_storage.delete(path)
+                saved = default_storage.save(path, ContentFile(content))
+                written.append(saved)
+                if saved != path:
+                    raise ValueError('Storage changed a restored file path')
+            with connection.constraint_checks_disabled(), transaction.atomic():
+                from core.models import IdempotencyOperation
+                IdempotencyOperation.objects.all()._raw_delete('default')
+                models = backup_models()
+                for model in models:
+                    for field in model._meta.local_many_to_many:
+                        field.remote_field.through._base_manager.all()._raw_delete('default')
+                # Only this validated full-recovery path bypasses PROTECT/immutable guards.
+                for model in reversed(models):
+                    model._base_manager.all()._raw_delete('default')
+                memberships = [(obj, obj.m2m_data) for obj in objects]
+                for obj in objects:
+                    obj.save(save_m2m=False)
+                for obj, memberships_data in memberships:
+                    if memberships_data:
+                        for name, values in memberships_data.items():
+                            getattr(obj.object, name).set(values)
+                connection.check_constraints()
+                with connection.cursor() as cursor:
+                    for sql in connection.ops.sequence_reset_sql(no_style(), models):
+                        cursor.execute(sql)
+                Session.objects.all().delete()
+                from core.cache_utils import invalidate_group
+                for group in ('settings', 'dashboard', 'reports', 'context', 'context_users', 'context_doctors', 'context_appointments', 'context_patients', 'tasks', 'patients', 'visits'):
+                    invalidate_group(group)
+        except Exception:
+            for path in written:
+                default_storage.delete(path)
+            for path, content in previous.items():
+                default_storage.save(path, ContentFile(content))
             raise
-        except Exception as e:
-            raise ValueError(f'Invalid backup file: {e}')
-
-        try:
-            signed, _ = self._load_backup_data(file_stream)
-        except Exception as e:
-            raise ValueError(f'Invalid backup file: {e}')
-
-        patients = signed.get('patients', [])
-        diagnoses = signed.get('diagnoses', [])
-        medications = signed.get('medications', [])
-        visits_count = sum(len(p.get('visits', [])) for p in patients if isinstance(p, dict))
-        metadata = signed.get('metadata', {})
-        media_files = 0
-        if file_stream.name.endswith('.zip'):
-            file_stream.seek(0)
-            with zipfile.ZipFile(file_stream, 'r') as zf:
-                media_files = len([
-                    name for name in zf.namelist()
-                    if name not in {'backup.json', 'clinic.db', 'signature.txt', 'manifest.json'}
-                ])
-            file_stream.seek(0)
-        return {
-            'patients_count': len(patients),
-            'visits_count': visits_count,
-            'diagnoses_count': len(diagnoses),
-            'medications_count': len(medications),
-            'media_files_count': media_files,
-            'created_at': metadata.get('created_at'),
-            'application_version': metadata.get('application_version'),
-            'format_version': metadata.get('format_version', 1),
-            'compatible': metadata.get('format_version', 1) <= 2,
-            'will_replace': ['patients', 'visits', 'diagnoses', 'medications'],
-        }
-
-    @transaction.atomic
-    def execute_restore(self, file_stream, restore_patients=True, restore_diagnoses=True, restore_medications=True):
-        try:
-            self._verify_backup(file_stream)
-        except ValueError:
-            raise
-        except Exception as e:
-            raise ValueError(f'Invalid backup file: {e}')
-
-        try:
-            signed, _ = self._load_backup_data(file_stream)
-        except Exception as e:
-            raise ValueError(f'Invalid backup file: {e}')
-
-        existing_user_ids = set(User.objects.values_list('id', flat=True))
-
-        diagnosis_lookup = {}
-        medication_lookup = {}
-
-        if restore_diagnoses:
-            DiagnosisOption.objects.all().delete()
-            for d in signed.get('diagnoses', []):
-                new_d = DiagnosisOption.objects.create(
-                    code=d.get('code', ''),
-                    english_name=d.get('english_name', ''),
-                    arabic_name=d.get('arabic_name', ''),
-                    order=d.get('order', 0),
-                    is_active=_coerce_bool(d.get('is_active'), default=True),
-                )
-                diagnosis_lookup[new_d.code] = new_d
-        else:
-            for d in DiagnosisOption.objects.filter(is_active=True):
-                diagnosis_lookup[d.code] = d
-
-        if restore_medications:
-            MedicationOption.objects.all().delete()
-            for m in signed.get('medications', []):
-                new_m = MedicationOption.objects.create(
-                    generic_english=m.get('generic_english', ''),
-                    generic_arabic=m.get('generic_arabic', ''),
-                    dosage=m.get('dosage', ''),
-                    brand_english=m.get('brand_english', ''),
-                    brand_arabic=m.get('brand_arabic', ''),
-                    order=m.get('order', 0),
-                    is_active=_coerce_bool(m.get('is_active'), default=True),
-                    is_controlled=_coerce_bool(m.get('is_controlled'), default=False),
-                )
-                key = (new_m.generic_english, new_m.dosage, new_m.brand_english)
-                medication_lookup[key] = new_m
-        else:
-            for m in MedicationOption.objects.filter(is_active=True):
-                key = (m.generic_english, m.dosage, m.brand_english)
-                medication_lookup[key] = m
-
-        if restore_patients:
-            Patient.all_objects.all().delete()
-            Visit.all_objects.all().delete()
-            VisitDiagnosis.objects.all().delete()
-            VisitMedication.objects.all().delete()
-            VisitAttachment.all_objects.all().delete()
-            VisitScaleResponse.objects.all().delete()
-
-            for p in signed.get('patients', []):
-                doctor_id = p.get('doctor_id')
-                if doctor_id not in existing_user_ids:
-                    doctor_id = None
-                created_by_id = p.get('created_by_id')
-                if created_by_id not in existing_user_ids:
-                    created_by_id = None
-
-                new_patient = Patient(
-                    first_name=p.get('first_name', ''),
-                    father_name=p.get('father_name', ''),
-                    surname=p.get('surname', ''),
-                    mother_name=p.get('mother_name', ''),
-                    dob_year=p.get('dob_year', 1998),
-                    gender=p.get('gender', ''),
-                    national_id=p.get('national_id', ''),
-                    marital_status=p.get('marital_status', ''),
-                    occupation=p.get('occupation', ''),
-                    permanent_address=p.get('permanent_address', ''),
-                    phone=p.get('phone', ''),
-                    emergency_contact_name=p.get('emergency_contact_name', ''),
-                    emergency_contact_relation=p.get('emergency_contact_relation', ''),
-                    emergency_contact_phone=p.get('emergency_contact_phone', ''),
-                    family_history=p.get('family_history', ''),
-                    important_notes=p.get('important_notes', ''),
-                    doctor_id=doctor_id,
-                    created_by_id=created_by_id,
-                    admission_date=p.get('admission_date'),
-                    deleted_at=_coerce_datetime(p.get('deleted_at')),
-                    is_active=_coerce_bool(p.get('is_active'), default=True),
-                    version=p.get('version', 1),
-                )
-                new_patient.save()
-
-                for v in p.get('visits', []):
-                    signed_by_id = v.get('signed_by_id')
-                    if signed_by_id not in existing_user_ids:
-                        signed_by_id = None
-                    supervisor_id = v.get('supervisor_id')
-                    if supervisor_id not in existing_user_ids:
-                        supervisor_id = None
-                    author_id = v.get('author_id')
-                    if author_id not in existing_user_ids:
-                        author_id = None
-
-                    new_visit = Visit(
-                        patient=new_patient,
-                        visit_date=v.get('visit_date'),
-                        main_complaints=v.get('main_complaints', ''),
-                        history_presenting_complaint=v.get('history_presenting_complaint', ''),
-                        treatment_text=v.get('treatment_text', ''),
-                        doctor_notes=v.get('doctor_notes', ''),
-                        status=(v.get('status') if v.get('status') in {'draft', 'final', 'amended', 'locked'} else 'final'),
-                        status_reason=v.get('status_reason', ''),
-                        clinical_status=(
-                            v.get('clinical_status', '')
-                            or (v.get('status', '') if v.get('status') not in {'draft', 'final', 'amended', 'locked'} else '')
-                        ),
-                        accompanied_by=v.get('accompanied_by', ''),
-                        companion_relation=v.get('companion_relation', ''),
-                        follow_up_date=v.get('follow_up_date'),
-                        follow_up_completed=_coerce_bool(v.get('follow_up_completed'), default=False),
-                        pain_level=v.get('pain_level'),
-                        anxiety_level=v.get('anxiety_level'),
-                        suicide_risk_level=v.get('suicide_risk_level'),
-                        violence_risk_level=v.get('violence_risk_level'),
-                        firearm_access=_coerce_bool(v.get('firearm_access'), default=False),
-                        level_of_care=v.get('level_of_care'),
-                        follow_up_type=v.get('follow_up_type'),
-                        date_signed=v.get('date_signed'),
-                        signed_by_id=signed_by_id,
-                        supervisor_id=supervisor_id,
-                        diagnosis_discussed=_coerce_bool(v.get('diagnosis_discussed'), default=False),
-                        plan_discussed=_coerce_bool(v.get('plan_discussed'), default=False),
-                        clinical_data=v.get('clinical_data', {}),
-                        version=v.get('version', 1),
-                        author_id=author_id,
-                    )
-                    new_visit.save()
-
-                    for vd in v.get('diagnoses', []):
-                        diagnosis = None
-                        code = vd.get('diagnosis_code') or vd.get('custom_code')
-                        if code:
-                            diagnosis = diagnosis_lookup.get(code)
-                        VisitDiagnosis.objects.create(
-                            visit=new_visit,
-                            diagnosis=diagnosis,
-                            custom_code=vd.get('custom_code', ''),
-                            custom_name=vd.get('custom_name', ''),
-                            custom_arabic=vd.get('custom_arabic', ''),
-                            order=vd.get('order', 0),
-                        )
-
-                    for vm in v.get('medications', []):
-                        medication = None
-                        if not _coerce_bool(vm.get('is_custom'), default=False):
-                            key = (
-                                vm.get('medication_generic_english'),
-                                vm.get('medication_dosage'),
-                                vm.get('medication_brand_english'),
-                            )
-                            medication = medication_lookup.get(key)
-                        VisitMedication.objects.create(
-                            visit=new_visit,
-                            medication=medication,
-                            custom_name=vm.get('custom_name', ''),
-                            custom_dosage=vm.get('custom_dosage', ''),
-                            custom_brand=vm.get('custom_brand', ''),
-                            is_custom=_coerce_bool(vm.get('is_custom'), default=False),
-                            schedule=vm.get('schedule', ''),
-                            order=vm.get('order', 0),
-                        )
-
-                    for att in v.get('attachments', []):
-                        uploaded_by_id = att.get('uploaded_by_id')
-                        if uploaded_by_id not in existing_user_ids:
-                            uploaded_by_id = None
-                        attachment = VisitAttachment(
-                            visit=new_visit,
-                            filename=att.get('filename', ''),
-                            original_filename=att.get('original_filename', ''),
-                            filepath=att.get('filepath', ''),
-                            file_size=att.get('file_size'),
-                            mime_type=att.get('mime_type', ''),
-                            uploaded_by_id=uploaded_by_id,
-                            deleted_at=_coerce_datetime(att.get('deleted_at')),
-                            is_active=_coerce_bool(att.get('is_active'), default=True),
-                        )
-                        # Bypass auto_now_add so the original created_at is preserved.
-                        attachment.save()
-                        original_created = _coerce_datetime(att.get('created_at'))
-                        if original_created is not None:
-                            VisitAttachment.objects.filter(pk=attachment.pk).update(
-                                created_at=original_created
-                            )
-
-                    for sr in v.get('scale_responses', []):
-                        response = VisitScaleResponse(
-                            visit=new_visit,
-                            scale_id=sr.get('scale_id'),
-                            scale_name_snapshot=sr.get('scale_name_snapshot', ''),
-                            responses_json=sr.get('responses_json', {}),
-                        )
-                        response.save()
-                        original_created = _coerce_datetime(sr.get('created_at'))
-                        if original_created is not None:
-                            VisitScaleResponse.objects.filter(pk=response.pk).update(
-                                created_at=original_created
-                            )
-
-        self._reset_sequences()
         return True
-
-    def _reset_sequences(self):
-        if settings.DATABASES['default']['ENGINE'] == 'django.db.backends.sqlite3':
-            tables = [
-                'patients_patient',
-                'visits_visit',
-                'visits_visitdiagnosis',
-                'visits_visitmedication',
-                'visits_visitattachment',
-                'visits_visitscaleresponse',
-                'clinical_diagnosisoption',
-                'clinical_medicationoption',
-            ]
-            with connection.cursor() as cursor:
-                for table in tables:
-                    cursor.execute(f"DELETE FROM sqlite_sequence WHERE name='{table}'")

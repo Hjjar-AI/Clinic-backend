@@ -12,7 +12,7 @@ from apps.patients.models import Patient
 from apps.visits.models import Visit, VisitDiagnosis, VisitMedication
 from apps.clinical.models import DiagnosisOption, MedicationOption
 from apps.accounts.models import User
-from core.cache_utils import get_grouped_key, set_grouped_key, invalidate_group
+from core.cache_utils import get_grouped_key, set_grouped_key, invalidate_group, get_group_version
 
 
 # Sentinel used to distinguish "cache miss" from "cached value happens to equal default".
@@ -31,7 +31,8 @@ class SettingsService:
         # tested `is not None`, which meant the DB branch below was dead
         # code — every read returned the fallback, and clinic settings
         # edited through PUT /settings/ were invisible on the next GET.
-        value = get_grouped_key('settings', key, _CACHE_MISS)
+        generation = get_group_version('settings')
+        value = get_grouped_key('settings', key, _CACHE_MISS, version=generation)
         if value is not _CACHE_MISS:
             return value
 
@@ -41,7 +42,7 @@ class SettingsService:
         except ClinicSetting.DoesNotExist:
             value = default
 
-        set_grouped_key('settings', key, value, timeout=300)
+        set_grouped_key('settings', key, value, timeout=300, version=generation)
         return value
 
     def set_setting(self, key, value):
@@ -63,6 +64,7 @@ class SettingsService:
 
     def get_clinic_info(self):
         return {
+            'version': int(self.get_setting('__version', '1')),
             'clinic_name': self.get_setting('clinic_name', settings.CLINIC_NAME),
             'clinic_address': self.get_setting('clinic_address', settings.CLINIC_ADDRESS),
             'clinic_phone': self.get_setting('clinic_phone', settings.CLINIC_PHONE),
@@ -72,26 +74,47 @@ class SettingsService:
             'task_reminder_days': self._get_bounded_integer('task_reminder_days', 1, 0, 30),
         }
 
-    def update_clinic_info(self, data):
-        allowed = ['clinic_name', 'clinic_address', 'clinic_phone', 'theme']
-        reminder_ranges = {
-            'appointment_reminder_days': (0, 30),
-            'appointment_reminder_hours': (1, 12),
-            'task_reminder_days': (0, 30),
-        }
+    @transaction.atomic
+    def update_clinic_info(self, data, expected_version=None):
+        from core.exceptions import ConflictError
+        from django.core.exceptions import ValidationError
+        limits = {'clinic_name': 200, 'clinic_address': 1000, 'clinic_phone': 50, 'theme': 50}
+        ranges = {'appointment_reminder_days': (0, 30), 'appointment_reminder_hours': (1, 12), 'task_reminder_days': (0, 30)}
+        normalized = {}
         for key, value in data.items():
-            if key in allowed:
-                self.set_setting(key, value)
-            elif key in reminder_ranges:
-                try:
-                    parsed = int(value)
-                except (TypeError, ValueError):
-                    raise ValueError(f'{key} must be an integer')
-                minimum, maximum = reminder_ranges[key]
-                if not minimum <= parsed <= maximum:
-                    raise ValueError(f'{key} must be between {minimum} and {maximum}')
-                self.set_setting(key, str(parsed))
-        return self.get_clinic_info()
+            if key == 'version':
+                continue
+            if key in limits:
+                if not isinstance(value, str) or len(value) > limits[key]:
+                    raise ValidationError({key: ['قيمة غير صالحة أو طويلة جداً']})
+                if key == 'theme' and (not value or not all(c.isalnum() or c in '_-' for c in value)):
+                    raise ValidationError({'theme': ['اسم السمة غير صالح']})
+                normalized[key] = value.strip()
+            elif key in ranges:
+                if isinstance(value, bool) or str(value) != str(int(value)):
+                    raise ValidationError({key: ['يلزم عدد صحيح']})
+                minimum, maximum = ranges[key]
+                if not minimum <= int(value) <= maximum:
+                    raise ValidationError({key: ['العدد خارج النطاق']})
+                normalized[key] = str(value)
+            else:
+                raise ValidationError({key: ['حقل غير معروف']})
+        ClinicSetting.objects.get_or_create(key='__version', defaults={'value': '1'})
+        version = ClinicSetting.objects.select_for_update().get(key='__version')
+        expected = data.get('version', expected_version)
+        if type(expected) is not int or expected != int(version.value):
+            raise ConflictError('تغيرت إعدادات العيادة؛ أعد تحميلها')
+        for key, value in normalized.items():
+            self.set_setting(key, value)
+        version.value = str(int(version.value) + 1)
+        version.save()
+        # Read directly while on_commit cache invalidation is still pending.
+        result = self.get_clinic_info()
+        result.update(normalized)
+        result['version'] = int(version.value)
+        for key in ranges:
+            result[key] = int(result[key])
+        return result
 
     # ------------------------------------------------------------
     # Demo data generation
@@ -107,6 +130,8 @@ class SettingsService:
         if max_visits_per_patient is None:
             max_visits_per_patient = getattr(settings, 'DEMO_VISITS_PER_PATIENT', 3)
 
+        if type(num_patients) is not int or not 1 <= num_patients <= 1000 or type(max_visits_per_patient) is not int or not 1 <= max_visits_per_patient <= 20:
+            raise ValueError('عدد المرضى بين 1 و1000 والزيارات بين 1 و20')
         fake = Faker('ar_SA')
         doctor = User.objects.filter(role__in=['doctor', 'admin'], is_active=True).first()
         if not doctor:
@@ -138,7 +163,7 @@ class SettingsService:
                 occupation=random.choice(['طبيب', 'مهندس', 'معلم', 'طالب', 'موظف']),
                 phone='09' + ''.join([str(random.randint(0, 9)) for _ in range(8)]),
                 permanent_address='دمشق، ' + fake.city(),
-                admission_date=timezone.now().date(),
+                admission_date=timezone.localdate(),
                 doctor=doctor,
                 created_by=doctor,
             )
@@ -151,7 +176,7 @@ class SettingsService:
                     patient=patient,
                     visit_date=visit_date,
                     main_complaints=random.choice(['قلق', 'اكتئاب', 'توتر', 'أرق', 'هلع']),
-                    status='final',
+                    status='draft',
                     clinical_status=random.choice(['تحسن', 'تحسن جزئي', 'غير مستقر']),
                     pain_level=random.randint(0, 10),
                     anxiety_level=random.randint(0, 10),
@@ -180,20 +205,21 @@ class SettingsService:
                         visit=visit,
                         medication=med,
                         custom_name=med.generic_arabic or med.generic_english,
-                        custom_dosage=med.dosage or '',
+                        custom_dosage=med.dosage or 'حسب توجيهات الطبيب',
                         custom_brand=med.brand_arabic or med.brand_english,
                         is_custom=False,
+                        controlled_snapshot=med.is_controlled,
                         schedule=random.choice(['صباحاً', 'مساءاً', 'صباحاً ومساءاً']),
                         order=0,
                     )
 
-                visit.clinical_data = {
-                    'lab_values': [
-                        {'name': 'CBC', 'value': 'طبيعي', 'date': visit_date.isoformat()},
-                        {'name': 'TSH', 'value': 'طبيعي', 'date': visit_date.isoformat()},
-                    ]
-                }
+                visit.lab_values = [
+                    {'name': 'CBC', 'value': 'طبيعي', 'date': visit_date.isoformat(), 'status': 'normal'},
+                    {'name': 'TSH', 'value': 'طبيعي', 'date': visit_date.isoformat(), 'status': 'normal'},
+                ]
                 visit.save()
+                from apps.visits.services import VisitService
+                VisitService().transition(visit, 'final', doctor, visit.version)
 
             patients_created += 1
 

@@ -11,12 +11,16 @@ from django.contrib.auth.models import Group
 @receiver(post_save, sender=User)
 @receiver(post_delete, sender=User)
 def clear_user_cache(sender, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('context_doctors')
     invalidate_group('context_users')
     invalidate_group('dashboard')
 
 @receiver(user_logged_in)
 def log_user_login(sender, request, user, **kwargs):
+    if kwargs.get('raw'):
+        return
     log_action(
         user.id,
         'login',
@@ -27,6 +31,8 @@ def log_user_login(sender, request, user, **kwargs):
 
 @receiver(user_logged_out)
 def log_user_logout(sender, request, user, **kwargs):
+    if kwargs.get('raw'):
+        return
     if user:
         log_action(
             user.id,
@@ -39,6 +45,8 @@ def log_user_logout(sender, request, user, **kwargs):
 # Invalidate permission cache when group membership changes
 @receiver(m2m_changed, sender=User.groups.through)
 def user_groups_changed(sender, instance, action, reverse, model, pk_set, **kwargs):
+    if kwargs.get('raw'):
+        return
     """
     Clear the permission cache for affected users when group membership changes.
     """
@@ -55,6 +63,8 @@ def user_groups_changed(sender, instance, action, reverse, model, pk_set, **kwar
 # Invalidate permission cache when direct user permissions change
 @receiver(m2m_changed, sender=User.user_permissions.through)
 def user_permissions_changed(sender, instance, action, reverse, model, pk_set, **kwargs):
+    if kwargs.get('raw'):
+        return
     if action in ['post_add', 'post_remove', 'post_clear']:
         if reverse:
             users = model.objects.filter(pk__in=pk_set) if pk_set else model.objects.all()
@@ -66,6 +76,8 @@ def user_permissions_changed(sender, instance, action, reverse, model, pk_set, *
 # NEW: Invalidate permission cache when group permissions change
 @receiver(m2m_changed, sender=Group.permissions.through)
 def group_permissions_changed(sender, instance, action, reverse, model, pk_set, **kwargs):
+    if kwargs.get('raw'):
+        return
     """
     Clear permission cache for all users belonging to the group(s) whose permissions changed.
     """

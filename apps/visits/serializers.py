@@ -39,10 +39,10 @@ class PatientSummarySerializer(serializers.ModelSerializer):
 
 class VisitSerializer(serializers.ModelSerializer):
     # Write-only fields for accepting nested data from the frontend
-    diagnoses_input = serializers.ListField(write_only=True, required=False)
-    medications_input = serializers.ListField(write_only=True, required=False)
-    lab_values_input = serializers.ListField(write_only=True, required=False)
-    scale_responses_input = serializers.ListField(write_only=True, required=False)
+    diagnoses_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
+    medications_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
+    lab_values_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
+    scale_responses_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
 
     patient = PatientSummarySerializer(read_only=True)
     patient_id = serializers.PrimaryKeyRelatedField(
@@ -59,13 +59,7 @@ class VisitSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    signed_by_id = serializers.PrimaryKeyRelatedField(
-        source='signed_by',
-        queryset=User.objects.filter(is_active=True),
-        write_only=True,
-        required=False,
-        allow_null=True,
-    )
+    signed_by_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Visit
@@ -80,10 +74,10 @@ class VisitSerializer(serializers.ModelSerializer):
             'clinical_data', 'version', 'author',
             'created_at', 'updated_at', 'deleted_at',
             'diagnoses_input', 'medications_input', 'lab_values_input', 'scale_responses_input',
-            'supervisor_id', 'signed_by_id',
+            'supervisor_id', 'signed_by_id', 'signed_at', 'follow_up_outcome', 'follow_up_completed_at', 'follow_up_completed_by',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'deleted_at', 'author',
-                            'signed_by', 'supervisor']
+                            'signed_by', 'signed_by_id', 'date_signed', 'supervisor', 'follow_up_completed', 'signed_at', 'follow_up_outcome', 'follow_up_completed_at', 'follow_up_completed_by']
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -93,78 +87,18 @@ class VisitSerializer(serializers.ModelSerializer):
         rep['scale_responses'] = VisitScaleResponseSerializer(instance.scale_responses.all(), many=True).data
         return rep
 
-    def create(self, validated_data, **kwargs):
-        diagnoses = validated_data.pop('diagnoses_input', [])
-        medications = validated_data.pop('medications_input', [])
-        lab_values = validated_data.pop('lab_values_input', [])
-        scale_responses = validated_data.pop('scale_responses_input', [])
+    def validate_clinical_data(self, value):
+        from .input_validation import clinical_object
+        return clinical_object(value)
 
-        # Merge additional kwargs (e.g., patient, author) passed from view
-        for key, value in kwargs.items():
-            if key not in validated_data:
-                validated_data[key] = value
-
-        visit = Visit.objects.create(**validated_data)
-        if diagnoses:
-            visit.set_diagnoses(diagnoses)
-        if medications:
-            visit.set_medications(medications)
-        if lab_values:
-            visit.set_lab_values(lab_values)
-        if scale_responses:
-            self._save_scale_responses(visit, scale_responses)
-        return visit
+    def create(self, validated_data):
+        from .services import VisitService
+        request = self.context['request']
+        patient = validated_data.pop('patient')
+        return VisitService().create_visit(patient, validated_data, request.user)
 
     def update(self, instance, validated_data):
-        diagnoses = validated_data.pop('diagnoses_input', None)
-        medications = validated_data.pop('medications_input', None)
-        lab_values = validated_data.pop('lab_values_input', None)
-        scale_responses = validated_data.pop('scale_responses_input', None)
-
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-
-        if diagnoses is not None:
-            instance.set_diagnoses(diagnoses)
-        if medications is not None:
-            instance.set_medications(medications)
-        if lab_values is not None:
-            instance.set_lab_values(lab_values)
-        if scale_responses is not None:
-            self._save_scale_responses(instance, scale_responses)
-        return instance
-
-    def _save_scale_responses(self, visit, responses):
-        existing_snapshots = {
-            response.scale_id: {
-                'definition': (response.responses_json or {}).get('__definition'),
-                'name': response.scale_name_snapshot,
-            }
-            for response in visit.scale_responses.all()
-        }
-        normalized_responses = []
-        seen_scale_ids = set()
-        for item in responses:
-            try:
-                item_scale_id = int(item.get('scale_id'))
-            except (AttributeError, TypeError, ValueError):
-                item_scale_id = None
-            existing = existing_snapshots.get(item_scale_id) or {}
-            item = normalize_scale_response(
-                item, existing.get('definition'), existing.get('name')
-            )
-            if item['scale_id'] in seen_scale_ids:
-                raise serializers.ValidationError({
-                    'scale_responses_input': ['لا يمكن تكرار المقياس في الزيارة نفسها'],
-                })
-            seen_scale_ids.add(item['scale_id'])
-            normalized_responses.append(item)
-
-        visit.scale_responses.all().delete()
-        for item in normalized_responses:
-            visit.scale_responses.create(
-                scale_id=item.get('scale_id'),
-                scale_name_snapshot=item.get('scale_name', ''),
-                responses_json=item.get('responses', {}),
-            )
+        from .services import VisitService
+        request = self.context['request']
+        version = validated_data.pop('version', None)
+        return VisitService().update_visit(instance, validated_data, request.user, version)

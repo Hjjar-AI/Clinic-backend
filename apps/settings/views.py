@@ -1,3 +1,4 @@
+from core.mutation import request_version
 # backend/apps/settings/views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -24,7 +25,7 @@ class SettingsView(APIView):
     def put(self, request):
         data = request.data
         try:
-            updated = self.service.update_clinic_info(data)
+            updated = self.service.update_clinic_info(data, request_version(request))
         except ValueError as exc:
             return error_response(400, str(exc), {})
         return Response({'data': updated})
@@ -36,8 +37,8 @@ class ThemeView(APIView):
 
     def put(self, request):
         theme = request.data.get('theme', 'default')
-        self.service.set_setting('theme', theme)
-        return Response({'data': {'status': 'ok'}})
+        updated = self.service.update_clinic_info({'theme': theme}, request_version(request))
+        return Response({'data': updated})
 
 
 class GenerateDemoDataView(APIView):

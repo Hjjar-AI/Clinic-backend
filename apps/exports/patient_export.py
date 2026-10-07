@@ -1,3 +1,5 @@
+from core.spreadsheets import csv_cell, text_cells
+from django.core.exceptions import ValidationError
 # backend/apps/exports/patient_export.py
 import csv
 import io
@@ -24,7 +26,9 @@ class PatientExportService(BaseExportService):
             'doctor': ('الطبيب المسؤول', lambda p: p.doctor.full_name if p.doctor else ''),
             'completeness': ('اكتمال الملف', lambda p: f"{p.get_completeness()['percent']}%"),
         }
-        if not fields:
+        if fields is not None and (not isinstance(fields, list) or not fields or any(f not in field_map for f in fields)):
+            raise ValidationError({'fields': ['أعمدة غير صالحة']})
+        if fields is None:
             fields = ['full_name', 'national_id', 'phone', 'admission_date']
 
         output = io.StringIO()
@@ -32,7 +36,7 @@ class PatientExportService(BaseExportService):
         writer.writerow([field_map[f][0] for f in fields if f in field_map])
         for p in patients:
             row = [field_map[f][1](p) for f in fields if f in field_map]
-            writer.writerow(row)
+            writer.writerow([csv_cell(value) for value in row])
         response = HttpResponse(output.getvalue(), content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="patients_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
         return self.stamp_response(response)
@@ -50,7 +54,9 @@ class PatientExportService(BaseExportService):
             'doctor': ('الطبيب المسؤول', lambda p: p.doctor.full_name if p.doctor else ''),
             'completeness': ('اكتمال الملف', lambda p: f"{p.get_completeness()['percent']}%"),
         }
-        fields = [field for field in (fields or []) if field in field_map]
+        if fields is not None and (not isinstance(fields, list) or not fields or any(f not in field_map for f in fields)):
+            raise ValidationError({'fields': ['أعمدة غير صالحة']})
+        fields = fields or []
         if not fields:
             fields = ['full_name', 'national_id', 'phone', 'address', 'admission_date', 'doctor']
         wb = Workbook()
@@ -61,6 +67,7 @@ class PatientExportService(BaseExportService):
             ws.append([field_map[field][1](p) for field in fields])
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="patients_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+        text_cells(ws)
         wb.save(response)
         return self.stamp_response(response)
 

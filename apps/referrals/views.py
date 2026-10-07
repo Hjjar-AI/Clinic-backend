@@ -10,15 +10,15 @@ class ReferralLetterView(APIView):
     permission_classes = [IsAuthenticated, HasViewReferrals, CanAccessVisit]
     service = ReferralService()
 
-    def get(self, request, visit_id):
+    def post(self, request, visit_id):
         visit = self.service.get_visit(visit_id)
         if not visit:
             return error_response(404, 'الزيارة غير موجودة', {})
         self.check_object_permissions(request, visit)
         pdf = self.service.generate_pdf(
             visit,
-            request.query_params.get('version'),
-            request.query_params.get('reason'),
+            request.data.get('version'),
+            request.data.get('reason'),
             request.user.id,
         )
         if pdf:

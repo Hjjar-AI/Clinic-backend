@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models.functions import Lower, Trim
 from django.core.validators import MinValueValidator
 from core.models import SoftDeleteModel, TimeStampedModel
 
@@ -9,6 +10,7 @@ class DiagnosisOption(SoftDeleteModel):
     order = models.PositiveIntegerField(default=0)
 
     class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(version__gte=1), name='diagnosisoption_version_positive')]
         ordering = ['order', 'code', 'id']
 
     def __str__(self):
@@ -17,14 +19,18 @@ class DiagnosisOption(SoftDeleteModel):
 
 class MedicationOption(SoftDeleteModel):
     generic_english = models.CharField(max_length=200)
-    generic_arabic = models.CharField(max_length=200, blank=True, null=True)
-    dosage = models.CharField(max_length=100, blank=True, null=True)
-    brand_english = models.CharField(max_length=200, blank=True, null=True)
-    brand_arabic = models.CharField(max_length=200, blank=True, null=True)
+    generic_arabic = models.CharField(max_length=200, blank=True, default='')
+    dosage = models.CharField(max_length=100, blank=True, default='')
+    brand_english = models.CharField(max_length=200, blank=True, default='')
+    brand_arabic = models.CharField(max_length=200, blank=True, default='')
     order = models.PositiveIntegerField(default=0)
     is_controlled = models.BooleanField(default=False)   # NEW FIELD
 
     class Meta:
+        constraints = [
+            models.CheckConstraint(check=models.Q(version__gte=1), name='medicationoption_version_positive'),
+            models.UniqueConstraint(Lower(Trim('generic_english')), Lower(Trim('dosage')), Lower(Trim('brand_english')), name='medication_identity_unique'),
+        ]
         ordering = ['order', 'generic_english', 'id']
 
     def display_name(self):
@@ -50,6 +56,7 @@ class ClinicalScale(SoftDeleteModel, TimeStampedModel):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(version__gte=1), name='clinicalscale_version_positive')]
         ordering = ['name', 'id']
 
     def __str__(self):
@@ -82,6 +89,7 @@ class ScaleField(SoftDeleteModel, TimeStampedModel):
     class Meta:
         ordering = ['order', 'id']
         constraints = [
+            models.CheckConstraint(check=models.Q(version__gte=1), name='scalefield_version_positive'),
             models.CheckConstraint(
                 check=models.Q(max_val__gt=models.F('min_val')),
                 name='scale_field_range_valid',

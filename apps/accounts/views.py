@@ -1,3 +1,4 @@
+from core.mutation import request_version
 # backend/apps/accounts/views.py
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
@@ -12,6 +13,8 @@ from core.permissions import (
 )
 from django.contrib.auth.models import Permission
 from django.db import transaction
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_protect
 
 from core.exceptions import ConflictError, error_response
 from apps.notifications.services import NotificationService
@@ -23,6 +26,7 @@ from django.db.models import Q
 from core.query_utils import apply_ordering
 
 
+@method_decorator(transaction.non_atomic_requests, name='dispatch')
 class AuthViewSet(viewsets.GenericViewSet):
     permission_classes = [permissions.AllowAny]
     serializer_class = LoginSerializer
@@ -30,6 +34,7 @@ class AuthViewSet(viewsets.GenericViewSet):
     notification_service = NotificationService()
 
     @action(detail=False, methods=['post'])
+    @method_decorator(csrf_protect)
     def login(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -131,7 +136,7 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer.instance = updated_user
 
     def perform_destroy(self, instance):
-        self.service.deactivate_user(instance, self.request.user)
+        self.service.deactivate_user(instance, self.request.user, request_version(self.request))
 
     @action(detail=False, methods=['get'])
     def doctors(self, request):
@@ -143,9 +148,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def permissions(self, request, pk=None):
         user = self.get_object()
         all_perms = ALL_PERMISSIONS
-        effective_codenames = sorted({
-            p.split('.')[-1] for p in user.get_all_permissions()
-        } & set(ALL_PERMISSIONS))
+        effective_codenames = sorted(name for name in ALL_PERMISSIONS if user.has_perm(name))
         direct_codenames = sorted(
             set(user.user_permissions.values_list('codename', flat=True)) & set(ALL_PERMISSIONS)
         )
@@ -168,6 +171,8 @@ class UserViewSet(viewsets.ModelViewSet):
     def update_permissions(self, request, pk=None):
         user = self.get_object()
         perm_codenames = request.data.get('permissions', [])
+        if not isinstance(perm_codenames, list) or any(not isinstance(item, str) for item in perm_codenames):
+            raise ValidationError({'permissions': ['قائمة أسماء صلاحيات مطلوبة']})
         try:
             expected_version = int(request.data.get('version'))
         except (ValueError, TypeError):

@@ -148,8 +148,10 @@ class TaskService:
         return self.transition_task(task, 'open', actor, expected_version)
 
     @transaction.atomic
-    def delete_task(self, task):
+    def delete_task(self, task, expected_version=None):
         task = UserTask.objects.select_for_update().get(pk=task.pk)
+        from core.mutation import check_mutation
+        check_mutation(task, expected_version)
         if task.status not in {'completed', 'cancelled'}:
             raise ValidationError({'status': ['لا يمكن حذف مهمة نشطة؛ ألغها أولاً']})
         task.delete()
@@ -176,5 +178,8 @@ class TaskService:
 
         # Perform reorder
         for idx, task_id in enumerate(order_list):
-            UserTask.objects.filter(id=task_id).update(order=idx)
+            task = self.get_for_user(user).select_for_update().get(pk=task_id)
+            task.order = idx
+            task.version += 1
+            task.save(update_fields=['order', 'version', 'updated_at'])
         return True

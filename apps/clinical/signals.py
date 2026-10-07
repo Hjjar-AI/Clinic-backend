@@ -7,21 +7,29 @@ from core.cache_utils import invalidate_group
 @receiver(post_save, sender=DiagnosisOption)
 @receiver(post_delete, sender=DiagnosisOption)
 def clear_diagnosis_cache(sender, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('reports')
     invalidate_group('context')
 
 @receiver(post_save, sender=MedicationOption)
 @receiver(post_delete, sender=MedicationOption)
 def clear_medication_cache(sender, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('reports')
     invalidate_group('context')
 
 @receiver(post_save, sender=ClinicalScale)
 @receiver(post_delete, sender=ClinicalScale)
 def clear_scale_cache(sender, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('context')
 
 @receiver(post_save, sender=ClinicalNoteTemplate)
 @receiver(post_delete, sender=ClinicalNoteTemplate)
 def clear_template_cache(sender, **kwargs):
+    if kwargs.get('raw'):
+        return
     invalidate_group('context')

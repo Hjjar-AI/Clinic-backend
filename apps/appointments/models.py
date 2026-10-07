@@ -15,12 +15,12 @@ class Appointment(SoftDeleteModel, TimeStampedModel):
     ]
     patient = models.ForeignKey(
         'patients.Patient',
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='appointments',
     )
     doctor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='appointments',
     )
     appointment_date = models.DateField()
@@ -44,6 +44,7 @@ class Appointment(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['deleted_at']),
         ]
         constraints = [
+            models.CheckConstraint(check=models.Q(version__gte=1, status__in=['scheduled', 'confirmed', 'arrived', 'completed', 'cancelled', 'no-show']), name='appointment_version_status_valid'),
             models.CheckConstraint(
                 check=models.Q(duration_minutes__gte=1, duration_minutes__lte=1440),
                 name='appointment_duration_valid',

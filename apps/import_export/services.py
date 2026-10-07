@@ -187,14 +187,16 @@ class OptionsImportService(BulkImportService):
         return {'rows':[{k:v for k,v in r.items() if not k.startswith('_')} for r in rows], 'counts':counts, 'total':len(rows)}
 
     def preview_diagnoses(self, file_stream, merge_mode='merge'):
-        result = self._summarize(self._catalog_rows(file_stream, 'diagnosis'))
-        valid_ids = [r['_pk'] for r in self._catalog_rows(file_stream, 'diagnosis') if r.get('_pk')]
+        rows = self._catalog_rows(file_stream, 'diagnosis')
+        result = self._summarize(rows)
+        valid_ids = [r['_pk'] for r in rows if r.get('_pk')]
         result['will_retire_existing'] = DiagnosisOption.objects.exclude(pk__in=valid_ids).count() if merge_mode == 'replace' else 0
         return result
 
     def preview_medications(self, file_stream, column_map, merge_mode='merge'):
-        result = self._summarize(self._catalog_rows(file_stream, 'medication', column_map))
-        valid_ids = [r['_pk'] for r in self._catalog_rows(file_stream, 'medication', column_map) if r.get('_pk')]
+        rows = self._catalog_rows(file_stream, 'medication', column_map)
+        result = self._summarize(rows)
+        valid_ids = [r['_pk'] for r in rows if r.get('_pk')]
         result['will_retire_existing'] = MedicationOption.objects.exclude(pk__in=valid_ids).count() if merge_mode == 'overwrite' else 0
         return result
 

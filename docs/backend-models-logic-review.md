@@ -1,6 +1,10 @@
 # Backend models and logic review
 
-Reviewed: 2026-10-07. Scope: application models, services, serializers, views, permissions, audit, reporting, imports, reminders, and backup/restore.
+Reviewed: 2026-10-07.
+
+**Implementation status:** the findings below are the original review record. The authorized fixes have now been implemented; see [implementation details, decisions, and verification](backend-fixes-implementation.md). The original verification limitations at the end describe the review pass, not the subsequent fix pass.
+
+ Scope: application models, services, serializers, views, permissions, audit, reporting, imports, reminders, and backup/restore.
 
 No migration files or test-suite files were inspected or changed. No builds, packaging, dependency/version changes, or compilation tasks were run. This pass adds this report; the implementation fixes listed below were made in the earlier pass and are present in the current checkout. The current Git baseline already contains those fixes.
 

@@ -21,6 +21,7 @@
 - Preserve immutable signed visit revisions/issued documents, server-authorized signing, expected-version checks, replayable idempotency, and after-commit cache invalidation.
 - Preserve session/CSRF handling, response envelopes, frontend opening versions/`If-Match`, and stable operation keys across retries after uncertain responses.
 - Archive retains clinical history; pseudonymization retains signed identity snapshots. Keep full authenticated ZIP recovery distinct from catalog-only merge; imports/restores require bound previews/confirmations.
+- Patient design: [schema/API/retention](docs/patient-record-schema.md). Preserve year-only/unknown birth, permanent file numbers, unchanged duplicate IDs/dismissible review, optional preview-bound merge, dated team memberships, clinical unknowns, longitudinal/encounter/signed fact ownership, correction reasons and parent versions.
 - Consult the [implementation record](docs/backend-fixes-implementation.md) and [workflow checklist](docs/critical-workflow-checklist.md) when changing these contracts.
 
 ## Verification and privacy

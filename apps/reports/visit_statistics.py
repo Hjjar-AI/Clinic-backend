@@ -46,10 +46,15 @@ class VisitStatisticsService(BaseStatisticsService):
         return self._top(VisitMedication.objects.filter(visit__in=visits), 'medication', limit)
 
     def get_followup_stats(self, user, date_from=None, date_to=None):
-        visits = self.get_accessible_visits(user, date_from, date_to)
+        from apps.patients.follow_up_services import accessible_follow_ups
+        actions = accessible_follow_ups(user)
+        if date_from:
+            actions = actions.filter(due_date__gte=date_from)
+        if date_to:
+            actions = actions.filter(due_date__lte=date_to)
         today = timezone.localdate()
-        completed = visits.filter(follow_up_date__isnull=False, follow_up_outcome='completed').count()
-        overdue = visits.filter(follow_up_date__lt=today, follow_up_outcome__in=['pending', 'missed']).count()
+        completed = actions.filter(status='completed').count()
+        overdue = actions.filter(due_date__lt=today, status__in=['pending', 'missed']).count()
         total = overdue + completed
         adherence = (completed / total * 100) if total > 0 else 0
         return completed, overdue, adherence

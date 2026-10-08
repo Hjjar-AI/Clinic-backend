@@ -29,7 +29,9 @@ from django.core.files.storage import default_storage
 from core.signals import log_action
 
 
-class PatientViewSet(viewsets.ModelViewSet):
+from .record_views import PatientRecordsMixin
+
+class PatientViewSet(PatientRecordsMixin, viewsets.ModelViewSet):
     serializer_class = PatientSerializer
     permission_classes = [permissions.IsAuthenticated]
     service = PatientService()
@@ -38,11 +40,16 @@ class PatientViewSet(viewsets.ModelViewSet):
         # Item #2: CanAccessPatient is layered on every action that fetches a
         # specific patient via get_object(), as defense-in-depth on top of the
         # queryset scoping in PatientService.list_patients.
-        if self.action in ['create', 'duplicates']:
+        if self.action == 'team_candidates':
+            if not (self.request.user.has_perm('edit_patient') or self.request.user.has_perm('manage_users')):
+                from django.core.exceptions import PermissionDenied
+                raise PermissionDenied('غير مصرح بعرض أعضاء الفريق')
+            permission_classes = [permissions.IsAuthenticated]
+        elif self.action in ['create', 'duplicates']:
             permission_classes = [permissions.IsAuthenticated, HasEditPatient]
-        elif self.action in ['update', 'partial_update']:
+        elif self.action in ['update', 'partial_update', 'duplicate_review']:
             permission_classes = [permissions.IsAuthenticated, HasEditPatient, CanAccessPatient]
-        elif self.action in ['destroy', 'archive', 'restore']:
+        elif self.action in ['destroy', 'archive', 'restore', 'merge_preview', 'merge']:
             permission_classes = [permissions.IsAuthenticated, HasDeletePatient, CanAccessPatient]
         elif self.action == 'anonymize':
             permission_classes = [permissions.IsAuthenticated, HasDeletePatient, CanAccessPatient]
@@ -51,7 +58,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         elif self.action in ['risk_history', 'timeline']:
             from core.permissions import HasViewVisits
             permission_classes = [permissions.IsAuthenticated, HasViewPatients, HasViewVisits, CanAccessPatient]
-        elif self.action in ['retrieve', 'care_team']:
+        elif self.action in ['retrieve', 'care_team', 'records', 'corrections']:
             permission_classes = [permissions.IsAuthenticated, HasViewPatients, CanAccessPatient]
         elif self.action in ['care_team_add', 'care_team_remove']:
             permission_classes = [permissions.IsAuthenticated, HasManageUsers, CanAccessPatient]
@@ -62,7 +69,7 @@ class PatientViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         if user.has_perm(PERM_VIEW_PATIENTS):
-            if self.action == 'restore':
+            if self.action in {'restore', 'merge_preview', 'merge'}:
                 from core.access import accessible_patients
                 return accessible_patients(user, include_archived=True)
             return self.service.list_patients(user, self.request.query_params)
@@ -102,6 +109,12 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         self.service.soft_delete_patient(instance, self.request.user, request_version(self.request))
+
+    @action(detail=False, methods=['get'])
+    def team_candidates(self, request):
+        from apps.accounts.models import User
+        rows = User.objects.filter(is_active=True).order_by('full_name', 'id')
+        return Response({'data': [{'id': user.pk, 'full_name': user.full_name or user.username, 'role': user.role} for user in rows]})
 
     @action(detail=False, methods=['post'])
     def duplicates(self, request):
@@ -214,7 +227,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         user_id = request.data.get('user_id')
         role = request.data.get('role', '')
         member, version = self.service.add_care_team_member(
-            patient, user_id, role, request_version(request))
+            patient, user_id, role, request_version(request), actor=request.user)
         log_action(request.user.id, 'care_team_add', 'Patient', patient.pk, {'user_id': member.user_id})
         serializer = CareTeamMemberSerializer(member)
         return Response({'data': serializer.data}, status=status.HTTP_201_CREATED,
@@ -223,7 +236,7 @@ class PatientViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['delete'], url_path='care-team/(?P<user_id>[^/.]+)')
     def care_team_remove(self, request, pk=None, user_id=None):
         patient = self.get_object()
-        version = self.service.remove_care_team_member(patient, user_id, request_version(request))
+        version = self.service.remove_care_team_member(patient, user_id, request_version(request), actor=request.user, reason=request.data.get('reason', ''))
         log_action(request.user.id, 'care_team_remove', 'Patient', patient.pk, {'user_id': user_id})
         return Response(status=status.HTTP_204_NO_CONTENT, headers={'X-Resource-Version': str(version)})
 
@@ -240,7 +253,7 @@ class PatientDocumentViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.instance = self.service.update_document(
-            self.get_object(), serializer.validated_data, request_version(self.request))
+            self.get_object(), {**serializer.validated_data, '_actor': self.request.user}, request_version(self.request))
 
     def create(self, request, patient_pk=None):
         patient = get_object_or_404(accessible_patients(request.user), pk=patient_pk)
@@ -253,7 +266,10 @@ class PatientDocumentViewSet(viewsets.ModelViewSet):
             return error_response(400, str(e), {})
         category = request.data.get('category', 'other')
         description = request.data.get('description', '')
-        doc = self.service.upload_document(patient, file, request.user, category, description)
+        metadata = {name: request.data[name] for name in ('document_date', 'source', 'provider', 'verification') if name in request.data}
+        validated = self.get_serializer(data=metadata, partial=True)
+        validated.is_valid(raise_exception=True)
+        doc = self.service.upload_document(patient, file, request.user, category, description, metadata=validated.validated_data)
         serializer = self.get_serializer(doc)
         return Response({'data': serializer.data}, status=status.HTTP_201_CREATED)
 

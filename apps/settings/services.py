@@ -5,7 +5,6 @@ from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
 import random
-from faker import Faker
 
 from .models import ClinicSetting
 from apps.patients.models import Patient
@@ -69,6 +68,7 @@ class SettingsService:
             'clinic_address': self.get_setting('clinic_address', settings.CLINIC_ADDRESS),
             'clinic_phone': self.get_setting('clinic_phone', settings.CLINIC_PHONE),
             'theme': self.get_setting('theme', 'default'),
+            'patient_completeness_fields': __import__('apps.patients.completeness', fromlist=['recommended_fields']).recommended_fields(),
             'appointment_reminder_days': self._get_bounded_integer('appointment_reminder_days', 1, 0, 30),
             'appointment_reminder_hours': self._get_bounded_integer('appointment_reminder_hours', 1, 1, 12),
             'task_reminder_days': self._get_bounded_integer('task_reminder_days', 1, 0, 30),
@@ -83,6 +83,13 @@ class SettingsService:
         normalized = {}
         for key, value in data.items():
             if key == 'version':
+                continue
+            if key == 'patient_completeness_fields':
+                from apps.patients.completeness import ALLOWED_FIELDS
+                import json
+                if not isinstance(value, list) or any(item not in ALLOWED_FIELDS for item in value):
+                    raise ValidationError({key: ['حقول اكتمال غير صالحة']})
+                normalized[key] = json.dumps(list(dict.fromkeys(value)))
                 continue
             if key in limits:
                 if not isinstance(value, str) or len(value) > limits[key]:
@@ -115,6 +122,9 @@ class SettingsService:
         result = self.get_clinic_info()
         result.update(normalized)
         result['version'] = int(version.value)
+        if 'patient_completeness_fields' in normalized:
+            import json
+            result['patient_completeness_fields'] = json.loads(normalized['patient_completeness_fields'])
         for key in ranges:
             result[key] = int(result[key])
         return result
@@ -135,6 +145,7 @@ class SettingsService:
 
         if type(num_patients) is not int or not 1 <= num_patients <= 1000 or type(max_visits_per_patient) is not int or not 1 <= max_visits_per_patient <= 20:
             raise ValueError('عدد المرضى بين 1 و1000 والزيارات بين 1 و20')
+        from faker import Faker
         fake = Faker('ar_SA')
         doctor = User.objects.filter(role__in=['doctor', 'admin'], is_active=True).first()
         if not doctor:
@@ -166,15 +177,18 @@ class SettingsService:
                 occupation=random.choice(['طبيب', 'مهندس', 'معلم', 'طالب', 'موظف']),
                 phone='09' + ''.join([str(random.randint(0, 9)) for _ in range(8)]),
                 permanent_address='دمشق، ' + fake.city(),
-                admission_date=timezone.localdate(),
+                registration_date=timezone.localdate(),
                 doctor=doctor,
                 created_by=doctor,
             )
             patient.save()
+            from apps.patients.models import PatientCareTeam, PatientIdentifier
+            PatientCareTeam.objects.create(patient=patient, user=doctor, role='doctor', assigned_by=doctor)
+            PatientIdentifier.objects.create(patient=patient, identifier_type='national_id', value=patient.national_id, created_by=doctor, updated_by=doctor)
 
             num_visits = random.randint(1, max_visits_per_patient)
             for _ in range(num_visits):
-                visit_date = patient.admission_date - timedelta(days=random.randint(0, 30))
+                visit_date = patient.registration_date - timedelta(days=random.randint(0, 30))
                 visit = Visit(
                     patient=patient,
                     visit_date=visit_date,

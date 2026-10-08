@@ -23,6 +23,7 @@ def export_patient_to_word(patient, clinic_info):
         p = doc.add_paragraph(f"{clinic_info.get('address', '')} | {clinic_info.get('phone', '')}")
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+    _add_rtl_paragraph(doc, f'رقم الملف: {patient.patient_number}')
     # Patient information
     doc.add_heading(f"تقرير المريض: {patient.get_full_name()}", level=1)
     doc.add_heading('المعلومات الشخصية', level=2)
@@ -34,12 +35,21 @@ def export_patient_to_word(patient, clinic_info):
     _add_rtl_paragraph(doc, f"العنوان: {patient.permanent_address}")
     if patient.emergency_contact_name:
         _add_rtl_paragraph(doc, f"جهة اتصال للطوارئ: {patient.emergency_contact_name} ({patient.emergency_contact_relation}) - {patient.emergency_contact_phone}")
-    _add_rtl_paragraph(doc, f"تاريخ الإضافة: {patient.admission_date.strftime('%d/%m/%Y') if patient.admission_date else ''}")
+    _add_rtl_paragraph(doc, f"تاريخ التسجيل: {patient.registration_date.strftime('%d/%m/%Y') if patient.registration_date else ''}")
 
+    doc.add_heading('المعلومات المستمرة الحالية', level=2)
+    _add_rtl_paragraph(doc, f'الحساسية: {patient.get_allergy_status_display()}')
+    _add_rtl_paragraph(doc, f'الأدوية المستمرة: {patient.get_medication_status_display()}')
+    for row in patient.patientallergy_records.filter(is_active=True):
+        _add_rtl_paragraph(doc, f'{row.substance} — {row.reaction} — {row.get_status_display()}')
+    for row in patient.patientmedication_records.filter(is_active=True):
+        _add_rtl_paragraph(doc, f'{row.name} — {row.dosage} — {row.schedule} — {row.get_status_display()}')
+    for row in patient.patientcontact_records.filter(is_active=True):
+        _add_rtl_paragraph(doc, f'جهة اتصال: {row.name} — {row.relationship} — {row.phone}')
     # Medical history
     doc.add_heading('المعلومات الطبية الهامة', level=2)
-    _add_rtl_paragraph(doc, f"التاريخ العائلي: {patient.family_history or 'لا يوجد'}")
-    _add_rtl_paragraph(doc, f"ملاحظات هامة: {patient.important_notes or 'لا يوجد'}")
+    _add_rtl_paragraph(doc, f"التاريخ العائلي: {patient.family_history or 'غير مسجل'}")
+    _add_rtl_paragraph(doc, f"ملاحظات هامة: {patient.important_notes or 'غير مسجل'}")
 
     # Visits
     doc.add_heading('الزيارات الطبية', level=2)

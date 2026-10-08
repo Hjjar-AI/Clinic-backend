@@ -1,6 +1,6 @@
 # Current work
 
-Updated: 2026-10-08. Second backend model/logic review fixes complete; see [second-pass findings and verification](backend-second-pass.md). No active implementation.
+Updated: 2026-10-08. Patient schema/workflow expansion complete; see [schema/retention](patient-record-schema.md) and [verification](patient-record-verification.md). Second backend model/logic review fixes complete; see [second-pass findings and verification](backend-second-pass.md). No active implementation.
 
 - Pending: API regression under pinned Django/DRF (temporary dependency download unavailable); browser care-team/document/conflict flows.
 - Unverified, not confirmed defects: PDF/Arabic rendering, frontend browser workflows, PostgreSQL/concurrent writers.

@@ -8,6 +8,7 @@ from django.utils import timezone
 from .models import Visit, VisitAttachment, VisitRevision
 from apps.patients.models import Patient
 from core.mutation import check_mutation
+from core.exceptions import ConflictError
 from core.lifecycle import enforce_transition
 from core.file_utils import save_uploaded_file
 from .scale_validation import normalize_scale_response
@@ -15,12 +16,22 @@ from .lab_validation import normalize_lab_values
 from .input_validation import normalize_rows, clinical_object, text
 
 
+def lock_visit(visit_id):
+    """Lock the patient before its encounter, matching patient reconciliation."""
+    patient_id = Visit.all_objects.values_list('patient_id', flat=True).get(pk=visit_id)
+    Patient.all_objects.select_for_update().get(pk=patient_id)
+    visit = Visit.all_objects.select_for_update().get(pk=visit_id)
+    if visit.patient_id != patient_id:
+        raise ConflictError('تغير ملف المريض؛ أعد تحميل الزيارة')
+    return visit
+
+
 class VisitService:
     EDITABLE = {
         'visit_date', 'main_complaints', 'history_presenting_complaint', 'treatment_text',
         'doctor_notes', 'clinical_status', 'accompanied_by', 'companion_relation',
         'follow_up_date', 'pain_level', 'anxiety_level', 'suicide_risk_level',
-        'violence_risk_level', 'firearm_access', 'level_of_care', 'follow_up_type',
+        'violence_risk_level', 'firearm_access', 'level_of_care', 'care_basis', 'follow_up_type',
         'supervisor', 'diagnosis_discussed', 'plan_discussed', 'clinical_data',
     }
 
@@ -76,13 +87,17 @@ class VisitService:
         visit.save(update_fields=['signed_by', 'signed_at', 'date_signed', 'updated_at'])
         scalar = {field.name: field.value_from_object(visit) for field in visit._meta.concrete_fields}
         snapshot = json.loads(json.dumps({
-            'fields': scalar, 'diagnoses': visit.get_diagnoses(),
+            'schema_version': 2, 'fields': scalar, 'diagnoses': visit.get_diagnoses(),
             'medications': visit.get_medications(), 'lab_values': visit.get_lab_values(),
             'scales': list(visit.scale_responses.values('scale_id', 'scale_name_snapshot', 'responses_json')),
             'attachments': list(visit.attachments.values('id', 'original_filename', 'filepath', 'file_size')),
             'patient': {'id': visit.patient_id, 'name': visit.patient.get_full_name(),
                         'national_id': visit.patient.national_id, 'dob_year': visit.patient.dob_year,
-                        'gender': visit.patient.gender},
+                        'gender': visit.patient.gender, 'patient_number': visit.patient.patient_number},
+            'longitudinal': {
+                'allergy_status': visit.patient.allergy_status, 'medication_status': visit.patient.medication_status,
+                'allergies': list(visit.patient.patientallergy_records.filter(is_active=True).values()),
+                'medications': list(visit.patient.patientmedication_records.filter(is_active=True).values())},
             'clinician': {'id': actor.pk, 'name': actor.full_name or actor.username},
         }, cls=DjangoJSONEncoder, allow_nan=False))
         number = (visit.revisions.order_by('-number').values_list('number', flat=True).first() or 0) + 1
@@ -105,11 +120,13 @@ class VisitService:
         self._save_nested(visit, nested)
         if status == 'final':
             self._sign(visit, current_user)
+        from apps.patients.follow_up_services import sync_visit_follow_up
+        sync_visit_follow_up(visit, current_user)
         return visit
 
     @transaction.atomic
     def update_visit(self, visit, data, current_user, expected_version=None):
-        visit = Visit.all_objects.select_for_update().get(pk=visit.pk)
+        visit = lock_visit(visit.pk)
         check_mutation(visit, expected_version)
         if visit.status in {'final', 'locked'}:
             raise ValidationError({'status': ['افتح تعديلاً قبل تغيير الزيارة المعتمدة']})
@@ -137,11 +154,13 @@ class VisitService:
         self._save_nested(visit, nested)
         if status in {'final', 'locked'}:
             self._sign(visit, current_user)
+        from apps.patients.follow_up_services import sync_visit_follow_up
+        sync_visit_follow_up(visit, current_user)
         return visit
 
     @transaction.atomic
     def transition(self, visit, target_status, current_user, expected_version=None, reason=''):
-        visit = Visit.all_objects.select_for_update().get(pk=visit.pk)
+        visit = lock_visit(visit.pk)
         check_mutation(visit, expected_version)
         previous = visit.status
         if not enforce_transition('visit', previous, target_status):
@@ -178,16 +197,18 @@ class VisitService:
 
     @transaction.atomic
     def soft_delete_visit(self, visit, expected_version=None):
-        visit = Visit.all_objects.select_for_update().get(pk=visit.pk)
+        visit = lock_visit(visit.pk)
         check_mutation(visit, expected_version)
         if visit.status != 'draft':
             raise ValidationError({'status': ['السجلات المعتمدة تحفظ تاريخياً']})
         visit.soft_delete()
+        from apps.patients.follow_up_services import sync_visit_follow_up
+        sync_visit_follow_up(visit, None)
         return True
 
     @transaction.atomic
     def complete_follow_up(self, visit, actor, expected_version=None, outcome='completed'):
-        visit = Visit.all_objects.select_for_update().get(pk=visit.pk)
+        visit = lock_visit(visit.pk)
         check_mutation(visit, expected_version)
         if not visit.follow_up_date or outcome not in {'completed', 'missed', 'cancelled', 'waived'}:
             raise ValidationError({'follow_up': ['تاريخ ونتيجة متابعة صالحان مطلوبان']})
@@ -197,16 +218,32 @@ class VisitService:
         visit.follow_up_completed_by = actor
         visit.version += 1
         visit.save()
+        from apps.patients.follow_up_services import sync_visit_follow_up
+        sync_visit_follow_up(visit, actor)
         return visit
 
     @transaction.atomic
     def mark_all_overdue(self, user):
         from core.access import accessible_visits
-        visits = accessible_visits(user).select_for_update().filter(
-            follow_up_date__lt=timezone.localdate(), follow_up_outcome='pending').order_by('pk')
+        from apps.patients.follow_up_services import accessible_follow_ups
+        rows = accessible_follow_ups(user).filter(legacy_visit_follow_up=False,
+            due_date__lt=timezone.localdate(), status='pending')
+        visits = accessible_visits(user).filter(
+            follow_up_date__lt=timezone.localdate(), follow_up_outcome='pending')
+        patient_ids = set(rows.values_list('patient_id', flat=True)) | set(visits.values_list('patient_id', flat=True))
+        # Batch operations acquire all parent locks in the same order as merge.
+        list(Patient.all_objects.select_for_update().filter(pk__in=patient_ids).order_by('pk'))
+        visits = visits.filter(patient_id__in=patient_ids).select_for_update().order_by('pk')
         count = 0
         for visit in visits:
             self.complete_follow_up(visit, user, visit.version, 'missed')
+            count += 1
+        from apps.patients.record_services import PatientRecordService
+        rows = rows.filter(patient_id__in=patient_ids).order_by('patient_id', 'pk')
+        for action in rows:
+            patient = Patient.objects.select_for_update().get(pk=action.patient_id)
+            PatientRecordService().save(patient, 'follow-ups', {'status': 'missed', 'outcome_reason': 'Overdue review'},
+                user, patient.version, action.pk, reason='Explicit overdue review')
             count += 1
         return count
 
@@ -214,7 +251,7 @@ class VisitService:
 class VisitAttachmentService:
     @transaction.atomic
     def upload_attachment(self, visit, file, uploaded_by, expected_version=None):
-        visit = Visit.objects.select_for_update().get(pk=visit.pk)
+        visit = lock_visit(visit.pk)
         check_mutation(visit, expected_version)
         if visit.status not in {'draft', 'amended'}:
             raise ValidationError({'visit': ['افتح تعديلاً قبل إضافة مرفق إلى سجل معتمد']})
@@ -235,7 +272,7 @@ class VisitAttachmentService:
 
     @transaction.atomic
     def soft_delete_attachment(self, attachment, expected_version=None):
-        visit = Visit.objects.select_for_update().get(pk=attachment.visit_id)
+        visit = lock_visit(attachment.visit_id)
         check_mutation(visit, expected_version)
         if visit.status not in {'draft', 'amended'}:
             raise ValidationError({'visit': ['لا يمكن حذف مرفقات سجل معتمد']})

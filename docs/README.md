@@ -44,3 +44,5 @@ Clinic/
 3. Open a PR.
 
 Never commit `.env`, `data/`, `media/`, `backups/`, or `staticfiles/`.
+
+Patient record design: [schema, API, duplicates and retention](patient-record-schema.md).

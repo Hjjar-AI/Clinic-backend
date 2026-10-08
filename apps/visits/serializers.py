@@ -32,7 +32,7 @@ class PatientSummarySerializer(serializers.ModelSerializer):
         model = Patient
         fields = ['id', 'first_name', 'father_name', 'surname', 'mother_name',
                   'dob_year', 'gender', 'national_id', 'phone', 'permanent_address',
-                  'admission_date', 'doctor_id', 'created_by_id', 'full_name']
+                  'registration_date', 'patient_number', 'doctor_id', 'created_by_id', 'full_name']
 
     def get_full_name(self, obj):
         return obj.get_full_name()
@@ -69,7 +69,7 @@ class VisitSerializer(serializers.ModelSerializer):
             'status', 'status_reason', 'clinical_status', 'accompanied_by', 'companion_relation', 'follow_up_date',
             'follow_up_completed', 'pain_level', 'anxiety_level',
             'suicide_risk_level', 'violence_risk_level', 'firearm_access',
-            'level_of_care', 'follow_up_type', 'date_signed', 'signed_by',
+            'level_of_care', 'care_basis', 'follow_up_type', 'date_signed', 'signed_by',
             'supervisor', 'diagnosis_discussed', 'plan_discussed',
             'clinical_data', 'version', 'author',
             'created_at', 'updated_at', 'deleted_at',

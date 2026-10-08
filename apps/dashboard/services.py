@@ -56,16 +56,14 @@ class DashboardService:
         recent_patients = self._get_accessible_patients(user).order_by('-created_at')[:5]
         high_risk = self.stats.get_high_risk_patients(user, limit=20)
 
-        overdue_followups = visits_for_period.filter(
-            follow_up_date__lt=today,
-            follow_up_outcome='pending'
-        ).order_by('follow_up_date')[:50]
-
-        upcoming_followups = visits_for_period.filter(
-            follow_up_date__gte=today,
-            follow_up_date__lte=next_week,
-            follow_up_outcome='pending'
-        ).order_by('follow_up_date')[:50]
+        from apps.patients.follow_up_services import accessible_follow_ups
+        actions = accessible_follow_ups(user).select_related('patient', 'owner')
+        if date_from:
+            actions = actions.filter(due_date__gte=date_from)
+        if date_to:
+            actions = actions.filter(due_date__lte=date_to)
+        overdue_followups = actions.filter(due_date__lt=today, status='pending').order_by('due_date', 'pk')[:50]
+        upcoming_followups = actions.filter(due_date__gte=today, due_date__lte=next_week, status='pending').order_by('due_date', 'pk')[:50]
 
         pending_tasks = UserTask.objects.filter(
             Q(assigned_to=user) | Q(assigned_to__isnull=True),
@@ -105,8 +103,8 @@ class DashboardService:
             'total_patients': self.stats.get_total_patients(user),
             'total_visits': self.stats.get_total_visits(user, date_from, date_to),
             'recent_patients': self._serialize_patients(recent_patients),
-            'overdue_followups': self._serialize_visits(overdue_followups),
-            'upcoming_followups': self._serialize_visits(upcoming_followups),
+            'overdue_followups': self._serialize_follow_ups(overdue_followups),
+            'upcoming_followups': self._serialize_follow_ups(upcoming_followups),
             'pending_tasks': self._serialize_tasks(pending_tasks),
             'high_risk_patients': self._serialize_patients(high_risk),
             'upcoming_appointments': self._serialize_appointments(upcoming_appointments),
@@ -145,6 +143,11 @@ class DashboardService:
             '_meta': self._meta(date_from, date_to),
         }
 
+    def _serialize_follow_ups(self, qs):
+        return [{'id': row.pk, 'patient_id': row.patient_id, 'patient_name': row.patient.get_full_name(),
+                 'title': row.title, 'due_date': row.due_date, 'status': row.status,
+                 'owner_name': row.owner.full_name if row.owner else '', 'source_visit': row.source_visit_id} for row in qs]
+
     def _serialize_patients(self, qs):
         return [{
             'id': p.id,
@@ -156,8 +159,9 @@ class DashboardService:
             'gender': p.gender,
             'national_id': p.national_id,
             'phone': p.phone,
-            'admission_date': p.admission_date.isoformat() if p.admission_date else None,
-            'doctor_name': p.doctor.full_name if p.doctor else None,
+            'registration_date': p.registration_date.isoformat() if p.registration_date else None,
+            'patient_number': p.patient_number,
+            'care_team_names': [member.user.full_name or member.user.username for member in p.care_team.filter(ended_at__isnull=True).select_related('user')],
             'created_at': p.created_at.isoformat() if p.created_at else None,
         } for p in qs]
 

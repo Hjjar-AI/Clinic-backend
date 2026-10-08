@@ -26,8 +26,6 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         ('PHP', 'PHP'),
         ('Inpatient', 'Inpatient'),
         ('Residential', 'Residential'),
-        ('Voluntary', 'Voluntary'),
-        ('Involuntary', 'Involuntary'),
     ]
     FOLLOW_UP_TYPE_CHOICES = [
         ('In-person', 'In-person'),
@@ -40,10 +38,10 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         related_name='visits',
     )
     visit_date = models.DateField()
-    main_complaints = models.TextField(blank=True, null=True)
-    history_presenting_complaint = models.TextField(blank=True, null=True)
-    treatment_text = models.TextField(blank=True, null=True)
-    doctor_notes = models.TextField(blank=True, null=True)
+    main_complaints = models.TextField(blank=True, default='')
+    history_presenting_complaint = models.TextField(blank=True, default='')
+    treatment_text = models.TextField(blank=True, default='')
+    doctor_notes = models.TextField(blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     status_reason = models.CharField(max_length=500, blank=True, default='')
     clinical_status = models.CharField(max_length=100, blank=True, default='')
@@ -51,9 +49,9 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         max_length=20,
         choices=ACCOMPANIED_BY_CHOICES,
         blank=True,
-        null=True,
+        default='',
     )
-    companion_relation = models.CharField(max_length=100, blank=True, null=True)
+    companion_relation = models.CharField(max_length=100, blank=True, default='')
     follow_up_date = models.DateField(null=True, blank=True)
     follow_up_completed = models.BooleanField(default=False)
     pain_level = models.PositiveSmallIntegerField(
@@ -70,26 +68,27 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         max_length=20,
         choices=RISK_LEVEL_CHOICES,
         blank=True,
-        null=True,
+        default='',
     )
     violence_risk_level = models.CharField(
         max_length=20,
         choices=RISK_LEVEL_CHOICES,
         blank=True,
-        null=True,
+        default='',
     )
-    firearm_access = models.BooleanField(default=False)
+    firearm_access = models.BooleanField(null=True, blank=True, default=None)
+    care_basis = models.CharField(max_length=20, default='unknown', choices=[('unknown', 'Unknown'), ('voluntary', 'Voluntary'), ('involuntary', 'Involuntary')])
     level_of_care = models.CharField(
         max_length=50,
         choices=LEVEL_OF_CARE_CHOICES,
         blank=True,
-        null=True,
+        default='',
     )
     follow_up_type = models.CharField(
         max_length=30,
         choices=FOLLOW_UP_TYPE_CHOICES,
         blank=True,
-        null=True,
+        default='',
     )
     signed_at = models.DateTimeField(null=True, blank=True, editable=False)
     amendment_reason = models.CharField(max_length=500, blank=True, default='')
@@ -113,8 +112,8 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         null=True,
         related_name='supervised_visits',
     )
-    diagnosis_discussed = models.BooleanField(default=False)
-    plan_discussed = models.BooleanField(default=False)
+    diagnosis_discussed = models.BooleanField(null=True, blank=True, default=None)
+    plan_discussed = models.BooleanField(null=True, blank=True, default=None)
     clinical_data = models.JSONField(default=dict, blank=True)
     lab_values = models.JSONField(default=list, blank=True)
     version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
@@ -282,7 +281,7 @@ class VisitAttachment(SoftDeleteModel, TimeStampedModel):
     filepath = models.CharField(max_length=500)
     file_size = models.PositiveBigIntegerField(null=True, blank=True)
     checksum = models.CharField(max_length=64, blank=True, editable=False)
-    mime_type = models.CharField(max_length=100, blank=True, null=True)
+    mime_type = models.CharField(max_length=100, blank=True, default='')
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

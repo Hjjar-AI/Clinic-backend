@@ -55,7 +55,7 @@ class MedicationOption(SoftDeleteModel):
 
 class ClinicalScale(SoftDeleteModel, TimeStampedModel):
     name = models.CharField(max_length=200)
-    description = models.TextField(blank=True, null=True)
+    description = models.TextField(blank=True, default='')
 
     class Meta:
         constraints = [models.CheckConstraint(check=models.Q(version__gte=1), name='clinicalscale_version_positive')]
@@ -85,7 +85,7 @@ class ScaleField(SoftDeleteModel, TimeStampedModel):
     max_val = models.FloatField(default=10)
     step = models.FloatField(default=1, validators=[MinValueValidator(0.000001)])
     default = models.FloatField(default=0)
-    options = models.TextField(blank=True, null=True)
+    options = models.TextField(blank=True, default='')
     order = models.PositiveIntegerField(default=0)
 
     def clean(self):
@@ -131,7 +131,7 @@ class ScaleField(SoftDeleteModel, TimeStampedModel):
 
 class ClinicalNoteTemplate(SoftDeleteModel, TimeStampedModel):
     name = models.CharField(max_length=100)
-    description = models.TextField(blank=True, null=True)
+    description = models.TextField(blank=True, default='')
     category = models.CharField(max_length=50)
     content = models.JSONField(default=dict)
 

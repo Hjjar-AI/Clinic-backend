@@ -22,14 +22,15 @@ class PatientExportService(BaseExportService):
             'gender': ('الجنس', lambda p: p.gender or ''),
             'dob_year': ('سنة الميلاد', lambda p: str(p.dob_year or '')),
             'address': ('العنوان', lambda p: p.permanent_address or ''),
-            'admission_date': ('تاريخ الإضافة', lambda p: p.admission_date.strftime('%d/%m/%Y') if p.admission_date else ''),
-            'doctor': ('الطبيب المسؤول', lambda p: p.doctor.full_name if p.doctor else ''),
+            'registration_date': ('تاريخ الإضافة', lambda p: p.registration_date.strftime('%d/%m/%Y') if p.registration_date else ''),
+            'doctor': ('فريق الرعاية', lambda p: '، '.join(member.user.full_name or member.user.username for member in p.care_team.filter(ended_at__isnull=True).select_related('user'))),
+            'patient_number': ('رقم الملف', lambda p: p.patient_number),
             'completeness': ('اكتمال الملف', lambda p: f"{p.get_completeness()['percent']}%"),
         }
         if fields is not None and (not isinstance(fields, list) or not fields or any(f not in field_map for f in fields)):
             raise ValidationError({'fields': ['أعمدة غير صالحة']})
         if fields is None:
-            fields = ['full_name', 'national_id', 'phone', 'admission_date']
+            fields = ['full_name', 'national_id', 'phone', 'registration_date']
 
         output = io.StringIO()
         writer = csv.writer(output)
@@ -50,15 +51,16 @@ class PatientExportService(BaseExportService):
             'gender': ('الجنس', lambda p: p.gender or ''),
             'dob_year': ('سنة الميلاد', lambda p: p.dob_year or ''),
             'address': ('العنوان', lambda p: p.permanent_address or ''),
-            'admission_date': ('تاريخ الإضافة', lambda p: p.admission_date.strftime('%d/%m/%Y') if p.admission_date else ''),
-            'doctor': ('الطبيب المسؤول', lambda p: p.doctor.full_name if p.doctor else ''),
+            'registration_date': ('تاريخ الإضافة', lambda p: p.registration_date.strftime('%d/%m/%Y') if p.registration_date else ''),
+            'doctor': ('فريق الرعاية', lambda p: '، '.join(member.user.full_name or member.user.username for member in p.care_team.filter(ended_at__isnull=True).select_related('user'))),
+            'patient_number': ('رقم الملف', lambda p: p.patient_number),
             'completeness': ('اكتمال الملف', lambda p: f"{p.get_completeness()['percent']}%"),
         }
         if fields is not None and (not isinstance(fields, list) or not fields or any(f not in field_map for f in fields)):
             raise ValidationError({'fields': ['أعمدة غير صالحة']})
         fields = fields or []
         if not fields:
-            fields = ['full_name', 'national_id', 'phone', 'address', 'admission_date', 'doctor']
+            fields = ['full_name', 'national_id', 'phone', 'address', 'registration_date', 'doctor']
         wb = Workbook()
         ws = wb.active
         ws.title = 'المرضى'

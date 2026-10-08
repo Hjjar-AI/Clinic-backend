@@ -31,7 +31,7 @@ class Appointment(SoftDeleteModel, TimeStampedModel):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
     status_reason = models.CharField(max_length=500, blank=True, default='')
-    notes = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, default='')
     reminder_sent = models.BooleanField(default=False)
     reminder_sent_hour = models.BooleanField(default=False)
     version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])

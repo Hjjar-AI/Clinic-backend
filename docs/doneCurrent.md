@@ -2,6 +2,8 @@
 
 Updated: 2026-10-08.
 
+- Patient expansion: optional year-only birth, permanent numbers/nonblocking duplicate IDs and optional preview-bound merge, structured identifiers/contacts/representatives/allergies/ongoing medications/follow-ups, dated team history, document provenance, immutable corrections, tri-state clinical facts, configurable completeness; coordinated frontend/API/import/export/recovery. 89 isolated service/ORM/recovery assertions passed; pinned HTTP/browser/PostgreSQL checks pending. [Schema/retention](patient-record-schema.md), [verification](patient-record-verification.md).
+
 - Second backend review: strict versions, document/care-team access and writes, service validation, stable lock queries, fractional billing constraints, scale bounds, doctor lookup privacy, backup integrity/catalog merge; coordinated frontend versions/member fields. Passed 101 isolated backend assertions (system Django 5.2.9; missing integration boundaries excluded), 10 frontend version assertions and source syntax checks. Pinned HTTP/browser/PostgreSQL verification remains pending. See [second-pass record](backend-second-pass.md).
 
 - Enhanced/compacted both root agent guides: agreed limits, docs/handoff locations, review/fix workflow, verification boundaries, model/API and CSS/layout/RTL conventions.

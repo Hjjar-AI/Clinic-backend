@@ -14,7 +14,7 @@ class PrescriptionSignature(TimeStampedModel):
         related_name='prescription_signatures',
     )
     signature_data = models.TextField()
-    stamp_data = models.TextField(blank=True, null=True)
+    stamp_data = models.TextField(blank=True, default='')
 
 
 

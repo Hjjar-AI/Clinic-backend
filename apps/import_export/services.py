@@ -71,15 +71,15 @@ class BulkImportService:
     def _patient_kwargs(self, row, doctor_id, created_by_id):
         national_id = normalize_identifier(row.get('الرقم الوطني', ''))
         raw_date = (normalize_digits(row.get('تاريخ الإضافة', '')) or '').strip()
-        admission_date = None
+        registration_date = None
         if raw_date:
             for date_format in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%d/%m/%Y', '%d-%m-%Y'):
                 try:
-                    admission_date = datetime.strptime(raw_date, date_format).date()
+                    registration_date = datetime.strptime(raw_date, date_format).date()
                     break
                 except ValueError:
                     continue
-            if admission_date is None:
+            if registration_date is None:
                 raise ValueError('تاريخ الإضافة غير صالح')
         raw_dob_year = (normalize_digits(row.get('سنة الميلاد', '')) or '').strip()
         dob_year = int(raw_dob_year) if raw_dob_year else None
@@ -87,22 +87,22 @@ class BulkImportService:
             raise ValueError('سنة الميلاد غير صالحة')
         return {
             'first_name': normalize_name(row.get('الاسم الأول', '')),
-            'father_name': normalize_name(row.get('اسم الأب', '')) or None,
-            'surname': normalize_name(row.get('اللقب', '')) or None,
-            'mother_name': normalize_name(row.get('اسم الأم', '')) or None,
+            'father_name': normalize_name(row.get('اسم الأب', '')) or '',
+            'surname': normalize_name(row.get('اللقب', '')) or '',
+            'mother_name': normalize_name(row.get('اسم الأم', '')) or '',
             'dob_year': dob_year,
             'gender': row.get('الجنس', ''),
-            'national_id': national_id,
+            'national_id': national_id or '',
             'marital_status': row.get('الحالة الاجتماعية', ''),
             'occupation': row.get('المهنة', ''),
-            'phone': normalize_phone(row.get('الهاتف', '')),
+            'phone': normalize_phone(row.get('الهاتف', '')) or '',
             'permanent_address': row.get('العنوان', ''),
             'emergency_contact_name': row.get('جهة اتصال للطوارئ (الاسم)', ''),
             'emergency_contact_relation': row.get('صلة القرابة', ''),
-            'emergency_contact_phone': normalize_phone(row.get('هاتف جهة الاتصال', '')),
+            'emergency_contact_phone': normalize_phone(row.get('هاتف جهة الاتصال', '')) or '',
             'family_history': row.get('التاريخ العائلي', ''),
             'important_notes': row.get('ملاحظات هامة', ''),
-            'admission_date': admission_date,
+            'registration_date': registration_date,
             'doctor_id': doctor_id,
             'created_by_id': created_by_id,
         }
@@ -116,10 +116,8 @@ class BulkImportService:
             row = {k.strip(): v.strip() for k, v in source.items()}
             national_id = normalize_identifier(row.get('الرقم الوطني', ''))
             phone = normalize_phone(row.get('الهاتف', ''))
-            if national_id and (national_id in seen_ids or Patient.objects.filter(national_id=national_id).exists()):
-                results['skipped'] += 1
-                results['rows'].append({'row': idx+2, 'outcome': 'duplicate', 'reason': 'الرقم الوطني مكرر'})
-                continue
+            if national_id and (national_id in seen_ids or Patient.all_objects.filter(national_id=national_id).exists()):
+                results['warnings'].append(f'الصف {idx+2}: رقم هوية مشترك؛ سيضاف ملف مستقل دون تغيير الرقم')
             if phone and (phone in seen_phones or Patient.objects.filter(phone=phone).exists()):
                 results['warnings'].append(f'الصف {idx+2}: الهاتف مشترك مع مريض آخر؛ لن يتم حذف الصف')
             try:
@@ -130,7 +128,11 @@ class BulkImportService:
                 patient.full_clean()
                 if execute:
                     with transaction.atomic():
-                        patient.save()
+                        actor = User.objects.get(pk=created_by_id)
+                        target = User.objects.get(pk=doctor_id)
+                        data = {key: value for key, value in kwargs.items() if key not in {'doctor_id', 'created_by_id'}}
+                        data['care_team_ids'] = [target.pk]
+                        patient = PatientService().create_patient(data, actor)
                 results['added'] += 1
                 if national_id: seen_ids.add(national_id)
                 if phone: seen_phones.add(phone)

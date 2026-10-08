@@ -24,7 +24,7 @@
   <header>
     <h1>{{ clinic.name }}</h1>
     <div class="clinic-meta">{{ clinic.address }}{% if clinic.phone %} — {{ clinic.phone }}{% endif %}</div>
-    <div class="document-meta">تقرير مريض #{{ report_data.patient_id }} • {{ report_data.generated_at }} • {{ report_data.timezone }}</div>
+    <div class="document-meta">تقرير مريض {{ report_data.patient_number }} • {{ report_data.generated_at }} • {{ report_data.timezone }}</div>
   </header>
 
   <h2>بيانات المريض</h2>
@@ -34,13 +34,19 @@
     <div class="field"><span class="label">الجنس:</span> {{ report_data.gender }}</div>
     <div class="field"><span class="label">الرقم الوطني:</span> {{ report_data.national_id }}</div>
     <div class="field"><span class="label">الهاتف:</span> {{ report_data.phone }}</div>
-    <div class="field"><span class="label">تاريخ الإضافة:</span> {{ report_data.admission_date }}</div>
+    <div class="field"><span class="label">تاريخ التسجيل:</span> {{ report_data.registration_date }}</div>
     <div class="field"><span class="label">العنوان:</span> {{ report_data.address }}</div>
     <div class="field"><span class="label">جهة الطوارئ:</span> {{ report_data.emergency_contact }}</div>
   </div>
   <div class="field pre"><span class="label">التاريخ العائلي:</span> {{ report_data.family_history }}</div>
   <div class="field pre"><span class="label">تنبيهات مهمة:</span> {{ report_data.important_notes }}</div>
 
+  <h2>المعلومات المستمرة الحالية</h2>
+  <p>الحساسية: {{ report_data.allergy_status }} · الأدوية المستمرة: {{ report_data.medication_status }}</p>
+  {% for row in report_data.allergies %}<p>{{ row.substance }} — {{ row.reaction }} — {{ row.get_status_display }}</p>{% endfor %}
+  {% for row in report_data.ongoing_medications %}<p>{{ row.name }} — {{ row.dosage }} — {{ row.schedule }} — {{ row.get_status_display }}</p>{% endfor %}
+  {% for row in report_data.contacts %}<p>جهة اتصال: {{ row.name }} — {{ row.relationship }} — {{ row.phone }}</p>{% endfor %}
+  <p>القسم أعلاه يعرض المعلومات الحالية، وتبقى النسخ الموقعة والمستندات الصادرة محفوظة مستقلة.</p>
   <h2>الزيارات</h2>
   {% for visit in report_data.visits %}
     <section class="visit">

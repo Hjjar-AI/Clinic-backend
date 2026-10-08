@@ -10,9 +10,9 @@ def patient_scope(user):
         return Q(pk__in=[])
     if user.role == 'admin':
         return Q()
-    membership = Q(care_team__user=user)
+    membership = Q(care_team__user=user, care_team__ended_at__isnull=True)
     if user.role == 'doctor':
-        return Q(doctor=user) | Q(visits__author=user) | membership
+        return Q(visits__author=user) | membership
     if user.role == 'receptionist':
         return Q(created_by=user) | membership
     return Q(pk__in=[])

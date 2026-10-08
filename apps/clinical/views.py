@@ -139,9 +139,9 @@ class ClinicalConstantsView(APIView):
                 'suicide_risk_levels': ['Low', 'Moderate', 'High'],
                 'violence_risk_levels': ['Low', 'Moderate', 'High'],
                 'level_of_care': [
-                    'Outpatient', 'IOP', 'PHP', 'Inpatient', 'Residential',
-                    'Voluntary', 'Involuntary'
+                    'Outpatient', 'IOP', 'PHP', 'Inpatient', 'Residential'
                 ],
+                'care_basis': ['unknown', 'voluntary', 'involuntary'],
                 'follow_up_type': ['In-person', 'Telehealth', 'Phone'],
                 'marital_status_male': ['أعزب', 'متزوج', 'مطلق', 'أرمل'],
                 'marital_status_female': ['عزباء', 'متزوجة', 'مطلقة', 'أرملة'],

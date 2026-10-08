@@ -2,9 +2,24 @@ from django.db import models
 from django.core.validators import MinValueValidator
 from django.utils import timezone
 
+def normalize_optional_text(instance):
+    # Missing text has one representation; dates, numbers, booleans and relations keep NULL.
+    for field in instance._meta.concrete_fields:
+        if isinstance(field, (models.CharField, models.TextField)) and field.blank and not field.null and getattr(instance, field.name) is None:
+            setattr(instance, field.name, '')
+
+
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        normalize_optional_text(self)
+        return super().save(*args, **kwargs)
+
+    def clean_fields(self, exclude=None):
+        normalize_optional_text(self)
+        return super().clean_fields(exclude=exclude)
 
     class Meta:
         abstract = True
@@ -26,6 +41,14 @@ class SoftDeleteModel(models.Model):
 
     class Meta:
         abstract = True
+
+    def save(self, *args, **kwargs):
+        normalize_optional_text(self)
+        return super().save(*args, **kwargs)
+
+    def clean_fields(self, exclude=None):
+        normalize_optional_text(self)
+        return super().clean_fields(exclude=exclude)
 
     def soft_delete(self, actor=None, reason=''):
         from .request_context import get_current_request

@@ -43,13 +43,13 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     status_reason = models.CharField(max_length=500, blank=True, default='')
-    payment_method = models.CharField(max_length=30, blank=True, null=True, choices=[
+    payment_method = models.CharField(max_length=30, blank=True, default='', choices=[
         ('cash', 'Cash'), ('card', 'Card'), ('bank_transfer', 'Bank transfer'),
         ('insurance', 'Insurance'), ('other', 'Other'),
     ])
     issued_date = models.DateField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
-    notes = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, default='')
     currency = models.CharField(max_length=3, default='SYP')
     issue_snapshot = models.JSONField(default=dict, blank=True, editable=False)
     paid_at = models.DateTimeField(null=True, blank=True, editable=False)

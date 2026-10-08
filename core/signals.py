@@ -18,11 +18,13 @@ AUDIT_MODELS = [
     'Patient', 'Visit', 'Appointment', 'Invoice', 'UserTask',
     'ClinicalScale', 'DiagnosisOption', 'MedicationOption', 'ClinicalNoteTemplate',
     'PatientDocument', 'VisitAttachment', 'ClinicSetting', 'User',
+    'PatientCareTeam', 'PatientIdentifier', 'PatientContact', 'PatientRepresentative', 'PatientAllergy',
+    'PatientMedication', 'PatientFollowUp', 'PatientCorrection', 'PatientMerge', 'PatientDuplicateReview',
 ]
 
 AUDIT_FIELDS = {
     'Patient': ['first_name', 'father_name', 'surname', 'dob_year', 'gender', 'national_id',
-                'phone', 'doctor_id', 'admission_date', 'is_active', 'deleted_at'],
+                'phone', 'doctor_id', 'registration_date', 'identity_verification', 'allergy_status', 'medication_status', 'is_active', 'deleted_at'],
     'Visit': ['visit_date', 'status', 'status_reason', 'follow_up_date', 'follow_up_completed',
               'follow_up_outcome', 'follow_up_completed_at', 'follow_up_completed_by_id',
               'suicide_risk_level', 'violence_risk_level', 'signed_by_id', 'signed_at', 'version',
@@ -41,7 +43,7 @@ AUDIT_FIELDS = {
                          'is_active', 'deleted_at'],
     'ClinicalScale': ['name', 'is_active', 'deleted_at'],
     'ClinicalNoteTemplate': ['name', 'category', 'is_active', 'deleted_at'],
-    'PatientDocument': ['original_filename', 'category', 'version', 'is_active', 'deleted_at'],
+    'PatientDocument': ['original_filename', 'category', 'document_date', 'source', 'provider', 'verification', 'verified_at', 'verified_by_id', 'version', 'is_active', 'deleted_at'],
     'VisitAttachment': ['original_filename', 'is_active', 'deleted_at'],
 }
 

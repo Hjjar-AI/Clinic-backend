@@ -1,0 +1,14 @@
+# Patient expansion: implementation and verification
+
+2026-10-08. Implemented accepted [patient schema/workflows](patient-record-schema.md) in models/services/API/imports/exports/recovery and Arabic patient forms/tabs, team history, duplicate review/merge, documents, correction history, clinical unknowns, dashboard/report follow-ups and completeness settings. See [completed plan](patient-record-expansion-plan.md).
+
+Decisions: year-only birth remains nullable; clinic registration replaces admission terminology; dated team membership governs assignment; official IDs stay unchanged across duplicates, distinguished by permanent patient numbers; warnings dismissible and merge optional. Compatibility primary ID/doctor/emergency fields and admission-date alias remain for existing consumers; new interfaces use structured registers/team/registration. Signed revisions/issued documents remain immutable.
+
+Verification uses standalone `/tmp` development probes, **not project test-suite files** or project data:
+
+- `/tmp/clinic_patient_expansion_probe.py`: 89 isolated assertions, 38 models created only in SQLite memory; system Django 5.2.9. Exercises duplicate active/archived IDs, permanent numbers, optional birth/completeness, team scope/history, correction reasons/versions, verification, structured records/retirement, same-patient links, clinical unknowns, multiple/legacy follow-ups, dashboard/reports/overdue review, optional reviews, stale/tampered/wrong-actor previews, merge preservation of signed revisions/issued bytes, document metadata, retained merged-source correction history, unchanged verified full-form submissions, and full authenticated ZIP preview/restore with new models/media.
+- Missing DRF/phone/MIME dependencies are excluded or replaced by bounded fail-closed stubs at integration boundaries. This is real ORM/service/in-memory recovery verification, **not pinned-dependency HTTP integration**.
+- Frontend standalone VM source checks: 23 JS/Vue scripts parsed; 196 import/schema/permission/version/duplicate-flow assertions; 20 Vue template structures checked; 10 API version-registry assertions passed. 28 changed backend Python sources parsed via AST. CSS audit: 96 files and 16 theme combinations passed; no new static inline styles. Changed-document local links resolve. These checks do not compile/build the app.
+- Source review corrected patient-before-visit lock order and preserved explicit merge adjustments; no PostgreSQL stress/concurrency execution.
+
+Remaining verification: pinned Django/DRF API validation/serialization, authenticated browser forms and stale conflicts, mobile/RTL/light-dark rendering, PDF/Arabic output, real PostgreSQL concurrency. No migrations/test-suite inspection or changes, builds/compilation/packaging, dependency/version changes, or project DB initialization/seeding/restore. Fresh schema preparation remains a separately authorized operation.

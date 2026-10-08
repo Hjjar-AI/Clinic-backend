@@ -1,14 +1,12 @@
-# File 6 of 8: `docs/05-operations.md`
-
 # Operations
 
-Day-to-day running of a deployed MyClinic instance: backups, restore, scheduler, monitoring.
+Deployed operations: backups, restore, scheduler, monitoring.
 
 ## Backups
 
 ### What gets backed up
 
-`python manage.py auto_backup` produces a signed ZIP in `backend/backups/` named `clinic_backup_YYYYMMDD_HHMMSS.zip`. Contents:
+`python manage.py auto_backup`: signed `clinic_backup_YYYYMMDD_HHMMSS.zip` in `backend/backups/`; historical inventory:
 
 | Entry | Description |
 |---|---|
@@ -17,7 +15,7 @@ Day-to-day running of a deployed MyClinic instance: backups, restore, scheduler,
 | `media/*` | Every uploaded file under `MEDIA_ROOT` |
 | `signature.txt` | HMAC-SHA256 of `backup.json`, using `BACKUP_HMAC_KEY` |
 
-The HMAC means tampered backups fail signature verification on restore.
+Restore rejects HMAC-tampered backups.
 
 ### Trigger a backup
 
@@ -30,14 +28,14 @@ python manage.py auto_backup
 
 ### Backup retention
 
-The retention policy in `apps/backup/retention.py`:
+`apps/backup/retention.py` policy:
 
-- Keep **every** backup from the last `BACKUP_SAFETY_DAYS` days.
-- Keep **one per ISO week** for the next `BACKUP_WEEKLY_DAYS` days.
-- Keep **one per calendar month** for the next `BACKUP_MONTHLY_DAYS` days.
-- Keep **one per year** beyond that, forever.
+- Keep **all** backups for `BACKUP_SAFETY_DAYS` days.
+- Then **one/ISO week** for `BACKUP_WEEKLY_DAYS` days.
+- Then **one/calendar month** for `BACKUP_MONTHLY_DAYS` days.
+- Then **one/year**, forever.
 
-Adjust via `.env`. Sweep:
+Configure `.env`; sweep:
 
 ```bash
 python manage.py cleanup_backups
@@ -47,7 +45,7 @@ python manage.py cleanup_backups --dir /custom/path
 
 ### Off-site sync
 
-Backups on the same filesystem as the database are not backups. Options:
+Same-filesystem copies do not provide disaster recovery. Off-site options:
 
 ```bash
 # rsync to a remote host
@@ -57,11 +55,11 @@ rsync -a --delete /srv/myclinic/backend/backups/ backup-host:/srv/backups/myclin
 rclone sync /srv/myclinic/backend/backups/ remote:myclinic-backups
 ```
 
-Schedule via cron. See `04-deployment.md#scheduled-tasks`.
+Cron scheduling: `04-deployment.md#scheduled-tasks`.
 
 ### Restore
 
-Two-step via the API, or one-shot via `manage.py`.
+Historical API two-step/manual `manage.py` options below; no dedicated CLI restore.
 
 #### Via the API
 
@@ -72,11 +70,11 @@ Two-step via the API, or one-shot via `manage.py`.
    - `restore_medications=true`
    - `confirm_clear=true` — **required**. Without it, the endpoint returns 400.
 
-`confirm_clear=true` **deletes all existing data** before restoring. Do not run this against a live database.
+`confirm_clear=true` **deletes existing data** before restore; never run against a live database.
 
 #### Destructive restores from the CLI
 
-There is no CLI restore command today. The service (`apps.backup.backup_restore.BackupRestoreService`) is designed for the API. For CLI use, write a one-off management command or shell:
+API service `apps.backup.backup_restore.BackupRestoreService` has no dedicated CLI command; historical one-off command/shell example:
 
 ```bash
 python manage.py shell
@@ -106,18 +104,18 @@ print('valid' if BackupValidationService().verify_signature(raw, sig) else 'INVA
 python manage.py run_scheduler
 ```
 
-Loops forever, calling every `SCHEDULER_INTERVAL_HOURS`:
+Loops every `SCHEDULER_INTERVAL_HOURS`, indefinitely:
 
 1. `send_appointment_reminders`
 2. `send_task_reminders`
 3. `auto_backup`
 4. `cleanup_backups`
 
-Failures in one command don't stop the others.
+Command failures do not stop others.
 
 ### Production
 
-Do **not** run `run_scheduler`. Use cron or systemd timers, one entry per command. See `04-deployment.md#scheduled-tasks`.
+Use separate cron/systemd timers, **not** `run_scheduler`: `04-deployment.md#scheduled-tasks`.
 
 ### What each command does
 
@@ -144,7 +142,7 @@ GET /api/v1/system/health/full/
 → {"data": {"status": "ok", "database": "ok", "maintenance": false}}
 ```
 
-Point UptimeRobot, Pingdom, or a Nagios check at this URL. Alert if the response is not 200 or if `status != "ok"`.
+UptimeRobot/Pingdom/Nagios: alert for non-200 or `status != "ok"`.
 
 ### Logs
 
@@ -152,17 +150,17 @@ Point UptimeRobot, Pingdom, or a Nagios check at this URL. Alert if the response
 - **Nginx:** `/var/log/nginx/access.log`, `/var/log/nginx/error.log`
 - **Django app logs:** same as Gunicorn (stdout) by default, level `INFO`
 
-To persist Django logs separately, add a file handler to `LOGGING` in `config/settings/base.py`.
+Separate logs: add `LOGGING` file handler in `config/settings/base.py`.
 
 ### Audit log
 
-Every model change listed in `core/signals.py::AUDIT_MODELS` is recorded in `core.AuditLog` with user, IP, action, and entity. Query via:
+`core/signals.py::AUDIT_MODELS` changes enter `core.AuditLog` with user/IP/action/entity; query:
 
 ```
 GET /api/v1/audit-logs/
 ```
 
-Admins see everything; other users see only their own entries.
+Admins see all; others only their entries.
 
 ### Periodic checks
 
@@ -177,7 +175,7 @@ Admins see everything; other users see only their own entries.
 
 ## Cache
 
-Memcached on `127.0.0.1:11211`. Clear the cache if you suspect stale data:
+Memcached: `127.0.0.1:11211`; suspected-stale cache clearing:
 
 ```bash
 python manage.py shell -c "from django.core.cache import cache; cache.clear()"
@@ -189,11 +187,11 @@ Or via the API (admin only):
 POST /api/v1/system/cache/clear/
 ```
 
-Do **not** clear cache during business hours — every request will hit the database until the cache warms.
+Avoid business-hours clears: requests hit DB until cache warms.
 
 ## Session management
 
-Sessions live in `django_session` (DB). To force every user to re-login, rotate a key or set `session_revoked_at` on the user:
+DB sessions: `django_session`. Force re-login by key rotation or user `session_revoked_at`:
 
 ```python
 # In shell
@@ -202,7 +200,7 @@ from apps.accounts.models import User
 User.objects.all().update(session_revoked_at=timezone.now())
 ```
 
-Every in-flight session becomes invalid on the next request (enforced by `core.middleware.SessionRevocationMiddleware`).
+`core.middleware.SessionRevocationMiddleware` invalidates in-flight sessions on next request.
 
 ## Useful one-liners
 
@@ -224,5 +222,3 @@ python manage.py reset_admin_password --username admin
 
 - Troubleshooting → `06-troubleshooting.md`
 - Reference → `07-reference.md`
-
----

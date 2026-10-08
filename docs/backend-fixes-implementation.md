@@ -1,6 +1,6 @@
 # Backend review fixes — implementation record
 
-Completed 2026-10-07 for the 27 findings in [the original review](backend-models-logic-review.md).
+Completed 2026-10-07: all 27 [original review](backend-models-logic-review.md) findings.
 
 ## Changes by finding
 
@@ -32,29 +32,29 @@ Completed 2026-10-07 for the 27 findings in [the original review](backend-models
 
 ## Deliberate behavior and API contracts
 
-- Clinical revisions and issued documents reject ordinary ORM instance and QuerySet changes/deletion. The validated full-recovery loader is an explicit exception using raw serialization/database operations.
-- Doctors retain patient scope through authored visits; care-team membership grants record scope. Endpoint action permissions remain required. Existing receptionist default permissions remain unchanged.
-- Prescriptions and referrals require a final/locked visit with a signed revision. Opening an amendment blocks issuance until re-signing. Prescription previews are bound to visit, patient version and template.
-- Mutations accept an observed `version`, or `If-Match` where provided by the shared parser. Frontend editors preserve their opening version; action calls can use the last observed resource version.
-- `GET /visits/<id>/revisions/` and `GET /visits/<id>/issued-documents/` expose authorized history without mutation endpoints.
-- Patient archive/restore are explicit POST actions. Archive preserves linked records. Pseudonymization retains signed identity snapshots, narratives, audit history and historical access.
-- Follow-up `completed`, `missed`, `cancelled`, and `waived` outcomes are distinct. Bulk overdue closure means missed; cancelled/waived follow-ups do not count as completed adherence.
-- Billing supports a single full payment. Currency defaults to SYP; amounts use two decimal places with half-up rounding. Partial payments, refunds and credit-note workflows were not inferred as requirements.
-- Scheduling retains the existing working-hour policy. Historical dates remain allowed; completed appointments cannot move; arrived appointments follow the existing editable-schedule rule.
-- Restore preview binds file digest and selected scope. Full patient recovery requires the entire related dataset and revokes sessions. Catalog-only recovery preserves clinical records and current users.
-- Full ZIP is the portable recovery artifact. JSON contains all logical records but no file bytes; full recovery rejects missing referenced files. Incomplete legacy backup schemas are rejected before mutation rather than risking partial recovery. The installation must retain its backup HMAC key.
-- Imports explicitly support CSV UTF-8 and XLSX. Formula cells must be converted to values. Invalid/empty replacement files cannot retire the catalog.
+- Clinical revisions/issued documents reject ordinary ORM/QuerySet changes/deletion; validated full recovery explicitly uses raw serialization/database operations.
+- Authored visits retain doctor patient scope; care teams grant record scope; action permissions remain required. Receptionist defaults unchanged.
+- Prescriptions/referrals require final/locked signed revisions; open amendments block issuance until re-signing. Prescription previews bind visit/patient version/template.
+- Mutations use observed `version`/shared-parser `If-Match`; editors keep opening versions, actions may use last-observed versions.
+- Authorized read-only history: `GET /visits/<id>/revisions/`, `GET /visits/<id>/issued-documents/`; no mutation endpoints.
+- Patient archive/restore: explicit POST; archive preserves linked records. Pseudonymization retains signed identities/narratives/audit/historical access.
+- Follow-ups distinguish `completed`/`missed`/`cancelled`/`waived`; bulk overdue closure means missed, cancelled/waived never count as completed adherence.
+- Billing: single full payment, default SYP, two-decimal half-up rounding; partial payments/refunds/credit notes were not inferred requirements.
+- Existing working-hour/arrived-edit policies retained; historical dates allowed, completed appointments cannot move.
+- Restore previews bind digest/scope. Full patient recovery requires complete related data/revokes sessions; catalog recovery preserves clinical records/current users.
+- Portable recovery: full ZIP. JSON has all logical records, no bytes; full recovery rejects missing referenced files. Reject incomplete legacy schemas before mutation; retain installation HMAC key.
+- Imports: UTF-8 CSV/XLSX; convert formulas to values. Invalid/empty replacements cannot retire catalogs.
 
 ## Verification
 
-All checks used temporary scripts and a new in-memory SQLite schema created directly with Django's schema editor. No project database was opened, migrated, cleared or populated.
+Checks used temporary scripts/new in-memory SQLite via Django schema editor; no project DB opening/migration/clearing/population.
 
 - Python source syntax and Django model system checks passed, excluding migration and test-suite paths.
-- Verification passed against the project's pinned Django 5.0.6 and DRF 3.15.1, installed only under `/tmp`. Project requirements and dependency versions were unchanged.
+- Verified pinned Django 5.0.6/DRF 3.15.1 installed only in `/tmp`; project requirements/versions unchanged.
 - Real HTTP checks with CSRF and `ATOMIC_REQUESTS` enabled passed: login CSRF, persistent failed counters, forced-password gate, idempotent success replay, request digest conflicts, stale-write conflicts, catalog If-Match, settings, JSON backup and multipart replay across different boundaries.
 - Persistence probes passed: visit signing/amendment history, catalog snapshot stability, finite/off-step/retired scale rejection, pending/null lab behavior, structured JSON, attachment verified metadata and signed-state guards, follow-up outcomes, care-team scope, appointment filters/duration alias and after-commit cache generations.
 - JSON and full ZIP round trips passed with invoice lines/payments, revisions, media, authentication group/permission memberships and exact issued-document bytes. Modified archive media was rejected.
 - Import preview/execution parity, shared phone handling, empty replacement protection and explicit old date ranges with zero-filled months passed.
 - Parser-only JavaScript checks passed for changed JS/Vue script sections. No frontend build or compilation was run.
 
-Material validation limits: PDF layout/rendering, browser interaction and PostgreSQL/concurrent-writer behavior were not exercised. The runtime available for probes was Python 3.14; these probes do not establish compatibility for every pinned dependency on that interpreter. Migration generation and schema application remain outside this task, as requested.
+Unverified: PDF layout/rendering, browser interaction, PostgreSQL/concurrent writers. Probe runtime: Python 3.14; not proof every pinned dependency supports it. Migration generation/schema application remain excluded as requested.

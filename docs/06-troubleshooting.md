@@ -1,12 +1,10 @@
-# File 7 of 8: `docs/06-troubleshooting.md`
-
 # Troubleshooting
 
 ## Startup
 
 ### `RuntimeError: DJANGO_SECRET_KEY is not set`
 
-`config/settings/base.py` raises this when `DJANGO_DEBUG=false` and `DJANGO_SECRET_KEY` is blank. Generate one and put it in `.env`:
+`config/settings/base.py`: blank `DJANGO_SECRET_KEY` with `DJANGO_DEBUG=false`; generate into `.env`:
 
 ```bash
 python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
@@ -29,7 +27,7 @@ mkdir -p data backups media
 
 ### `ModuleNotFoundError: No module named 'magic'`
 
-`python-magic` is installed but the system library `libmagic` isn't.
+Installed `python-magic` lacks system `libmagic`:
 
 ```bash
 sudo apt install libmagic1     # Debian/Ubuntu
@@ -47,7 +45,7 @@ sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 
 
 ### `django.db.utils.OperationalError: no such table: core_auditlog`
 
-You ran `seed_db` before `migrate`. Re-run in order:
+`seed_db` preceded `migrate`; authorized repair order:
 
 ```bash
 python manage.py makemigrations
@@ -55,19 +53,19 @@ python manage.py migrate
 python manage.py seed_db
 ```
 
-Or simply use `python manage.py bootstrap`.
+Alternative: authorized `python manage.py bootstrap`.
 
 ## Runtime
 
 ### Requests hang for a few seconds then fail
 
-Likely memcached is not running. Check:
+Check likely stopped memcached:
 
 ```bash
 echo stats | nc 127.0.0.1 11211
 ```
 
-If empty, start it:
+If empty, start:
 
 ```bash
 sudo systemctl start memcached
@@ -77,11 +75,11 @@ Or switch to LocMemCache per `03-configuration.md#cache`.
 
 ### 500 with `AttributeError: 'NoneType' object has no attribute ...` in logs
 
-Usually a template trying to access a relation that's null. Check the traceback against the models — most likely a `patient.doctor` or `visit.author` that is `None`.
+Trace template null relations against models, especially `patient.doctor`/`visit.author` = `None`.
 
 ### Login returns "بيانات الاعتماد غير صحيحة" for a known-good password
 
-The account is probably locked. Check:
+Check likely account lock:
 
 ```bash
 python manage.py shell -c "
@@ -103,29 +101,29 @@ User.objects.filter(username='<username>').update(failed_login_attempts=0, locke
 
 ### PDF download returns 503
 
-WeasyPrint failed. Check the Gunicorn log for a Python traceback. Common causes:
+WeasyPrint failure: inspect Gunicorn traceback. Causes:
 
 - Missing system library (see Startup above)
 - Font not installed for Arabic glyphs
 - HTML template renders a value that isn't a string
 
-Fallback: `core/pdf_utils.render_pdf_from_html` logs the exception and returns `None`, which the view turns into a 503.
+`core/pdf_utils.render_pdf_from_html` logs exceptions/returns `None`; view emits 503.
 
 ### Frontend can't reach the API
 
 1. Check the backend is up: `curl http://localhost:5019/api/v1/system/health/`
-2. Check the Vite proxy target in `frontend/vite.config.js` matches the backend port.
-3. Check `CORS_ORIGINS` in `.env` includes the frontend origin **exactly** (no trailing slash, matching scheme/host/port).
+2. Match `frontend/vite.config.js` proxy/backend port.
+3. `.env` `CORS_ORIGINS`: exact frontend scheme/host/port, no trailing slash.
 
 ### CORS preflight fails
 
-Same as above — CORS origins must be an exact string match. `http://localhost:5173` and `http://127.0.0.1:5173` are different origins even though they point to the same machine.
+Exact CORS match required: `http://localhost:5173` ≠ `http://127.0.0.1:5173`, despite same machine.
 
 ## Data
 
 ### `IntegrityError: UNIQUE constraint failed: patients_patient.national_id`
 
-A patient with that national ID already exists (soft-deleted patients don't count — the constraint is conditional on `deleted_at IS NULL`). Search including deleted:
+Existing national ID; conditional `deleted_at IS NULL` excludes soft-deleted patients. Search including deleted:
 
 ```bash
 python manage.py shell -c "
@@ -136,7 +134,7 @@ Patient.all_objects.filter(national_id='<id>')
 
 ### Restore deleted patients
 
-There's no API for this. In shell:
+Historical guide had no restore API; shell example:
 
 ```bash
 python manage.py shell -c "
@@ -148,11 +146,11 @@ p.save(update_fields=['deleted_at', 'is_active'])
 "
 ```
 
-Related visits, attachments, and appointments were also soft-deleted during the patient's deletion. Restore them individually.
+Related visits/attachments/appointments were also soft-deleted; restore individually.
 
 ### Backup fails signature check on restore
 
-The backup was tampered with, truncated, or the `BACKUP_HMAC_KEY` was rotated after the backup was created. If the key was rotated intentionally, the old backups cannot be restored — they are permanently invalid. Restore from the last backup made with the current key.
+Possible tampering/truncation or post-backup `BACKUP_HMAC_KEY` rotation. Historical guide treats old-key backups as permanently invalid; use latest current-key backup.
 
 ## Development
 
@@ -164,11 +162,11 @@ Something else is on 5019:
 lsof -i :5019
 ```
 
-Kill it or run on a different port (update the Vite proxy if you do).
+Stop it or change port/update Vite proxy.
 
 ### Changes to `base.py` don't take effect
 
-`runserver` reloads on `.py` changes, but not on `.env` changes. `.env` is read at process start. Restart the server.
+`runserver` reloads `.py`, not startup-read `.env`; restart for env changes.
 
 ### Migrations say "No changes detected" but I added a model
 
@@ -178,7 +176,7 @@ Kill it or run on a different port (update the Vite proxy if you do).
 
 ### `--clean` leaves stale migrations behind
 
-`--clean` deletes migration files but not `.pyc` caches. `bootstrap.py` deletes `__pycache__` after removing files. If you did it manually:
+`--clean` removes migrations, not `.pyc`; `bootstrap.py` also deletes `__pycache__`. Historical manual cleanup:
 
 ```bash
 find . -path '*/migrations/__pycache__' -exec rm -rf {} +
@@ -186,18 +184,16 @@ find . -path '*/migrations/__pycache__' -exec rm -rf {} +
 
 ## No tests
 
-There is currently no test suite. If you add one, look at the highest-risk areas first:
+Historical guide recorded no suite; authorized test work should prioritize:
 
-- `apps/backup/backup_restore.py` — destructive; the code's own comments note a past bug here.
-- Optimistic locking (`version` fields on Patient, Visit, Appointment, Invoice, UserTask).
+- `apps/backup/backup_restore.py` — destructive, comments note past bug.
+- Optimistic `version` locking: Patient/Visit/Appointment/Invoice/UserTask.
 - Role-based queryset scoping (each `get_queryset` / `list_*` service).
 - Permission cache invalidation in `apps/accounts/signals.py`.
 
 ## Still stuck?
 
-1. Check the full traceback in `journalctl -u myclinic -n 200` (prod) or the terminal (dev).
+1. Full traceback: `journalctl -u myclinic -n 200` (prod), terminal (dev).
 2. `python manage.py check --deploy` for configuration issues.
 3. `curl -v http://localhost:5019/api/v1/system/health/` to isolate app vs. proxy problems.
-4. Check the `core_auditlog` table for the last actions a user took before the failure.
-
----
+4. Check pre-failure user actions in `core_auditlog`.

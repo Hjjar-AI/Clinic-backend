@@ -2,15 +2,15 @@
 
 Reviewed: 2026-10-07.
 
-**Implementation status:** the findings below are the original review record. The authorized fixes have now been implemented; see [implementation details, decisions, and verification](backend-fixes-implementation.md). The original verification limitations at the end describe the review pass, not the subsequent fix pass.
+**Historical review; fixes implemented.** See [implementation details, decisions, and verification](backend-fixes-implementation.md). Limitations below concern this review, not later fixes.
 
- Scope: application models, services, serializers, views, permissions, audit, reporting, imports, reminders, and backup/restore.
+Scope: models, services, serializers, views, permissions, audit, reporting, imports, reminders, backup/restore.
 
-No migration files or test-suite files were inspected or changed. No builds, packaging, dependency/version changes, or compilation tasks were run. This pass adds this report; the implementation fixes listed below were made in the earlier pass and are present in the current checkout. The current Git baseline already contains those fixes.
+Report-only pass: no migration/test-suite access, builds/packaging/compilation, or dependency/version changes. Earlier implementation fixes listed below were already in the checkout/Git baseline.
 
 ## Assessment and recommended order
 
-The app has a useful service layer, explicit lifecycle definitions, optimistic version fields, decimal invoice calculations, scale-definition snapshots, and soft deletion. The highest priority is reliable recovery and preservation of signed clinical history. Starting with a fresh database makes structural improvements easier, but does not address these logic defects by itself.
+Strengths: service layer, explicit lifecycles, optimistic versions, decimal billing, scale snapshots, soft deletion. Prioritize recovery/signed history; a fresh database simplifies structural changes but does not fix logic defects.
 
 1. Repair backup/restore completeness, signatures, and validation.
 2. Preserve clinical revisions and issued documents; strengthen signing and nested-input validation.
@@ -18,7 +18,7 @@ The app has a useful service layer, explicit lifecycle definitions, optimistic v
 4. Make mutations, reminders, and cache publication consistent.
 5. Improve invoice structure, report definitions, and import previews.
 
-P0 = data-loss/recovery defect; P1 = significant integrity or access issue; P2 = correctness or maintainability improvement. Findings described as reproduced used isolated probes with stubbed persistence/dependencies, not full HTTP or production-database execution. Other findings come from tracing source paths; concurrency risks need confirmation on the intended database.
+P0: data loss/recovery; P1: integrity/access; P2: correctness/maintainability. Reproductions used isolated stubbed persistence/dependencies, not full HTTP/production DB. Others are source-traced; confirm concurrency on the intended database.
 
 ## Findings and concrete recommendations
 
@@ -26,221 +26,195 @@ P0 = data-loss/recovery defect; P1 = significant integrity or access issue; P2 =
 
 Evidence: [creator](../apps/backup/backup_creator.py#L137), [verifier](../apps/backup/backup_restore.py#L62).
 
-The creator signs the serialized inner data, then returns an envelope containing `signature` and `data`. The JSON restore verifier computes its HMAC over the complete envelope. These are different byte sequences. A probe calling the current creator and verifier reproduced `Backup signature verification failed` with an empty logical backup.
-
-Recommendation: sign and verify the same precisely specified payload bytes. Use one shared serialization/signing function, reject missing/invalid signatures, and define how existing archives are interpreted without silently trusting unsigned data. ZIP and standalone JSON must follow the same contract.
+- **Issue:** Creator signs inner serialized `data`, returning `signature`/`data`; verifier HMACs the whole envelope. An empty-backup probe reproduced `Backup signature verification failed`.
+- **Recommendation:** Share canonical signing/serialization bytes across JSON/ZIP; reject missing/invalid signatures and define legacy interpretation without trusting unsigned archives.
 
 ### 2. P0 — “Full” restore does not restore the full backup and deletes additional records
 
 Evidence: [restore implementation](../apps/backup/backup_restore.py#L128), [backup contents](../apps/backup/backup_creator.py#L188), [execute endpoint](../apps/backup/views.py#L84).
 
-Execution reads `backup.json` and rebuilds patients, visits, diagnoses, medications, visit attachments, and scale responses. It never restores the included `clinic.db` or media members. Deleting patients cascades into appointments, invoices, patient documents, care-team membership, and visit-linked prescription signatures. Those records are not recreated. On a clean environment, attachment database paths are restored without restoring their files. Preview only advertises replacement of four categories.
-
-Recommendation: make complete disaster recovery and selective logical import separate operations. A complete restore must restore all supported entities and media consistently. A selective restore must preserve unrelated records or explicitly include their removal in the preview. Do not report a successful full recovery from the current partial reconstruction.
+- **Issue:** `backup.json` reconstructs patients, visits, diagnoses, medications, attachments, scales, but ignores `clinic.db`/media. Patient cascades delete appointments, invoices, documents, care teams, prescription signatures without rebuilding them. Clean recovery restores file paths without bytes; preview mentions only four replacement categories.
+- **Recommendation:** Separate full disaster recovery from selective logical import. Full recovery restores all supported entities/media consistently; selective import preserves unrelated records or previews their removal. Partial reconstruction must not report full success.
 
 ### 3. P1 — Backup coverage, authenticity, and compatibility checks are incomplete
 
 Evidence: [JSON selection](../apps/backup/backup_creator.py#L137), [patient serialization](../apps/backup/backup_creator.py#L20), [preview](../apps/backup/backup_restore.py#L87).
 
-Logical backups exclude archived patients, archived visits/attachments, and retired catalog entries. They omit `Visit.lab_values` entirely. Patient/visit creation and modification times are serialized but not restored. Missing DOB becomes the fabricated year `1998`. Unknown visit statuses are treated as finalized. Preview computes compatibility but execution never rejects unsupported format versions. The ZIP signature authenticates `backup.json`, not the database, manifest, or media members.
-
-Recommendation: define an explicit backup inventory; include archived history, labs, original identifiers/timestamps, and every required entity. Restore missing DOB as unknown and reject unknown lifecycle values. Validate format, shape, lengths, cross-references, expanded archive size, and member checksums before mutation. Sign a manifest covering every member. Use a consistent database snapshot mechanism; direct copying after a WAL checkpoint can race with subsequent writes.
+- **Issue:** Backups omit archived patients/visits/attachments, retired catalogs, `Visit.lab_values`; timestamps serialize but do not restore. Unknown DOB becomes `1998`, unknown statuses become finalized; execution ignores unsupported versions. ZIP authenticates only `backup.json`, excluding database/manifest/media.
+- **Recommendation:** Inventory all entities/history/labs/original IDs/timestamps; preserve unknown DOB, reject unknown states. Before mutation validate format/shape/lengths/references/expanded size/checksums; sign every member via manifest. Use consistent database snapshots: post-WAL-checkpoint copying races with writes.
 
 ### 4. P1 — Clinical amendments overwrite signed history
 
 Evidence: [visit update](../apps/visits/services.py#L109), [nested replacements](../apps/visits/models.py#L184), [audited fields](../core/signals.py#L24).
 
-`final → amended` permits updates to the original visit. Diagnoses, medications, and scale responses are deleted and recreated. The audit snapshot records workflow/risk/version fields but not the main complaint, history, treatment, notes, clinical JSON, lab values, or full nested records. Therefore previous clinical content cannot be reconstructed reliably from this audit trail.
-
-Recommendation: add immutable `VisitRevision` snapshots at finalization and amendment completion, including scalar fields, diagnoses, medications, labs, scale definitions/answers, author, signer, date, and amendment reason. Keep optimistic `version` for concurrency and a separate revision number for history. Point generated clinical documents at a finalized revision.
+- **Issue:** `final → amended` overwrites the visit and replaces diagnoses/medications/scales. Audit retains workflow/risk/version, excluding complaint/history/treatment/notes/clinical JSON/labs/full nested data; previous clinical content is unrecoverable.
+- **Recommendation:** Snapshot immutable `VisitRevision` at finalization/amendment completion: scalars, diagnoses, medications, labs, scale definitions/answers, author/signer/date/reason. Separate optimistic `version` from history revision number; documents reference finalized revisions.
 
 ### 5. P1 — Signing and document issuance need a stronger contract
 
 Evidence: [visit serializer](../apps/visits/serializers.py#L39), [visit transitions](../apps/visits/services.py#L177), [prescription service](../apps/prescriptions/services.py#L22), [signature storage](../apps/prescriptions/services.py#L122), [referrals](../apps/referrals/views.py#L13).
 
-Clients can supply another active user's `signed_by_id` and a manual signing date. Finalization does not set signer/date from the authenticated actor. Prescriptions and referrals allow any non-draft status, including a visit currently being amended. Signature storage updates one row per user/visit, overwriting earlier signatures; neither the exact issued PDF nor its complete immutable issuance record is retained. Referral reason is supplied in a GET query string, which can enter browser/proxy logs.
-
-Recommendation: authorize signing explicitly, set signer and signed timestamp on the server, and generate documents from a specified finalized revision. Add append-only `IssuedDocument` records with actor, revision, snapshot, checksum, generated time, signature/stamp, and optional stored PDF. Use POST for referral issuance and place the reason in its body.
+- **Issue:** Clients choose another active user's `signed_by_id`/manual date; finalization does not derive signer/time from actor. Any non-draft visit—including amendments—can issue. Per-user/visit signatures overwrite; exact PDF/complete issuance history is absent. GET referral reasons enter browser/proxy logs.
+- **Recommendation:** Authorize signing and set signer/time server-side. Issue from specified finalized revisions; append-only `IssuedDocument` stores actor/revision/snapshot/checksum/time/signature/stamp/optional PDF. Use POST body for referral reason.
 
 ### 6. P1 — Nested visit input is not validated as structured clinical data
 
 Evidence: [nested serializer fields](../apps/visits/serializers.py#L41), [diagnosis/medication setters](../apps/visits/models.py#L184), [clinical JSON use](../apps/exports/base.py#L67).
 
-The write fields are generic `ListField`s with no child serializers. Diagnosis and medication setters assume each row is a dictionary and trust foreign-key IDs and lengths. Invalid shapes can raise attribute errors; invalid references may fail at database constraint checking. Arbitrary `clinical_data` can be a list/string even though exports call `.get()` on it.
-
-Recommendation: add typed input serializers/normalizers for diagnosis and medication rows. Validate row counts, object shape, reference eligibility, field lengths, and custom-versus-catalog rules before deleting existing relations. Require a bounded object schema for clinical JSON. Reuse the same validation for imports and restore.
+- **Issue:** Generic `ListField`s lack child serializers; setters assume dictionaries and trust IDs/lengths, causing attribute/constraint errors. `clinical_data` permits list/string although exports call `.get()`.
+- **Recommendation:** Typed serializers/normalizers must validate counts, objects, eligible references, lengths, custom/catalog rules before replacing relations. Require bounded clinical JSON objects; share validation with imports/restore.
 
 ### 7. P1 — Null clinical fields can pass completeness validation
 
 Evidence: [lab normalizer](../apps/visits/lab_validation.py#L9), [finalization checks](../apps/visits/services.py#L35).
 
-The normalizers/checks use `str(value)`. JSON `null` becomes nonempty text `"None"`; final lab validation accepts null name and value when date/status are provided. This was reproduced. Medication completeness checks use the same pattern.
-
-Recommendation: handle null as missing, enforce expected primitive types, and reject oversized input instead of silently truncating clinical values. Distinguish pending labs from complete results rather than inventing values to satisfy finalization.
+- **Issue:** `str(value)` converts JSON `null` to nonempty `"None"`; lab finalization accepts null name/value with date/status (reproduced). Medication completeness uses the same pattern.
+- **Recommendation:** Treat null as missing, enforce primitive types, reject oversize values rather than truncate. Distinguish pending labs from completed results; never fabricate finalization values.
 
 ### 8. P1 — Scale validation accepts invalid scores and new uses of retired definitions
 
 Evidence: [response normalizer](../apps/visits/scale_validation.py#L6), [field validation](../apps/clinical/serializers.py#L41).
 
-`float('NaN')` passes both `< minimum` and `> maximum` checks and makes the total score NaN. Slider values are not checked against the configured step. New responses resolve scales with `all_objects`, so retired scales can be selected. Isolated probes reproduced all three behaviors. Missing answers fall back to defaults, which can make an unanswered assessment look completed. Separately, field validation assumes a missing default equals the supplied minimum but does not put that value in `attrs`; the model still defaults to zero, potentially violating its range constraint.
-
-Recommendation: require finite numeric values, validate slider increments, persist the validated default, allow retired definitions only for an existing historical snapshot, and represent unanswered questions explicitly. Add a completion rule before treating an assessment as scored/final.
+- **Issue:** `float('NaN')` evades `< minimum`/`> maximum` and poisons totals; slider steps are unchecked; `all_objects` allows new retired-scale responses (all reproduced). Defaulted missing answers appear completed. Missing field default is assumed minimum but omitted from `attrs`, leaving model zero and possibly violating range.
+- **Recommendation:** Require finite/on-step scores, persist validated defaults, restrict retired definitions to existing historical snapshots, represent unanswered items explicitly, and enforce completion before scoring/finalization.
 
 ### 9. P1 — Historical diagnoses and medications can change with catalog edits
 
 Evidence: [visit getters](../apps/visits/models.py#L149), [setters](../apps/visits/models.py#L184), [catalog updates](../apps/clinical/services.py#L27).
 
-Display getters fall back to current catalog fields if custom/snapshot text is blank. Medication controlled status always comes from the current catalog. Editing a catalog entry can change the display or controlled classification of an earlier finalized visit without incrementing its version.
-
-Recommendation: populate immutable code/name/dosage/brand/controlled snapshots on every saved visit row. Retain optional catalog references for searching and grouping. Historical documents should consume snapshots, never mutable catalog labels.
+- **Issue:** Blank custom/snapshot text falls back to mutable catalog labels; controlled status always uses current medication catalog. Catalog edits change finalized history/display/classification without version increments.
+- **Recommendation:** Save immutable code/name/dosage/brand/controlled snapshots on every clinical row; retain optional catalog references for search/grouping. Historical documents read snapshots.
 
 ### 10. P1 — Access policies differ between related endpoints
 
 Evidence: [visit object permission](../core/permissions.py#L221), [visit queryset](../apps/visits/views.py#L59), [dashboard](../apps/dashboard/views.py#L13), [patient timeline](../apps/patients/views.py#L167), [care-team model](../apps/patients/models.py#L150).
 
-Object permission allows a doctor to access visits they authored, while the visit queryset requires the doctor to be the patient's current doctor. Reassignment can therefore remove an author's historical access. Care-team membership does not grant access anywhere in these policies. The dashboard requires authentication only and returns clinical risk/follow-up data and task descriptions even if a user's relevant permissions were removed. Patient timeline/risk endpoints require patient-view permission without separately requiring visit-view permission.
-
-Recommendation: define shared `accessible_patients/visits/appointments/invoices` querysets and one object-access policy used by lists, details, creation, dashboards, exports, and reminders. Decide explicitly whether authors retain access after reassignment and whether care-team membership grants access. Gate sensitive dashboard sections and clinical patient subresources using their corresponding permissions.
+- **Issue:** Object permission allows visit authors but querysets require current patient doctor, losing historical access after reassignment. Care teams grant nothing. Authentication-only dashboards expose risk/follow-ups/task descriptions despite removed permissions; patient timeline/risk require patient-view but not visit-view.
+- **Recommendation:** Share `accessible_patients/visits/appointments/invoices` and object policies across lists/details/create/dashboard/exports/reminders. Explicitly decide author/care-team scope; gate sensitive dashboard sections/clinical subresources with corresponding permissions.
 
 ### 11. P1 — Failed-login counters conflict with request-wide transactions
 
 Evidence: [login failure path](../apps/accounts/services.py#L18), [counter mutation](../apps/accounts/models.py#L103), [database settings](../config/settings/base.py#L180), [exception delegation](../core/exceptions.py#L55).
 
-`ATOMIC_REQUESTS` is enabled. A wrong password increments the database counter and then raises DRF `AuthenticationFailed`. The default DRF exception handler marks an active request transaction for rollback, so the counter increment and resulting lockout can be rolled back along with the failed request. This follows the transaction wiring and the [official DRF handler implementation](https://github.com/encode/django-rest-framework/blob/master/rest_framework/views.py); full HTTP reproduction was not possible without installed DRF.
-
-Recommendation: put the login endpoint outside request-wide atomic handling and give security-state updates their own short committed transaction. Keep account lockout updates durable on failed responses. Also use a dummy password hash check for unknown usernames to reduce observable timing differences, and verify login-specific CSRF protection for anonymous session login.
+- **Issue:** With `ATOMIC_REQUESTS`, wrong-password counters increment before DRF `AuthenticationFailed`; the [official DRF handler implementation](https://github.com/encode/django-rest-framework/blob/master/rest_framework/views.py) rolls back active request transactions, potentially undoing lockout. Source-traced; HTTP reproduction lacked installed DRF.
+- **Recommendation:** Exclude login from request-wide transactions; commit security updates in short transactions, durable even on failure. Dummy-hash unknown users to reduce timing differences; verify anonymous session-login CSRF.
 
 ### 12. P1 — Forced password changes and permission reporting are incomplete
 
 Evidence: [user serializer](../apps/accounts/serializers.py#L7), [user updates](../apps/accounts/services.py#L110), [session middleware](../core/middleware.py#L88).
 
-`force_password_change` is writable in the generic user serializer, and no backend gate limits a flagged account to password-change/session endpoints. Password changes and some security-state changes do not increment the user version. Permission output is assembled from groups/direct grants, so it can disagree with an active superuser's `has_perm()` result. `_apply_role_group()` rewrites permissions for an existing role group whenever a user is created or changes role.
-
-Recommendation: make forced-change state server-controlled, enforce it on the backend, version relevant user changes, and expose one authoritative effective-permissions calculation. Seed role groups explicitly and avoid rewriting existing group permissions as a side effect of creating a user. Validate permission-update payloads as a list of strings before set operations.
+- **Issue:** Generic serializer accepts `force_password_change`; no backend gate limits flagged users to password/session endpoints. Password/security changes may skip version increments. Group/direct permission output disagrees with active-superuser `has_perm()`; `_apply_role_group()` rewrites existing role grants on create/role change.
+- **Recommendation:** Server-control/enforce forced changes, version security updates, compute authoritative effective permissions. Seed roles explicitly; user creation must not rewrite existing group permissions. Validate permission payloads as string lists before set operations.
 
 ### 13. P1 — Follow-up completion can lose edits and inflate adherence figures
 
 Evidence: [single/bulk completion](../apps/visits/services.py#L251), [follow-up statistics](../apps/reports/visit_statistics.py#L60).
 
-Single completion accepts no expected version and does not increment it. Bulk completion marks every overdue follow-up completed without recording actual contact, actor, outcome, or completion date. It uses `QuerySet.update()`, bypassing save audit and cache signals. A missed follow-up becomes indistinguishable from a completed one in adherence figures. Changing follow-up date through a visit edit does not automatically reset a previously completed flag.
-
-Recommendation: distinguish completed, missed, cancelled, rescheduled, and waived follow-ups. Prefer a linked `FollowUp` record with due date, outcome, completion actor/time, and version. Until then, lock/version single changes, reset completion on a new due date, and make bulk closure an explicit auditable outcome rather than “completed”.
+- **Issue:** Single completion neither checks nor increments version. Bulk marks every overdue item completed without contact/actor/outcome/date; `QuerySet.update()` bypasses audit/cache signals, inflating adherence. New due dates do not reset completion.
+- **Recommendation:** Distinguish completed/missed/cancelled/rescheduled/waived. Prefer linked `FollowUp` with due date/outcome/actor/time/version; meanwhile lock/version updates, reset new dates, and record bulk closure as explicit auditable outcome, not completion.
 
 ### 14. P1 — Destructive actions and archived objects do not share a version contract
 
 Evidence: [patient removal/anonymization](../apps/patients/services.py#L167), [appointment mutations](../apps/appointments/services.py#L171), [visit mutations](../apps/visits/services.py#L109).
 
-Several deletion/archive/anonymization actions accept no expected version. Some mutation paths reload through `all_objects` after a view fetched an active instance, but never recheck active/deleted state. A concurrent archive can therefore leave another request editing or transitioning a now-archived object. Patient dependency checks omit care-team records, and the “use archive” error does not correspond to a separate patient archive action.
-
-Recommendation: use the same lock/version/active-state checks for edit, transition, archive, restore, and anonymize. Define a real archive action that keeps readable history and rejects new clinical/financial records. Recheck active patients under the mutation transaction when attaching new records.
+- **Issue:** Delete/archive/anonymize lack consistent expected versions. Mutations reload `all_objects` without active/deleted rechecks, allowing concurrent edits/transitions after archive. Dependency checks omit care teams; “use archive” references no dedicated patient action.
+- **Recommendation:** Share lock/version/active-state checks across edit/transition/archive/restore/anonymize. Add explicit archive preserving readable history while blocking new clinical/financial records; recheck active parents when adding new records within the transaction.
 
 ### 15. P1 — Idempotency blocks retries without recovering the successful result
 
 Evidence: [middleware](../core/middleware.py#L29).
 
-The stored value is a boolean. A retry after a successful write whose response was lost receives 409 rather than the original result. Keys are scoped to the user but not request method/path/payload. Cache expiry/eviction and global cache clearing can remove the protection. Options, scales, and templates are absent from the enforced prefixes even though they are mutable resources.
-
-Recommendation: store an operation record with user, method, route, payload digest, processing state, resulting resource, and response/status. Return the saved successful result for the same request; reject reuse with different data. Keep durable records for important creates/issuances and bound key length. Treat in-progress operations separately from completed requests.
+- **Issue:** Boolean idempotency records return 409 after successful responses are lost; keys lack method/path/payload scope and disappear on expiry/eviction/global clearing. Mutable options/scales/templates are uncovered.
+- **Recommendation:** Persist user/method/route/payload digest/state/resource/response/status; replay identical successes, reject changed payload reuse. Make important creates/issuances durable, bound key length, distinguish processing from completed operations.
 
 ### 16. P1 — Cache invalidation can publish stale data as current
 
 Evidence: [cache utility](../core/cache_utils.py#L38), model-specific save signals, [bulk follow-up update](../apps/visits/services.py#L258).
 
-Signals invalidate cache groups before the surrounding transaction commits. Another request can read old committed data and publish it under the new version. `set_grouped_key()` obtains the version at write time, allowing a query begun before invalidation to be stored in the newer group; an isolated interleaving reproduced that mechanism. Bulk updates bypass invalidation entirely.
-
-Recommendation: invalidate after commit using `transaction.on_commit()`. Capture the cache generation before querying and only publish into that generation, or discard the result if it changed. Explicitly invalidate after bulk mutations. Keep idempotency and preview records outside the scope of a general settings cache-clear action.
+- **Issue:** Pre-commit invalidation lets another request cache old committed data under new generation. `set_grouped_key()` selects generation at publication; isolated interleaving reproduced stale-query promotion. Bulk updates skip invalidation.
+- **Recommendation:** Invalidate with `transaction.on_commit()`; capture generation before query and publish only there or discard changed-generation results. Invalidate bulk changes explicitly; protect idempotency/preview records from settings cache clears.
 
 ### 17. P2 — Appointment scheduling rules still need consistency
 
 Evidence: [update](../apps/appointments/services.py#L171), [calendar](../apps/appointments/services.py#L340), [availability endpoint](../apps/appointments/views.py#L194).
 
-The earlier fixes address the main reopen/reschedule problems. Remaining issues: cancelled/no-show schedule edits skip availability but also skip duration validation and reminder reset; the legacy `duration` alias may affect checks without being persisted; duration bounds differ between model/service and availability API; calendar doctor filters can fall back to an unfiltered accessible queryset; cancellation filtering differs by branch. Occupied intervals use time-only endpoints, so an existing cross-midnight interval loses its date component.
-
-Recommendation: normalize scheduling input once, persist only canonical keys, validate every requested schedule even when non-occupying, and share availability constants. Apply requested doctor/date/status filters after access scoping. Represent intervals as datetimes. Keep a documented working-hours and past-booking policy, including whether arrived appointments can be moved. Confirm race handling on the intended database; SQLite does not provide the row locks assumed by the schedule sentinel.
+- **Issue:** Earlier reopen/reschedule fixes exist. Cancelled/no-show edits skip availability plus duration/reminder checks; legacy `duration` affects validation without persistence. Bounds differ across model/service/API; doctor filters can fall back to unfiltered accessible results; cancellation branches differ. Time-only intervals lose cross-midnight dates.
+- **Recommendation:** Normalize once/persist canonical keys; validate all requested schedules, including non-occupying ones; share bounds. Apply doctor/date/status filters after access scope; use datetimes. Document working hours/past bookings/arrived edits. Verify target-database races: SQLite lacks sentinel row locks.
 
 ### 18. P2 — Invoice structure is too limited for a durable billing record
 
 Evidence: [invoice model](../apps/billing/models.py#L7), [creation/update/transition](../apps/billing/services.py#L51).
 
-Invoices have one supplied total, tax, and discount, without itemization, currency, payment records, or explicit paid actor/time. Payment method is free text and must already be present before issue because ordinary edits are blocked afterward. Issued patient details are read from the mutable patient record. Status supplied during creation/update is ignored rather than clearly rejected or declared read-only.
-
-Recommendation: add `InvoiceLine` records and derive totals server-side. Choose currency and rounding policy explicitly. Add payment records if partial/multiple payments are needed; otherwise retain a simpler model with validated method, paid actor/time, and a clear pay action. Snapshot billed patient/clinic details on issue. Keep financial correction as cancellation/credit rather than editing an issued record.
+- **Issue:** Supplied total/tax/discount lack itemization/currency/payment records/paid actor/time. Free-text method must precede issue because edits then lock. Issue reads mutable patient identity; creation/update silently ignore status.
+- **Recommendation:** Add `InvoiceLine`, server totals, explicit currency/rounding. Support payments only if partial/multiple required; otherwise validate method and record actor/time through pay action. Snapshot billed patient/clinic on issue; reject/read-only status explicitly; correct issued finance by cancellation/credit, not editing.
 
 ### 19. P2 — Physical deletion can remove clinical and financial history
 
 Evidence: [appointment patient/doctor FKs](../apps/appointments/models.py#L16), [invoice patient FK](../apps/billing/models.py#L15), [signature FKs](../apps/prescriptions/models.py#L5).
 
-Several history-bearing relationships use `CASCADE`. Normal endpoints mostly use soft deletion, but restore, management commands, or a later admin interface can still physically delete parents and their history. This is already material in the current restore path.
-
-Recommendation: use `PROTECT` for clinical/financial parents where history must survive; use nullable `SET_NULL` only with sufficient immutable identity snapshots. Reserve cascades for dependent rows whose deletion is truly intended. Do not change these relationships independently of the restore redesign.
+- **Issue:** History-bearing relationships use `CASCADE`. Soft-delete endpoints do not prevent restore/management/future-admin physical parent deletion from erasing history; current restore already triggers this.
+- **Recommendation:** Use `PROTECT` for clinical/financial parents; nullable `SET_NULL` only with sufficient immutable identities. Cascade only intended dependents; coordinate relationship changes with restore redesign.
 
 ### 20. P2 — Archival and anonymization need separate meanings
 
 Evidence: [anonymize](../apps/patients/services.py#L185), [audit contents](../core/signals.py#L24).
 
-Current anonymization changes the patient identity, archives it, clears doctor/creator and also removes family history/important notes. It does not scrub visit narratives, document contents, attachment names, or identity-bearing audit history. It should not be described as complete anonymization. Clearing clinician links also changes historical access.
-
-Recommendation: separate archive, reversible identity restriction/pseudonymization, and irreversible erasure. Define which retained clinical data must remain and how authorized history is accessed. Scope an anonymization operation across all identity-bearing resources and record its purpose/result without reproducing removed identity in the new audit entry.
+- **Issue:** Anonymization rewrites identity/archives, clears doctor/creator/family history/important notes, but retains identity-bearing narratives/documents/attachment names/audit. Clearing clinicians changes historical access; this is not complete anonymization.
+- **Recommendation:** Separate archive, reversible identity restriction/pseudonymization, irreversible erasure. Define retained clinical data/authorized access; comprehensive anonymization must scope all identity resources and audit purpose/result without copying removed identity.
 
 ### 21. P2 — Reports use inconsistent periods and mutable grouping labels
 
 Evidence: [monthly visits](../apps/reports/visit_statistics.py#L18), [diagnoses/medications](../apps/reports/visit_statistics.py#L38), [patient acquisition](../apps/reports/patient_statistics.py#L27), [report view](../apps/reports/views.py#L19).
 
-Monthly series always add a rolling “today minus N months” restriction, even with an explicit older date range. Months with zero rows are omitted. Average visits per patient ignores the selected date range. Top diagnoses/medications group by both catalog and custom text and display catalog labels first, while visit displays prefer custom values; one clinical concept can be split and historic labels can change. High-risk patients are selected from any past high-risk visit, so they do not mean “currently high risk”. Monthly-summary parameters are parsed without safe range validation.
-
-Recommendation: make explicit date filters authoritative, fill empty calendar periods, and return definitions for every KPI. Group on a stable catalog/concept identifier or a defined custom normalized key, with historical display snapshots. Define high risk as latest assessment or clearly label it “ever recorded high risk”. Validate report month/year and distinguish all-time patient metrics from period metrics.
+- **Issue:** Monthly series imposes rolling “today minus N months” even on old explicit ranges; omits zero months. Visit average ignores period. Diagnosis/medication grouping splits catalog/custom concepts and prefers mutable catalog labels unlike visits. Any historic high-risk visit counts as current; summary month/year parsing is unsafe.
+- **Recommendation:** Make explicit periods authoritative, fill empty months, define each KPI. Group stable concept/catalog IDs or normalized custom keys with historical labels. Define latest-assessment risk or label “ever recorded high risk”; validate month/year and separate all-time/period metrics.
 
 ### 22. P2 — Local dates and reminder windows are inconsistent
 
 Evidence: [appointment job](../core/management/commands/send_appointment_reminders.py#L14), [task job](../core/management/commands/send_task_reminders.py#L14), dashboard/report services.
 
-Several business dates use `timezone.now().date()` or host `datetime.now()` instead of the clinic's local date. Appointment hourly reminders query only one date, missing windows crossing local midnight. Day reminders select one exact due day, so an outage can skip them completely. Many reminder flags are updated without updating `updated_at`, and general save auditing records events even when audited business fields did not change.
-
-Recommendation: use clinic-local dates consistently and timezone-aware datetimes for windows. Query the full reminder interval, define catch-up behavior, and keep dedupe keys tied to the actual schedule occurrence. Avoid auditing scheduler bookkeeping as a clinical edit; use a separate delivery event if needed.
+- **Issue:** `timezone.now().date()`/host `datetime.now()` replace clinic-local dates. Hourly appointment windows miss local midnight; exact-day reminders miss outages. Flags skip `updated_at`; auditing records unchanged business fields.
+- **Recommendation:** Use clinic-local dates/aware datetime intervals, full-window queries, defined catch-up, occurrence-specific dedupe. Update bookkeeping timestamps; suppress empty clinical audit edits or use separate delivery events.
 
 ### 23. P2 — Imports can disagree with previews and silently discard valid records
 
 Evidence: [patient preview/import](../apps/import_export/services.py#L57), [diagnosis preview/import](../apps/import_export/services.py#L162), [medication mapping](../apps/import_export/views.py#L246).
 
-Patient import treats a shared phone as a duplicate and skips the row, although family members can share phones and the normal patient model permits them. Patient fields are truncated, while normal creation uses a different validation path. Diagnosis preview permits a two-column row that execution rejects for lacking a third column. Medication preview is a raw sample; it is not bound to the final column map or overwrite choice. Catalog replace/overwrite retires everything before processing, even if every row is invalid. Row-level validation/errors are much weaker than the patient importer. Empty medication files can index a nonexistent first row.
-
-Recommendation: share one validated row parser between preview and execution. Make national-ID matches strong duplicates and phone matches reviewable warnings. Bind previews to mapping, merge policy, target doctor, and digest. Require at least one valid record and clearly preview retirement effects before replace/overwrite. Use row savepoints, length/type validation, stable outcomes, and safe empty-file handling.
+- **Issue:** Patient import skips shared phones despite valid family sharing, truncates fields, diverges from normal validation. Diagnosis preview accepts two columns but execution requires three. Medication preview is raw/unbound to mapping/overwrite; retirement precedes validation. Weak row errors and empty-file first-row indexing risk losing valid catalogs.
+- **Recommendation:** Share validated preview/execution parsers; national ID is strong duplicate, phone a warning. Bind digest/mapping/merge policy/doctor; require valid records and preview retirements before replacement. Use savepoints, bounded typed rows, stable outcomes, safe empty-file handling.
 
 ### 24. P2 — Catalog writes ignore accepted fields and bypass concurrency controls
 
 Evidence: [diagnosis service](../apps/clinical/services.py#L11), [medication service](../apps/clinical/services.py#L46), [catalog serializers](../apps/clinical/serializers.py#L11).
 
-Diagnosis creation/update ignores submitted ordering/activity fields. Medication creation ignores `is_controlled`, ordering, and activity. Medication update has weaker duplicate handling than creation. Catalogs, scales, templates, and clinic settings have no version contract even though editing them affects current clinical workflows. Serializer and service persistence paths differ.
-
-Recommendation: explicitly define writable fields and persist or reject each one; make retirement/reactivation dedicated actions. Use one service path for each resource. Add version checks where concurrent edits matter, preserve immutable definition snapshots, and introduce a normalized medication-identity rule if duplicate catalog entries are undesirable.
+- **Issue:** Diagnosis writes ignore ordering/activity; medication create ignores `is_controlled`/ordering/activity, update has weaker duplicate handling. Catalogs/scales/templates/settings lack versions; serializer/service persistence differs.
+- **Recommendation:** Persist or reject every accepted field; dedicated retire/reactivate actions and canonical services. Version concurrent edits, preserve definition snapshots, optionally constrain normalized medication identity.
 
 ### 25. P2 — Multiple write paths bypass the service rules
 
 Evidence: [visit serializer create/update](../apps/visits/serializers.py#L96), [service lifecycle](../apps/visits/services.py#L50), [task model reactivation](../apps/tasks/models.py#L90).
 
-The visit serializer independently creates/updates rows and nested data without the service's lifecycle, finalization, and optimistic-lock checks. Existing views currently call services, but another view or script using `serializer.save()` can bypass the rules. Similar direct model helpers and demo/restore writers implement their own behavior.
-
-Recommendation: make serializers validation/representation adapters and route all ordinary clinical mutations through canonical services. Keep explicit, separately validated restore/seed interfaces for exceptional operations. Put crucial status/version/range invariants into database constraints where appropriate.
+- **Issue:** Visit serializer writes rows/nested data without service lifecycle/finalization/optimistic locks. Current views use services, but `serializer.save()` elsewhere bypasses rules; direct helpers/demo/restore have separate behavior.
+- **Recommendation:** Use serializers as validation/representation adapters and canonical services for ordinary clinical writes. Keep separately validated exceptional restore/seed interfaces; enforce crucial status/version/range invariants in database constraints.
 
 ### 26. P2 — File and document operations are not covered by clinical immutability
 
 Evidence: [attachments endpoint](../apps/visits/views.py#L210), [attachment deletion](../apps/visits/views.py#L241), [file storage](../core/file_utils.py#L58).
 
-Attachments can be added or archived on finalized/locked visits without a revision policy. File bytes are saved before the database row; a later transaction failure can leave orphaned storage. File size and MIME metadata partly use client properties rather than the validated detected values. Document relationships are not fully covered by the logical backup.
-
-Recommendation: decide whether attachments form part of the signed revision or are separately append-only administrative documents. Record who added/retired them and why. Add storage cleanup on failed persistence and orphan reconciliation, persist verified metadata/checksums, and include document inventory/media in recovery.
+- **Issue:** Final/locked visits permit attachment add/archive without revision policy. Bytes precede database rows, orphaning files on transaction failure. Size/MIME partly trust client metadata; logical recovery omits document relationships.
+- **Recommendation:** Define signed-revision attachments versus append-only administrative documents; audit actor/reason for additions/retirements. Clean failed storage/reconcile orphans, persist verified metadata/checksums, and recover document inventory/media.
 
 ### 27. P2 — Export and settings paths need small correctness improvements
 
 Evidence: [CSV/Excel exports](../apps/exports/patient_export.py#L14), [report export](../apps/exports/report_export.py#L9), [settings update](../apps/settings/services.py#L75), [PDF data](../apps/exports/base.py#L134).
 
-Exports place untrusted strings directly into spreadsheet cells; leading formula characters need a deliberate text-cell policy. User-selected unsupported CSV columns can produce an empty export instead of a validation error. Clinical formulation/MSE export reads attributes not present on `Visit`, so those sections are blank even if the corresponding information lives in clinical JSON. Settings update writes keys sequentially; a later validation error can return 400 after earlier changes were saved. Theme/clinic strings and demo-generation counts lack a clear bounded schema. Demo lab data is written to `clinical_data['lab_values']` while normal visits use `Visit.lab_values`.
+- **Issue:** Spreadsheet exports allow formula-leading untrusted text; unsupported CSV columns can silently empty output. Formulation/MSE read nonexistent `Visit` attributes instead of clinical JSON. Sequential settings writes partially persist before 400; strings/demo counts are unbounded. Demo labs use `clinical_data['lab_values']` instead of `Visit.lab_values`.
+- **Recommendation:** Keep spreadsheet text literal, reject invalid columns, map canonical clinical storage. Validate bounded settings/counts before atomic save; demo data must follow real model contracts.
 
-Recommendation: preserve user text as text in spreadsheet output, reject invalid column selections, and map export fields to the canonical storage schema. Validate all settings before one atomic save, bound values/counts, and make demo data use the same model contract as real data.
 
 ## Earlier implementation fixes present in this checkout
 
-These are implementation changes from the previous pass, not unresolved suggestions:
+Already implemented in the earlier pass:
 
 - Rescheduling parses string times and rejects timezone-bearing/invalid time input.
 - Reopening cancelled/no-show appointments rechecks availability, including ordinary updates and transition actions.
@@ -271,7 +245,7 @@ These are implementation changes from the previous pass, not unresolved suggesti
 | Archive metadata | Archived actor/time/reason and version; separate from irreversible identity removal. Active/deleted consistency constraint where applicable. |
 | Database invariants | Enumerated lifecycle checks, version >= 1, required signing/payment timestamps for corresponding states, validated numeric bounds, and deliberate deletion protections. Existing invoice/range/task constraints are a useful starting point. |
 
-Do not split every JSON field into its own model automatically. Keep variable clinical narrative/scale definitions as validated, bounded JSON snapshots; use relational rows for independently queried, scheduled, paid, or audited entities. Keep year-only DOB if that is the information the clinic actually collects; do not fabricate a full birth date.
+Keep variable narratives/scale definitions as validated bounded JSON snapshots; relational rows suit independently queried/scheduled/paid/audited entities. Do not automatically model every JSON field. Retain year-only DOB when that is collected; never fabricate full dates.
 
 ## Decisions worth making explicitly
 
@@ -289,6 +263,6 @@ Do not split every JSON field into its own model automatically. Keep variable cl
 - Parsed Python syntax for 160 backend source files, excluding migration and test-suite paths.
 - Temporary isolated probes passed overlap/adjacent-slot checks, invalid-duration guards, reopened-booking conflict checks, string-time rescheduling, completed-appointment guards, invoice arithmetic/non-finite rejection, and permission/cache-clearing guards.
 - Temporary isolated probes reproduced the JSON-signature mismatch, null lab completeness bypass, NaN/off-step scale acceptance, selection of a retired scale for a new response, and stale cache publication mechanism.
-- Persistence/query dependencies in those probes were stubbed. They do not establish cross-role HTTP behavior, transactional correctness on PostgreSQL, SQLite concurrency behavior, document rendering, or end-to-end backup recovery.
-- The environment lacks DRF, phonenumbers, pandas, python-magic, openpyxl, Faker, and python-dotenv. Full application/API verification was therefore unavailable; dependencies were not installed or modified.
-- No project database was opened or changed. No migration files or test-suite files were read or created. No build/compilation/packaging tasks were run.
+- Stubbed persistence/queries do not verify cross-role HTTP, PostgreSQL transactions, SQLite concurrency, document rendering, or end-to-end recovery.
+- Missing DRF, phonenumbers, pandas, python-magic, openpyxl, Faker, python-dotenv prevented full app/API checks; dependencies remained uninstalled/unchanged.
+- No project database access/changes, migration/test-suite reads/creation, builds/compilation/packaging.

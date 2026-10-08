@@ -1,8 +1,6 @@
-# File 2 of 8: `docs/01-getting-started.md`
-
 # Getting Started (Quickstart)
 
-Ten-minute path to a running dev environment. For the full manual walkthrough see `02-development.md`.
+Ten-minute dev setup; full walkthrough: `02-development.md`.
 
 ## Prerequisites
 
@@ -48,7 +46,7 @@ python manage.py runserver 0.0.0.0:5019
 
 ## Frontend
 
-In a **second terminal**:
+**Second terminal:**
 
 ```bash
 cd "/run/media/mhmmd-ali/MyFiles/IT Projects/Clinic/frontend"
@@ -66,7 +64,7 @@ pnpm dev
 
 ## Log in
 
-`seed_db` creates three users. Passwords are printed once to the terminal unless you set `ADMIN_PASSWORD`, `DOCTOR_PASSWORD`, `RECEPTIONIST_PASSWORD` in `.env` first.
+`seed_db`: three users; passwords print once unless `.env` sets `ADMIN_PASSWORD`, `DOCTOR_PASSWORD`, `RECEPTIONIST_PASSWORD` beforehand.
 
 | Role | Username |
 |---|---|
@@ -74,7 +72,7 @@ pnpm dev
 | Doctor | `doctor1` |
 | Receptionist | `receptionist1` |
 
-You will be forced to change the password on first login.
+First login requires password change.
 
 ## Lost the admin password?
 
@@ -87,5 +85,3 @@ python manage.py reset_admin_password --username admin
 - Full setup detail → `02-development.md`
 - Configuration → `03-configuration.md`
 - Something broken → `06-troubleshooting.md`
-
----

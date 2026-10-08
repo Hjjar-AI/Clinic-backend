@@ -1,12 +1,8 @@
-# File 5 of 8: `docs/04-deployment.md`
-
 # Deployment (Production)
 
-Production checklist and reference configs. Assumes Debian/Ubuntu with `systemd` and `nginx`.
+Production checklist/configs: Debian/Ubuntu, `systemd`/`nginx`.
 
 ## 1. Checklist
-
-Before you start:
 
 - [ ] Server with Python 3.10+, Node.js 18+, `pnpm`, `memcached`, `nginx`
 - [ ] Database chosen: SQLite works for small clinics; PostgreSQL for anything larger
@@ -89,7 +85,7 @@ CLINIC_PHONE=...
 CACHE_LOCATION=127.0.0.1:11211
 ```
 
-Note: `production.py` sets `SESSION_COOKIE_SECURE = True` and `CSRF_COOKIE_SECURE = True` unconditionally. TLS is required.
+`production.py` forces `SESSION_COOKIE_SECURE = True`/`CSRF_COOKIE_SECURE = True`; TLS required.
 
 ## 6. Database migrations
 
@@ -104,7 +100,7 @@ python manage.py collectstatic --noinput
 python manage.py seed_db
 ```
 
-`seed_db` prints admin credentials once. Save them, then immediately log in and rotate.
+`seed_db` prints admin credentials once; save, log in, rotate immediately.
 
 ## 7. Frontend build
 
@@ -114,9 +110,7 @@ pnpm install --frozen-lockfile
 pnpm build
 ```
 
-Output lands in `frontend/dist/`, which is already in `STATICFILES_DIRS`.
-
-Re-run `python manage.py collectstatic --noinput` afterwards.
+Output: `frontend/dist/` (already `STATICFILES_DIRS`); afterwards re-run `python manage.py collectstatic --noinput`.
 
 ## 8. Gunicorn systemd unit
 
@@ -157,7 +151,7 @@ sudo systemctl enable --now myclinic
 sudo systemctl status myclinic
 ```
 
-Worker count: `2 × CPU cores + 1` is the classic heuristic; 3 is fine for a small clinic.
+Worker heuristic: `2 × CPU cores + 1`; 3 suits a small clinic.
 
 ## 9. Nginx
 
@@ -224,13 +218,9 @@ sudo certbot --nginx -d clinic.example.com
 
 ## 10. Serving the frontend
 
-Two options.
+**Option A — Django `index.html` (wired):** `config/urls.py` catch-all `re_path(r'^.*$', TemplateView.as_view(template_name='index.html'))` returns SPA for unknown paths. Requires `frontend/dist/` in `STATICFILES_DIRS`, completed `collectstatic`, and Nginx `location /` proxying to Django.
 
-**Option A — Django serves `index.html` (already wired).**  
-`config/urls.py` ends with a catch-all `re_path(r'^.*$', TemplateView.as_view(template_name='index.html'))`. As long as `frontend/dist/` is in `STATICFILES_DIRS` and `collectstatic` has run, Nginx's `location /` proxies to Django, which returns the SPA shell for any unknown path.
-
-**Option B — Nginx serves `dist/` directly.**  
-Replace `location /` with:
+**Option B — direct Nginx `dist/`:** replace `location /`:
 
 ```nginx
 location / {
@@ -243,18 +233,18 @@ location /api/ {
 }
 ```
 
-Option B is faster. Option A is simpler. Pick one.
+Choose B for speed or A for simplicity.
 
 ## 11. Media files
 
-`MEDIA_ROOT = /srv/myclinic/backend/media`. Nginx serves it directly (above). Ensure:
+Historical direct Nginx media: `MEDIA_ROOT = /srv/myclinic/backend/media`. Ensure:
 
 - The `deploy` user owns `media/`.
-- `client_max_body_size` in Nginx matches `MAX_CONTENT_LENGTH` in `.env` (default 210 MB) — otherwise large uploads fail with a 413 before reaching Django.
+- Match Nginx `client_max_body_size` to `.env` `MAX_CONTENT_LENGTH` (210 MB default), preventing pre-Django 413 errors.
 
 ## 12. Scheduled tasks
 
-Do **not** use `python manage.py run_scheduler` in production. Configure `systemd` timers or cron instead:
+Production: `systemd` timers/cron, **not** `python manage.py run_scheduler`:
 
 `/etc/cron.d/myclinic`:
 
@@ -272,28 +262,28 @@ Do **not** use `python manage.py run_scheduler` in production. Configure `system
 30 3 * * * deploy  cd /srv/myclinic/backend && /srv/myclinic/venv/bin/python manage.py cleanup_backups
 ```
 
-Set `DJANGO_SETTINGS_MODULE=config.settings.production` in each environment. See `05-operations.md` for details.
+Each environment: `DJANGO_SETTINGS_MODULE=config.settings.production`; details: `05-operations.md`.
 
 ## 13. Backups
 
-`auto_backup` writes signed ZIP archives to `backend/backups/`. **Backups on the same server as the database are not real backups.** Add an off-site sync:
+`auto_backup`: signed ZIPs in `backend/backups/`. Same-server copies do not provide disaster recovery; add off-site sync:
 
 ```bash
 # Example: rsync to a remote host nightly at 04:00
 0 4 * * * deploy rsync -a --delete /srv/myclinic/backend/backups/ backup-host:/srv/backups/myclinic/
 ```
 
-Or use `rclone` to push to S3/B2/Drive. See `05-operations.md#off-site-sync`.
+Alternative: `rclone` → S3/B2/Drive; `05-operations.md#off-site-sync`.
 
 ## 14. Health checks
 
-External monitoring should poll:
+Monitor:
 
 ```
 GET https://clinic.example.com/api/v1/system/health/
 ```
 
-Returns `{"data":{"status":"ok","database":"ok"}}` when healthy. Anything else means the app or DB is down.
+Healthy: `{"data":{"status":"ok","database":"ok"}}`; otherwise app/DB failure.
 
 ## 15. Updating a deployment
 
@@ -319,7 +309,7 @@ sudo systemctl restart myclinic
 
 ## 16. Rollback
 
-Keep the last known-good commit hash. To roll back:
+Retain last-good commit; rollback:
 
 ```bash
 git checkout <previous-commit>
@@ -327,20 +317,18 @@ git checkout <previous-commit>
 sudo systemctl restart myclinic
 ```
 
-Database migrations are the hard part. If the schema changed, you may need to restore from a backup — see `05-operations.md#restore`.
+Changed schema may require backup restore: `05-operations.md#restore`.
 
 ## 17. Security notes
 
-- Never run with `DEBUG=true` in production. `base.py` raises if secrets are missing; `production.py` forces secure cookies.
-- Store `.env` outside of git. Use a secret manager (Vault, AWS Secrets Manager, systemd credentials) if available.
+- Never production `DEBUG=true`; `base.py` rejects missing secrets, `production.py` forces secure cookies.
+- Keep `.env` outside git; prefer Vault/AWS Secrets Manager/systemd credentials when available.
 - Restrict SSH. Use key auth only.
-- Rotate `DJANGO_SECRET_KEY` and `BACKUP_HMAC_KEY` immediately if either leaks.
+- Immediately rotate leaked `DJANGO_SECRET_KEY`/`BACKUP_HMAC_KEY`.
 - `ALLOWED_HOSTS` must not contain `*` in production.
-- Run `pip-audit` periodically to catch vulnerable dependencies.
+- Periodically run `pip-audit` for vulnerable dependencies.
 
 ## Next
 
 - Operations → `05-operations.md`
 - Troubleshooting → `06-troubleshooting.md`
-
----

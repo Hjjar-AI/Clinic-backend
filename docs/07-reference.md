@@ -1,8 +1,6 @@
-# File 8 of 8: `docs/07-reference.md`
-
 # Reference
 
-Look-up tables: commands, URLs, credentials, dependencies.
+Commands, URLs, credentials, dependencies.
 
 ## Commands
 
@@ -34,7 +32,7 @@ python manage.py createsuperuser
 
 ## Python dependencies
 
-Every package the codebase imports, and where it's used:
+Package/import mapping:
 
 | Package | Used by |
 |---|---|
@@ -55,7 +53,7 @@ Every package the codebase imports, and where it's used:
 | `qrcode` | optional, `reset_admin_password --qr` only |
 | `gunicorn` | production WSGI server |
 
-**Not used:** `wkhtmltopdf`, `pdfkit`, `django-phonenumber-field`. If you see them mentioned elsewhere, that documentation is stale.
+**Unused:** `wkhtmltopdf`, `pdfkit`, `django-phonenumber-field`; contrary docs are stale.
 
 ## URLs
 
@@ -70,7 +68,7 @@ Every package the codebase imports, and where it's used:
 
 ### Production
 
-Replace `clinic.example.com` with your domain.
+Substitute your domain for `clinic.example.com`.
 
 | Service | URL |
 |---|---|
@@ -107,7 +105,7 @@ All under `/api/v1/`.
 
 ## Default credentials
 
-`seed_db` creates three users. Passwords are generated randomly unless `ADMIN_PASSWORD` / `DOCTOR_PASSWORD` / `RECEPTIONIST_PASSWORD` are set in `.env` before seeding.
+`seed_db`: three users; random passwords unless `.env` sets `ADMIN_PASSWORD`/`DOCTOR_PASSWORD`/`RECEPTIONIST_PASSWORD` before seeding.
 
 | Role | Username |
 |---|---|
@@ -115,9 +113,9 @@ All under `/api/v1/`.
 | Doctor | `doctor1` |
 | Receptionist | `receptionist1` |
 
-All three have `force_password_change = True`: you are required to change the password on first login.
+All: `force_password_change = True`; change password at first login.
 
-If the initial password is lost:
+Lost initial password:
 
 ```bash
 python manage.py reset_admin_password --username admin
@@ -125,17 +123,15 @@ python manage.py reset_admin_password --username admin
 
 ## Roles & permissions
 
-Three roles:
-
 | Role | Typical capabilities |
 |---|---|
 | `admin` | Everything |
 | `doctor` | Own patients, own visits, own appointments, prescriptions, exports, reports |
 | `receptionist` | Patients they created, appointments for those patients, view-only billing |
 
-Permission codenames are defined in `core/permissions.py`. They are attached to `Group` records by `seed_db`, and users inherit them via their group. Additionally, users can be granted direct permissions via `POST /api/v1/auth/users/permissions/<id>/`.
+`core/permissions.py` defines codenames; `seed_db` attaches to `Group`, inherited by users. Direct grants: `POST /api/v1/auth/users/permissions/<id>/`.
 
-To see a user's effective permissions:
+Effective permissions:
 
 ```
 GET /api/v1/auth/users/permissions/<id>/
@@ -166,5 +162,3 @@ Full table → `03-configuration.md#env`.
 - Setup → `01-getting-started.md`
 - Dev → `02-development.md`
 - Ops → `05-operations.md`
-
----

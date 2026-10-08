@@ -1,17 +1,17 @@
 # MyClinic backend
 
-Django REST backend for clinic management: patients, clinical visits, appointments, billing, tasks, notifications, prescriptions, referrals, reports, imports, and backups. The sibling [Vue frontend](../frontend/README.md) provides the Arabic interface.
+Django REST clinic backend: patients, visits, appointments, billing, tasks, notifications, prescriptions, referrals, reports, imports, backups; Arabic UI: [Vue frontend](../frontend/README.md).
 
 ## Requirements
 
-- Python compatible with the pinned Django 5.0.6 release (Python 3.10–3.12).
-- A virtual environment and the packages in [requirements.txt](requirements.txt).
-- System libraries for `python-magic` and WeasyPrint, plus fonts supporting Arabic for PDF output.
-- SQLite for local development. Production requires an external database and a shared cache, with their matching Python drivers installed separately.
+- Python 3.10–3.12 for pinned Django 5.0.6.
+- Virtual environment with [requirements.txt](requirements.txt).
+- `python-magic`/WeasyPrint system libraries and Arabic PDF fonts.
+- Local: SQLite. Production: external database/shared cache; install matching Python drivers separately.
 
 ## Local setup
 
-Run these commands from `backend/` on a POSIX shell:
+From `backend/`, POSIX shell:
 
 ```bash
 python3 -m venv .venv
@@ -21,31 +21,31 @@ cp .env.example .env
 mkdir -p data media backups
 ```
 
-If `.env` already exists, edit it instead of replacing it. Set `DJANGO_DEBUG=True`, then generate separate secrets and put their output into `DJANGO_SECRET_KEY` and `BACKUP_HMAC_KEY`:
+Edit an existing `.env` rather than overwrite it. Set `DJANGO_DEBUG=True`; generate separate `DJANGO_SECRET_KEY`/`BACKUP_HMAC_KEY` values:
 
 ```bash
 python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'
 python -c 'import secrets; print(secrets.token_hex(32))'
 ```
 
-The example enables `ALLOW_DEMO_DATA` and `AUTO_SEED`; set both to `false` for an empty clinic setup. Keep the backup signing key available when recovering backups.
+For an empty clinic, change example `ALLOW_DEMO_DATA`/`AUTO_SEED` to `false`. Retain the backup signing key for recovery.
 
-**Database prerequisite:** prepare a fresh database schema matching the current models before seeding or starting normal workflows. Schema initialization is a separate, explicitly authorized step under this project's rules; this guide does not generate or apply migrations. Existing `bootstrap` and `runserver_auto` helpers perform migration work, so they are outside this setup sequence.
+**Database prerequisite:** prepare a fresh schema matching current models before seeding/workflows. Schema initialization requires separate explicit authorization; this guide generates/applies no migrations. Exclude migration-running `bootstrap`/`runserver_auto` from this sequence.
 
-After the schema is ready, initialize the application and start Django:
+Once the schema is ready, initialize/start Django:
 
 ```bash
 python manage.py seed_db
 python manage.py runserver 127.0.0.1:5019
 ```
 
-`seed_db` creates permissions, role groups, default users, clinic settings, catalogs, and tasks. New account passwords are generated and printed once unless `ADMIN_PASSWORD`, `DOCTOR_PASSWORD`, and `RECEPTIONIST_PASSWORD` are supplied through the environment. New users must change their passwords. Re-running the command updates role permissions and default clinic settings; use it deliberately.
+`seed_db` creates permissions, role groups, users, clinic settings, catalogs, tasks. Passwords print once unless environment `ADMIN_PASSWORD`/`DOCTOR_PASSWORD`/`RECEPTIONIST_PASSWORD` are supplied; new users must change them. Re-running updates role permissions/default clinic settings; use deliberately.
 
-Start the frontend separately using its README. Django's API is available at `http://localhost:5019/api/v1/`, and the administration site at `/admin/`. Serving the SPA through Django requires an existing `frontend/dist/`.
+Start frontend separately per its README. API: `http://localhost:5019/api/v1/`; admin: `/admin/`. Django SPA serving requires existing `frontend/dist/`.
 
 ## Configuration
 
-Settings load `backend/.env`; see [.env.example](.env.example) and [base settings](config/settings/base.py) for all supported values.
+Settings load `backend/.env`; supported values: [.env.example](.env.example), [base settings](config/settings/base.py).
 
 | Setting | Purpose |
 | --- | --- |
@@ -60,21 +60,21 @@ Settings load `backend/.env`; see [.env.example](.env.example) and [base setting
 | `SESSION_COOKIE_AGE`, `MAX_LOGIN_ATTEMPTS`, `LOGIN_LOCKOUT_MINUTES` | Session and login limits |
 | `SCHEDULER_INTERVAL_HOURS`, `BACKUP_CHECK_INTERVAL_HOURS`, `BACKUP_*_DAYS` | Scheduling and backup retention |
 
-`manage.py` defaults to `config.settings.development`, which forces debug mode and allows all hosts. Production must explicitly select `config.settings.production` and set `DJANGO_DEBUG=False` in the environment. That module requires allowed hosts, an external database, and a shared cache, enables secure cookies, and disables demo data. Use HTTPS and a production application server; provision its package and database/cache drivers separately.
+`manage.py` defaults to `config.settings.development` (debug/all hosts). Production: explicitly select `config.settings.production`, set environment `DJANGO_DEBUG=False`; allowed hosts, external database/shared cache required, secure cookies enabled, demo data disabled. Use HTTPS/production server; install server package and database/cache drivers separately.
 
 ## API and workflow contracts
 
-- API prefix: `/api/v1/`. JSON responses use a `data` envelope or an `error` object containing `code`, `message`, and optional validation errors; downloads return files.
-- Authentication uses session cookies. Fetch `/api/v1/system/config/` to obtain the CSRF cookie before `POST /api/v1/auth/login/`; send `X-CSRFToken` on unsafe requests.
-- Access combines the `admin`, `doctor`, and `receptionist` roles, action permissions, and patient/care-team scope.
-- Supported updates require the current resource `version` in the body or `If-Match`. Refresh stale records after a conflict.
-- Mutations covered by idempotency enforcement use `X-Idempotency-Key`. Retrying one logical operation must reuse its key and payload.
-- Finalized visits keep immutable signed revisions. Prescription/referral issuance requires a final or locked visit with a signed revision and preserves the issued document.
-- Invoice lines determine totals; payment records include the actor and time. Archival preserves clinical history, and pseudonymization retains identity snapshots in signed history.
+- API: `/api/v1/`; JSON: `data` or `error` (`code`, `message`, optional validation errors); downloads: files.
+- Session-cookie auth: fetch `/api/v1/system/config/` for CSRF before `POST /api/v1/auth/login/`; unsafe requests send `X-CSRFToken`.
+- Access: `admin`/`doctor`/`receptionist` roles + action permissions + patient/care-team scope.
+- Supported updates require current `version` or `If-Match`; refresh stale records after conflicts.
+- Covered mutations use `X-Idempotency-Key`; retries reuse the operation's key/payload.
+- Finalized visits retain immutable signed revisions; prescription/referral issuance requires final/locked signed visits and preserves issued documents.
+- Invoice lines determine totals; payments record actor/time. Archive preserves clinical history; pseudonymization retains signed identity snapshots.
 
 ## Operations and data recovery
 
-Run management commands from the activated backend environment:
+From the activated backend environment:
 
 | Command | Effect |
 | --- | --- |
@@ -85,11 +85,11 @@ Run management commands from the activated backend environment:
 | `python manage.py run_scheduler` | Run the periodic development loop for reminders, backups, and retention |
 | `python manage.py reconcile_media` | Report missing files and old unreferenced uploads without deleting them |
 
-Use cron or systemd timers for the individual scheduled commands in production. Media reconciliation deletes old orphaned uploads only when explicitly given `--delete`.
+Production: cron/systemd timers for individual commands. Media reconciliation deletes old orphans only with explicit `--delete`.
 
-Full ZIP backups include managed records and media, with authenticated manifests and checksums. Full restore replaces the managed inventory, creates a safety backup, and revokes sessions; it requires a matching preview and confirmation. Catalog-only restore merges catalog data. JSON exports do not include media bytes and cannot recover missing files. Spreadsheet imports also require a preview before applying changes.
+Full ZIP: managed records/media, authenticated manifests/checksums. Full restore requires matching preview/confirmation, replaces managed inventory, creates safety backup, revokes sessions. Catalog restore merges. JSON exports contain no media bytes and cannot recover missing files; spreadsheet imports also require previews.
 
-Keep `.env`, `data/`, `media/`, `backups/`, and `staticfiles/` out of source control. Serve production media through an access-controlled mechanism appropriate for patient records.
+Never commit `.env`, `data/`, `media/`, `backups/`, `staticfiles/`; protect production patient media with access control.
 
 ## Layout and development
 
@@ -101,6 +101,6 @@ Keep `.env`, `data/`, `media/`, `backups/`, and `staticfiles/` out of source con
 | `templates/` | Server-rendered documents and templates |
 | `docs/` | Setup, operations, review findings, and implementation notes |
 
-Read [AGENTS.md](AGENTS.md), [workCurrent.md](workCurrent.md), and [doneCurrent.md](doneCurrent.md) before making changes. Migration work, test-suite access, builds/compilation/packaging, and version changes require explicit authorization.
+Before changes: [AGENTS.md](AGENTS.md), [workCurrent.md](docs/workCurrent.md), [doneCurrent.md](docs/doneCurrent.md). Migrations, test-suite access, builds/compilation/packaging, version changes require explicit authorization.
 
-See the [documentation index](docs/README.md), [implemented backend fixes](docs/backend-fixes-implementation.md), and [workflow checklist](docs/critical-workflow-checklist.md). Older guides may describe setup helpers with broader side effects; follow the current project rules. Outstanding validation includes PDF/Arabic rendering, browser workflows, and PostgreSQL concurrency behavior.
+References: [documentation index](docs/README.md), [implemented backend fixes](docs/backend-fixes-implementation.md), [workflow checklist](docs/critical-workflow-checklist.md). Current rules override older setup helpers' broader side effects. Unverified: PDF/Arabic rendering, browser workflows, PostgreSQL concurrency.

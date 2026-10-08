@@ -1,14 +1,12 @@
-# File 4 of 8: `docs/03-configuration.md`
-
 # Configuration
 
-Everything that varies between environments: environment variables, cache backend, file storage.
+Environment variables, cache, storage.
 
 ## .env
 
-Location: `backend/.env`. Loaded by `config/settings/base.py` via `python-dotenv`.
+`backend/.env`: loaded by `config/settings/base.py` via `python-dotenv`.
 
-`.env` is gitignored. Never commit it. If it was ever committed, rotate every secret in it.
+Never commit gitignored `.env`; rotate all secrets if committed.
 
 ### Variables
 
@@ -39,7 +37,7 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 #### Database
 
-The default is SQLite at `backend/data/clinic.db`. `DATABASES` in `base.py` does not read from env — edit the setting directly to switch to PostgreSQL.
+Historical default: SQLite `backend/data/clinic.db`; `DATABASES` in `base.py` assumed direct PostgreSQL edits, not env configuration.
 
 #### Session & auth
 
@@ -97,7 +95,7 @@ All in MB.
 | `BACKUP_WEEKLY_DAYS` | `90` |
 | `BACKUP_MONTHLY_DAYS` | `365` |
 
-See `05-operations.md#backup-retention` for retention policy details.
+Retention: `05-operations.md#backup-retention`.
 
 #### Cache
 
@@ -109,7 +107,7 @@ See Cache below.
 
 ### Seed passwords (optional)
 
-If set, `seed_db` uses them verbatim instead of generating random ones.
+`seed_db` uses supplied passwords verbatim:
 
 ```ini
 ADMIN_PASSWORD=
@@ -117,11 +115,11 @@ DOCTOR_PASSWORD=
 RECEPTIONIST_PASSWORD=
 ```
 
-If left blank, a random password is generated and printed **once** to stdout.
+Blank passwords generate random values printed **once** to stdout.
 
 ## Cache
 
-`config/settings/base.py` ships with:
+Historical `config/settings/base.py` default:
 
 ```python
 CACHES = {
@@ -134,7 +132,7 @@ CACHES = {
 
 ### Option A — memcached (default)
 
-Start memcached:
+Start:
 
 ```bash
 # Linux
@@ -148,7 +146,7 @@ Verify: `echo stats | nc 127.0.0.1 11211`.
 
 ### Option B — local memory (single-process dev only)
 
-Comment out the default block and uncomment the alternate one in `base.py`:
+In `base.py`, replace the default block with the alternate:
 
 ```python
 # CACHES = {
@@ -166,16 +164,16 @@ CACHES = {
 }
 ```
 
-LocMemCache is per-process: every `runserver` restart empties the cache, and multiple worker processes will not share it. Fine for dev; **never use in production.**
+LocMemCache is per-process/unshared; `runserver` restarts clear it. Dev only, **never production**.
 
 ## File storage
 
-Two settings in `base.py`:
+`base.py`:
 
 - `MEDIA_ROOT = BASE_DIR / 'media'` — where uploads land
 - `MEDIA_URL = '/media/'` — served only when `DEBUG=true`
 
-In production, serving media from Django is slow and unsafe. Configure your reverse proxy to serve `/media/` from `MEDIA_ROOT`, or set up a storage backend like S3. See `04-deployment.md#media-files`.
+Historical production options: reverse-proxy `/media/` from `MEDIA_ROOT` or S3; Django media serving is slow/unsafe. See `04-deployment.md#media-files`; current README requires patient-media access control.
 
 ## Static files
 
@@ -183,17 +181,17 @@ In production, serving media from Django is slow and unsafe. Configure your reve
 - `STATICFILES_DIRS = [BASE_DIR.parent / 'frontend' / 'dist']`
 - `WHITENOISE_USE_FINDERS = True` and `WHITENOISE_AUTOREFRESH = True` (dev)
 
-In production, run `python manage.py collectstatic --noinput` and serve `/static/` via WhiteNoise middleware (already installed) or the reverse proxy.
+Authorized production collection: `python manage.py collectstatic --noinput`; serve `/static/` via installed WhiteNoise or reverse proxy.
 
 ## Templates
 
-Django looks for templates in:
+Template search order:
 
 1. `backend/templates/`
 2. `backend/../frontend/dist/`
 3. Every app's `templates/` directory (via `APP_DIRS`)
 
-PDF and email templates have a single source of truth in `backend/templates/`.
+Canonical PDF/email templates: `backend/templates/`.
 
 ## Settings modules
 
@@ -203,7 +201,7 @@ PDF and email templates have a single source of truth in `backend/templates/`.
 | `config.settings.development` | `DEBUG=True`, `ALLOWED_HOSTS=['*']` |
 | `config.settings.production` | `DEBUG=False`, requires `DJANGO_ALLOWED_HOSTS` |
 
-`manage.py` sets `DJANGO_SETTINGS_MODULE` to `development` by default. `wsgi.py` sets it to `production` by default. Override explicitly for any non-standard environment:
+`DJANGO_SETTINGS_MODULE` defaults: `manage.py` → `development`, `wsgi.py` → `production`; override explicitly for nonstandard environments:
 
 ```bash
 export DJANGO_SETTINGS_MODULE=config.settings.production
@@ -213,5 +211,3 @@ export DJANGO_SETTINGS_MODULE=config.settings.production
 
 - Operations → `05-operations.md`
 - Deployment → `04-deployment.md`
-
----

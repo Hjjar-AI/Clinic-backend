@@ -1,14 +1,30 @@
 # Backend agent guide
 
-- Before work, read `workCurrent.md`, `doneCurrent.md`, relevant work/plan files, and additional applicable `AGENTS.md`; use `README.md` for setup. For cross-project changes, also read the frontend handoff files.
-- Do not inspect, review, edit, or create migration files unless explicitly requested. The user normally starts with a fresh database. `bootstrap` and `runserver_auto` perform migration work; do not use them without authorization.
-- Do not inspect or review test-suite files unless explicitly requested to work on tests.
-- Do not run Gradle, builds, compilation, or packaging unless explicitly allowed. Simple development/debugging scripts and tools are allowed; do not treat their availability as permission to alter the project database.
-- Do not change dependency or application versions unless explicitly requested.
-- When the five-hour usage allowance reaches 20% remaining, finish the current step and stop; do not claim usage visibility if unavailable.
-- Preserve user changes. Keep these handoffs compact, update completed work and outstanding items, and distinguish verified behavior from unverified assumptions.
-- Django/DRF code lives in `apps/`, shared infrastructure in `core/`, settings in `config/`. Local API: port `5019`, prefix `/api/v1/`; sibling frontend: port `5173`.
-- Keep business validation and lifecycle transitions in services; preserve endpoint permissions and shared patient/care-team/historical-author scope.
-- Preserve immutable signed visit revisions and issued documents, server-authorized signing, expected-version checks, replayable idempotency, and cache invalidation after commit.
-- Archive preserves clinical history; pseudonymization retains signed identity snapshots. Keep full authenticated ZIP recovery distinct from catalog-only merge, and preserve preview/confirmation binding for imports and restore.
-- Never commit secrets or runtime data (`.env`, `data/`, `media/`, `backups/`, `staticfiles/`). Do not log patient records or credentials during debugging.
+## Workflow
+
+- Before editing, read [current](docs/workCurrent.md)/[completed](docs/doneCurrent.md) work, relevant plans, and applicable `AGENTS.md`; use [README.md](README.md) for setup. Read frontend instructions/handoffs for cross-project changes.
+- Keep `README.md`/`AGENTS.md` at root; other documentation, reviews, plans, and handoffs belong in `docs/`. Update local/cross-project references after moves; keep guides compact and link detailed records instead of duplicating them.
+- Preserve user changes and completed work. Reviews must identify findings, locations, impact, and corrections; fix requests require authorized implementation and verification, not suggestions alone.
+- Keep handoffs current: completions, outstanding work, verification, limitations. Separate confirmed defects from unverified behavior; do not reopen completed findings without evidence.
+
+## Limits
+
+- Unless explicitly requested, do not inspect/review/edit/create migration files or inspect/review test-suite files. The user normally starts with a fresh database. `bootstrap`/`runserver_auto` perform migration work and require authorization.
+- No Gradle, builds, compilation, or packaging without explicit permission. Simple development/debugging scripts/tools are allowed, but do not authorize project database changes. Preserve dependency/application versions, pinned requirements, and lockfiles unless version changes are explicitly requested.
+- At 20% remaining five-hour usage allowance, finish the current step and stop. Do not claim usage visibility when unavailable.
+
+## Models and contracts
+
+- Django/DRF: `apps/`; shared infrastructure: `core/`; settings: `config/`. API: port `5019`, `/api/v1/`; frontend: `5173`.
+- Requested model/logic changes may improve the fresh-database design without generating migrations. Trace services, serializers, endpoints, imports/exports, recovery, and frontend consumers; keep contracts consistent.
+- Put business validation/lifecycle transitions in services. Preserve endpoint permissions and shared patient/care-team/historical-author scope; UI permissions never replace backend authorization.
+- Preserve immutable signed visit revisions/issued documents, server-authorized signing, expected-version checks, replayable idempotency, and after-commit cache invalidation.
+- Preserve session/CSRF handling, response envelopes, frontend opening versions/`If-Match`, and stable operation keys across retries after uncertain responses.
+- Archive retains clinical history; pseudonymization retains signed identity snapshots. Keep full authenticated ZIP recovery distinct from catalog-only merge; imports/restores require bound previews/confirmations.
+- Consult the [implementation record](docs/backend-fixes-implementation.md) and [workflow checklist](docs/critical-workflow-checklist.md) when changing these contracts.
+
+## Verification and privacy
+
+- Use focused source/reference checks and isolated development probes within these limits. Exclude migrations, test suites, generated output, dependencies, and runtime data from broad searches; do not initialize/seed/restore project data merely to verify code.
+- Report checks and remaining uncertainty. Source parsing/SQLite probes do not verify browser/PDF rendering or PostgreSQL concurrency.
+- Never commit secrets/runtime data (`.env`, `data/`, `media/`, `backups/`, `staticfiles/`) or log patient records/credentials while debugging.

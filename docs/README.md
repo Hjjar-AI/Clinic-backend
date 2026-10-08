@@ -1,8 +1,6 @@
-# File 1 of 8: `docs/README.md`
-
 # MyClinic — Documentation
 
-Full-stack clinic management system. Django REST backend, Vue + Vite frontend.
+Clinic management: Django REST + Vue/Vite. Guides 01–07 retain historical examples; [current setup](../README.md) and [agent rules](../AGENTS.md) take precedence, including authorization for migration/build/test work.
 
 ## Where to start
 
@@ -34,18 +32,15 @@ Clinic/
 
 ## Conventions
 
-- **Dev port:** backend `5019`, frontend `5173`
-- **API base:** `/api/v1/`
-- **Response envelope:** every JSON response is `{ "data": … }` or `{ "error": { "code", "message", "errors" } }`
-- **Auth:** session cookie; login at `POST /api/v1/auth/login/`
-- **Permissions:** role-based (`admin`, `doctor`, `receptionist`) plus codename permissions on the user model
+- **Ports/API:** backend `5019`, frontend `5173`; `/api/v1/`
+- **JSON:** `{ "data": … }` or `{ "error": { "code", "message", "errors" } }`
+- **Auth:** session cookie; `POST /api/v1/auth/login/`
+- **Permissions:** roles (`admin`, `doctor`, `receptionist`) + user permission codenames
 
 ## Contributing
 
 1. Create a branch.
-2. Make changes; run `python manage.py test` if any exist (currently none — see `06-troubleshooting.md#no-tests`).
+2. Make changes; when authorized, run `python manage.py test` if present (historically none: `06-troubleshooting.md#no-tests`).
 3. Open a PR.
 
 Never commit `.env`, `data/`, `media/`, `backups/`, or `staticfiles/`.
-
----

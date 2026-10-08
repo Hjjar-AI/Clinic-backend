@@ -9,7 +9,7 @@ from .models import Invoice, InvoiceLine
 from apps.patients.models import Patient
 from apps.visits.models import Visit
 from core.exceptions import ConflictError
-from core.lifecycle import enforce_transition
+from core.lifecycle import enforce_transition, transition_reason
 
 class BillingService:
     INVOICE_PREFIX = 'INV'
@@ -71,13 +71,20 @@ class BillingService:
             discount = Decimal(str(data.get('discount', 0)))
         except (InvalidOperation, TypeError, ValueError):
             raise ValidationError({'amounts': ['قيمة مالية غير صالحة']})
-        if not all(amount.is_finite() for amount in (total, tax, discount)):
-            raise ValidationError({'amounts': ['قيمة مالية غير صالحة']})
-        if total < 0 or tax < 0 or discount < 0:
-            raise ValidationError(['المبالغ لا يمكن أن تكون سالبة'])
-        if discount > total + tax:
-            raise ValidationError({'discount': ['الخصم أكبر من المبلغ المستحق']})
-        return (total + tax - discount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        maximum = Decimal('99999999.99')
+        try:
+            for amount in (total, tax, discount):
+                if (not amount.is_finite() or amount < 0 or amount > maximum
+                        or amount != amount.quantize(Decimal('.01'))):
+                    raise ValueError()
+            final = total + tax - discount
+            if final < 0:
+                raise ValidationError({'discount': ['الخصم أكبر من المبلغ المستحق']})
+            if final > maximum:
+                raise ValueError()
+            return final.quantize(Decimal('.01'))
+        except (InvalidOperation, ValueError):
+            raise ValidationError({'amounts': ['قيمة مالية غير صالحة؛ يلزم استخدام منزلتين عشريتين ضمن الحد المسموح']})
 
     def _validate_dates(self, issued_date, due_date):
         if issued_date and due_date:
@@ -113,6 +120,8 @@ class BillingService:
             raise ValidationError(['المريض غير موجود'])
         if data.get('visit') is not None and not visit:
             raise ValidationError(['الزيارة غير صالحة'])
+        if visit:
+            visit = Visit.all_objects.select_for_update().get(pk=visit.pk)
         if visit and (visit.deleted_at is not None or not visit.is_active):
             raise ValidationError(['الزيارة غير صالحة'])
         if visit and visit.patient_id != patient.id:
@@ -177,7 +186,7 @@ class BillingService:
             data.get('due_date', invoice.due_date),
         )
         for k, v in data.items():
-            if k not in {'version', 'invoice_number'}:
+            if k in {'total_amount', 'tax', 'discount', 'payment_method', 'issued_date', 'due_date', 'notes', 'currency'}:
                 setattr(invoice, k, v)
         invoice.final_amount = final_amount
         invoice.version += 1
@@ -206,10 +215,9 @@ class BillingService:
         changed = enforce_transition('invoice', invoice.status, target_status)
         if not changed:
             return invoice
-        if target_status == 'cancelled' and not str(reason).strip():
-            raise ValidationError({'reason': ['سبب الإلغاء مطلوب']})
+        reason = transition_reason(reason, required=target_status == 'cancelled')
         if payment_method is not None:
-            if target_status != 'paid' or payment_method not in {'cash', 'card', 'bank_transfer', 'insurance', 'other'}:
+            if target_status != 'paid' or not isinstance(payment_method, str) or payment_method not in {'cash', 'card', 'bank_transfer', 'insurance', 'other'}:
                 raise ValidationError({'payment_method': ['طريقة الدفع غير صالحة']})
             invoice.payment_method = payment_method
         if target_status == 'paid' and not invoice.payment_method:
@@ -226,7 +234,7 @@ class BillingService:
             invoice.paid_at = timezone.now()
             invoice.paid_by = actor
         invoice.status = target_status
-        invoice.status_reason = str(reason).strip() if reason else ''
+        invoice.status_reason = reason
         invoice.issued_date = issued_date
         invoice.version += 1
         invoice.full_clean()

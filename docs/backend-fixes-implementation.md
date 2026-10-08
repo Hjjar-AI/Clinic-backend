@@ -58,3 +58,5 @@ Checks used temporary scripts/new in-memory SQLite via Django schema editor; no 
 - Parser-only JavaScript checks passed for changed JS/Vue script sections. No frontend build or compilation was run.
 
 Unverified: PDF layout/rendering, browser interaction, PostgreSQL/concurrent writers. Probe runtime: Python 3.14; not proof every pinned dependency supports it. Migration generation/schema application remain excluded as requested.
+
+Second-pass findings and verification: [backend-second-pass.md](backend-second-pass.md).

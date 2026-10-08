@@ -66,6 +66,17 @@ class BackupCreatorService:
         for path in media_paths():
             with default_storage.open(path, 'rb') as file:
                 members['media/' + path] = file.read()
+        # A complete backup must recover every referenced clinical file, not
+        # merely authenticate whichever files happened to exist in storage.
+        records = json.loads(members['backup.json'])['data']['records']
+        for record in records:
+            if record['model'] not in {'patients.patientdocument', 'visits.visitattachment'}:
+                continue
+            fields = record['fields']
+            content = members.get('media/' + fields['filepath'])
+            if (content is None or len(content) != fields['file_size']
+                    or hashlib.sha256(content).hexdigest() != fields['checksum']):
+                raise ValueError('Clinical file is missing or inconsistent; reconcile media before backup')
         manifest = {'format_version': 2, 'members': {
             name: {'sha256': hashlib.sha256(value).hexdigest(), 'size': len(value)}
             for name, value in members.items()}}

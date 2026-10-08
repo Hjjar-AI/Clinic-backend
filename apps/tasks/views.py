@@ -41,12 +41,7 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        version = self.request.data.get('version')
-        if version is not None:
-            try:
-                version = int(version)
-            except (ValueError, TypeError):
-                version = None
+        version = request_version(self.request)
         data = serializer.validated_data.copy()
         data.pop('version', None)
         # Service owns the optimistic-lock check + field assignment, matching
@@ -59,36 +54,21 @@ class TaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['put'])
     def complete(self, request, pk=None):
         task = self.get_object()
-        version = request.data.get('version')
-        if version is not None:
-            try:
-                version = int(version)
-            except (ValueError, TypeError):
-                version = None
+        version = request_version(request)
         updated = self.service.complete_task(task, request.user, version)
         return Response({'data': self.get_serializer(updated).data, 'message': 'تم إكمال المهمة'})
 
     @action(detail=True, methods=['put'])
     def cancel(self, request, pk=None):
         task = self.get_object()
-        version = request.data.get('version')
-        if version is not None:
-            try:
-                version = int(version)
-            except (ValueError, TypeError):
-                version = None
+        version = request_version(request)
         updated = self.service.cancel_task(task, request.user, version, request.data.get('reason', ''))
         return Response({'data': self.get_serializer(updated).data, 'message': 'تم إلغاء المهمة'})
 
     @action(detail=True, methods=['put'])
     def activate(self, request, pk=None):
         task = self.get_object()
-        version = request.data.get('version')
-        if version is not None:
-            try:
-                version = int(version)
-            except (ValueError, TypeError):
-                version = None
+        version = request_version(request)
         updated = self.service.activate_task(task, request.user, version)
         return Response({'data': self.get_serializer(updated).data, 'message': 'تم تنشيط المهمة'})
 
@@ -98,11 +78,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         target = request.data.get('status')
         if not target:
             return error_response(400, 'status is required', {'status': ['هذا الحقل مطلوب']})
-        version = request.data.get('version')
-        try:
-            version = int(version) if version is not None else None
-        except (ValueError, TypeError):
-            version = None
+        version = request_version(request)
         updated = self.service.transition_task(
             task, target, request.user, version, request.data.get('reason', '')
         )

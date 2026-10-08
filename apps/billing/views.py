@@ -95,12 +95,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        version = self.request.data.get('version')
-        if version is not None:
-            try:
-                version = int(version)
-            except (ValueError, TypeError):
-                version = None
+        version = request_version(self.request)
         data = serializer.validated_data.copy()
         data.pop('version', None)
         serializer.instance = self.service.update_invoice(instance, data, version)
@@ -114,13 +109,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         target = request.data.get('status')
         if not target:
             return error_response(400, 'status is required', {'status': ['هذا الحقل مطلوب']})
-        version = request.data.get('version')
-        if version is None:
-            raise ValidationError({'version': ['يجب توفير رقم الإصدار']})
-        try:
-            version = int(version)
-        except (ValueError, TypeError):
-            raise ValidationError({'version': ['رقم الإصدار غير صالح']})
+        version = request_version(request)
         updated = self.service.transition(
             invoice, target, request.user, version, request.data.get('reason', ''), payment_method=request.data.get('payment_method')
         )

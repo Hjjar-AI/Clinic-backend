@@ -1,7 +1,8 @@
 # Current work
 
-Updated: 2026-10-08. Backend review fixes/documentation complete; no active implementation.
+Updated: 2026-10-08. Second backend model/logic review fixes complete; see [second-pass findings and verification](backend-second-pass.md). No active implementation.
 
+- Pending: API regression under pinned Django/DRF (temporary dependency download unavailable); browser care-team/document/conflict flows.
 - Unverified, not confirmed defects: PDF/Arabic rendering, frontend browser workflows, PostgreSQL/concurrent writers.
 - Fresh schema initialization remains separate; no migrations generated/applied. Migrations, test-suite access, builds/compilation/packaging, version changes require explicit authorization.
 - Preserve signed history/documents, server signing, shared scope, versioned writes, idempotent replay, after-commit invalidation. Archive retains history; pseudonymization retains signed identities.

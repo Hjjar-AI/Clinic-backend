@@ -3,19 +3,32 @@ from core.mutation import check_mutation
 from django.db import transaction
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from datetime import datetime, timedelta, time
+from datetime import date, datetime, timedelta, time
 from django.conf import settings
 from .models import Appointment
 from apps.accounts.models import User
 from apps.patients.models import Patient
 from core.exceptions import ConflictError
-from core.lifecycle import enforce_transition
+from core.lifecycle import enforce_transition, transition_reason
 
 
 class AppointmentService:
     OCCUPYING_STATUSES = {'scheduled', 'confirmed', 'arrived'}
     WORK_START = time(settings.WORK_START_HOUR, settings.WORK_START_MINUTE)
     WORK_END = time(settings.WORK_END_HOUR, settings.WORK_END_MINUTE)
+
+    @staticmethod
+    def _schedule_values(day, clock):
+        try:
+            if isinstance(day, str):
+                day = date.fromisoformat(day)
+            if isinstance(clock, str):
+                clock = time.fromisoformat(clock)
+        except ValueError:
+            raise ValidationError({'schedule': ['صيغة التاريخ أو الوقت غير صحيحة']})
+        if type(day) is not date or not isinstance(clock, time) or clock.tzinfo is not None:
+            raise ValidationError({'schedule': ['تاريخ ووقت محلي صحيحان مطلوبان']})
+        return day, clock
 
     def _lock_doctor_schedule(self, doctor_id):
         """
@@ -133,16 +146,7 @@ class AppointmentService:
         # only for legacy callers that still pass the old key.
         duration = data.get('duration_minutes', data.get('duration', 30))
 
-        # Item #5: guard strptime so a malformed date string returns a clean
-        # ValidationError (mapped to 400 by the exception handler) instead of
-        # an unhandled 500.
-        if isinstance(date_str, str):
-            try:
-                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-            except (ValueError, TypeError):
-                raise ValidationError(['صيغة التاريخ غير صحيحة'])
-        else:
-            date_obj = date_str
+        date_obj, time_obj = self._schedule_values(date_str, time_obj)
 
         # Acquire the per-doctor booking lock BEFORE the availability check.
         # Without this, two concurrent requests for the same slot can both
@@ -165,6 +169,7 @@ class AppointmentService:
             status='scheduled',
             notes=data.get('notes', ''),
         )
+        appointment.full_clean()
         appointment.save()
         return appointment
 
@@ -187,6 +192,7 @@ class AppointmentService:
         if new_doctor is not None and new_doctor != appointment.doctor:
             raise ValidationError(['لا يمكن تغيير الطبيب المرتبط بالموعد'])
 
+        data = data.copy()
         # Strip these from data so the assignment loop below can't touch them.
         data.pop('patient', None)
         data.pop('doctor', None)
@@ -195,6 +201,8 @@ class AppointmentService:
 
         new_date = data.get('appointment_date', appointment.appointment_date)
         new_time = data.get('appointment_time', appointment.appointment_time)
+        new_date, new_time = self._schedule_values(new_date, new_time)
+        data['appointment_date'], data['appointment_time'] = new_date, new_time
         # F5: canonical key.
         new_duration = data.get('duration_minutes', data.get('duration', appointment.duration_minutes))
 
@@ -208,8 +216,8 @@ class AppointmentService:
             raise ValidationError({'status': ['لا يمكن نقل موعد مكتمل']})
         if target_status != appointment.status:
             enforce_transition('appointment', appointment.status, target_status)
-            if target_status in {'cancelled', 'no-show'} and not str(data.get('status_reason') or '').strip():
-                raise ValidationError({'status_reason': ['سبب الإلغاء أو عدم الحضور مطلوب']})
+            data['status_reason'] = transition_reason(
+                data.get('status_reason'), required=target_status in {'cancelled', 'no-show'})
 
         self._validate_duration(new_duration)
         data['duration_minutes'] = new_duration
@@ -230,14 +238,16 @@ class AppointmentService:
             appointment.reminder_sent = False
             appointment.reminder_sent_hour = False
 
-        if target_status != appointment.status:
-            data['status_reason'] = str(data.get('status_reason') or '').strip()
+        if 'status_reason' in data:
+            data['status_reason'] = transition_reason(
+                data['status_reason'], required=target_status in {'cancelled', 'no-show'})
         # Reminder delivery state belongs to the scheduler, not API input.
         for k, v in data.items():
             if k in {'appointment_date', 'appointment_time', 'duration_minutes',
                      'status', 'status_reason', 'notes'}:
                 setattr(appointment, k, v)
         appointment.version += 1
+        appointment.full_clean()
         appointment.save()
         return appointment
 
@@ -280,6 +290,7 @@ class AppointmentService:
         appointment.reminder_sent = False
         appointment.reminder_sent_hour = False
         appointment.version += 1
+        appointment.full_clean()
         appointment.save()
         return appointment
 
@@ -294,8 +305,7 @@ class AppointmentService:
         changed = enforce_transition('appointment', appointment.status, target_status)
         if not changed:
             return appointment
-        if target_status in {'cancelled', 'no-show'} and not str(reason).strip():
-            raise ValidationError({'status_reason': ['سبب الإلغاء أو عدم الحضور مطلوب']})
+        reason = transition_reason(reason, required=target_status in {'cancelled', 'no-show'})
         if target_status in self.OCCUPYING_STATUSES and appointment.status not in self.OCCUPYING_STATUSES:
             self._lock_doctor_schedule(appointment.doctor_id)
             if not self.is_time_available(
@@ -305,7 +315,7 @@ class AppointmentService:
             ):
                 raise ValidationError(['هذا الوقت محجوز بالفعل'])
         appointment.status = target_status
-        appointment.status_reason = str(reason).strip() if reason else ''
+        appointment.status_reason = reason
         if target_status == 'scheduled':
             appointment.reminder_sent = False
             appointment.reminder_sent_hour = False
@@ -313,6 +323,7 @@ class AppointmentService:
             appointment.reminder_sent = target_status not in {'confirmed'}
             appointment.reminder_sent_hour = target_status not in {'confirmed'}
         appointment.version += 1
+        appointment.full_clean()
         appointment.save(update_fields=[
             'status', 'status_reason', 'reminder_sent', 'reminder_sent_hour', 'version', 'updated_at',
         ])

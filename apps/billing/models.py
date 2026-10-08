@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import models
+from django.db.models.functions import Round
 from django.core.validators import MinValueValidator
 from core.models import TimeStampedModel, SoftDeleteModel
 
@@ -78,12 +79,12 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
                 name='invoice_amounts_nonnegative',
             ),
             models.CheckConstraint(
-                check=models.Q(discount__lte=models.F('total_amount') + models.F('tax')),
+                check=models.Q(discount__lte=Round(models.F('total_amount') + models.F('tax'), precision=2)),
                 name='invoice_discount_not_excessive',
             ),
             models.CheckConstraint(
                 check=models.Q(
-                    final_amount=models.F('total_amount') + models.F('tax') - models.F('discount')
+                    final_amount=Round(models.F('total_amount') + models.F('tax') - models.F('discount'), precision=2)
                 ),
                 name='invoice_final_amount_matches',
             ),

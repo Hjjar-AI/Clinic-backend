@@ -1,4 +1,5 @@
 from core.mutation import request_version
+from core.access import accessible_patients
 # backend/apps/patients/views.py
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
@@ -90,12 +91,7 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        version = self.request.data.get('version')
-        if version is not None:
-            try:
-                version = int(version)
-            except (ValueError, TypeError):
-                version = None
+        version = request_version(self.request)
         updated = self.service.update_patient(
             instance,
             serializer.validated_data,
@@ -209,58 +205,45 @@ class PatientViewSet(viewsets.ModelViewSet):
         patient = self.get_object()
         members = self.service.get_care_team(patient)
         serializer = CareTeamMemberSerializer(members, many=True)
-        return Response({'data': {'care_team': serializer.data}})
+        return Response({'data': {'care_team': serializer.data, 'version': patient.version}},
+                        headers={'X-Resource-Version': str(patient.version)})
 
     @action(detail=True, methods=['post'])
     def care_team_add(self, request, pk=None):
         patient = self.get_object()
         user_id = request.data.get('user_id')
         role = request.data.get('role', '')
-        member = self.service.add_care_team_member(patient, user_id, role)
+        member, version = self.service.add_care_team_member(
+            patient, user_id, role, request_version(request))
+        log_action(request.user.id, 'care_team_add', 'Patient', patient.pk, {'user_id': member.user_id})
         serializer = CareTeamMemberSerializer(member)
-        return Response({'data': serializer.data}, status=status.HTTP_201_CREATED)
+        return Response({'data': serializer.data}, status=status.HTTP_201_CREATED,
+                        headers={'X-Resource-Version': str(version)})
 
     @action(detail=True, methods=['delete'], url_path='care-team/(?P<user_id>[^/.]+)')
     def care_team_remove(self, request, pk=None, user_id=None):
         patient = self.get_object()
-        self.service.remove_care_team_member(patient, int(user_id))
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        version = self.service.remove_care_team_member(patient, user_id, request_version(request))
+        log_action(request.user.id, 'care_team_remove', 'Patient', patient.pk, {'user_id': user_id})
+        return Response(status=status.HTTP_204_NO_CONTENT, headers={'X-Resource-Version': str(version)})
 
 
 class PatientDocumentViewSet(viewsets.ModelViewSet):
     serializer_class = PatientDocumentSerializer
-    permission_classes = [permissions.IsAuthenticated, HasManagePatientDocuments]
+    permission_classes = [permissions.IsAuthenticated, HasViewPatients, HasManagePatientDocuments]
     service = PatientDocumentService()
 
     def get_queryset(self):
-        patient_id = self.kwargs.get('patient_pk')
-        patient = get_object_or_404(Patient, pk=patient_id)
-        user = self.request.user
-        if not user.has_perm(PERM_VIEW_PATIENTS):
-            return PatientDocument.objects.none()
-        if user.role == 'admin':
-            pass
-        elif user.role == 'doctor':
-            if patient.doctor_id != user.id:
-                return PatientDocument.objects.none()
-        elif user.role == 'receptionist':
-            if patient.doctor_id != user.id and patient.created_by_id != user.id:
-                return PatientDocument.objects.none()
-        else:
-            return PatientDocument.objects.none()
-        return PatientDocument.objects.filter(
-            patient_id=patient_id,
-            deleted_at__isnull=True,
-        ).select_related('uploaded_by')
+        patient = get_object_or_404(accessible_patients(self.request.user, include_archived=True),
+                                    pk=self.kwargs.get('patient_pk'))
+        return PatientDocument.objects.filter(patient=patient).select_related('uploaded_by')
+
+    def perform_update(self, serializer):
+        serializer.instance = self.service.update_document(
+            self.get_object(), serializer.validated_data, request_version(self.request))
 
     def create(self, request, patient_pk=None):
-        patient = get_object_or_404(Patient, pk=patient_pk)
-        # Check access to patient (IDOR fix)
-        user = request.user
-        if user.role == 'doctor' and patient.doctor_id != user.id:
-            return error_response(403, 'غير مصرح', {})
-        if user.role == 'receptionist' and patient.doctor_id != user.id and patient.created_by_id != user.id:
-            return error_response(403, 'غير مصرح', {})
+        patient = get_object_or_404(accessible_patients(request.user), pk=patient_pk)
         file = request.FILES.get('file')
         if not file:
             return error_response(400, 'الملف مطلوب', {})
@@ -275,7 +258,7 @@ class PatientDocumentViewSet(viewsets.ModelViewSet):
         return Response({'data': serializer.data}, status=status.HTTP_201_CREATED)
 
     def perform_destroy(self, instance):
-        self.service.soft_delete_document(instance)
+        self.service.soft_delete_document(instance, request_version(self.request))
 
     @action(detail=True, methods=['get'])
     def download(self, request, patient_pk=None, pk=None):

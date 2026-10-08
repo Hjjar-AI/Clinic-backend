@@ -1,3 +1,4 @@
+from core.mutation import parse_version
 # backend/apps/accounts/services.py
 from django.contrib.auth import authenticate, login, logout
 from django.core.exceptions import ValidationError
@@ -120,8 +121,7 @@ class UserService:
             role='admin', is_active=True
         ).order_by('pk').values_list('pk', flat=True))
         user = User.objects.select_for_update().get(pk=user.pk)
-        if expected_version is None:
-            raise ValidationError({'version': ['يجب توفير رقم الإصدار']})
+        expected_version = parse_version(expected_version)
         if user.version != expected_version:
             raise ConflictError('تم تعديل المستخدم بواسطة مستخدم آخر')
         # Enforce privilege escalation prevention: only superusers can modify these fields.

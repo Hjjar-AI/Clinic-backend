@@ -23,6 +23,12 @@ from core.normalization import (
 from core.query_utils import apply_ordering
 
 class PatientService:
+    EDITABLE_FIELDS = {
+        'first_name', 'father_name', 'surname', 'mother_name', 'dob_year', 'gender',
+        'national_id', 'marital_status', 'occupation', 'permanent_address', 'phone',
+        'emergency_contact_name', 'emergency_contact_relation', 'emergency_contact_phone',
+        'family_history', 'important_notes', 'admission_date', 'doctor',
+    }
     IDENTITY_FIELDS = ('first_name', 'father_name', 'surname', 'mother_name')
 
     def _normalize(self, data):
@@ -64,7 +70,7 @@ class PatientService:
             if not (phone.startswith('0') or phone.startswith('+963')):
                 errors.append('رقم الهاتف غير صالح')
         dob_year = data.get('dob_year')
-        if dob_year is not None and not (1900 <= dob_year <= timezone.localdate().year):
+        if dob_year is not None and (type(dob_year) is not int or not (1900 <= dob_year <= timezone.localdate().year)):
             errors.append('سنة الميلاد غير صالحة')
         if errors:
             raise ValidationError(errors)
@@ -121,6 +127,7 @@ class PatientService:
         )
         try:
             with transaction.atomic():
+                patient.full_clean()
                 patient.save()
         except IntegrityError:
             if patient.national_id and Patient.objects.filter(
@@ -149,11 +156,12 @@ class PatientService:
 
         # Exclude version and doctor_id from assignment loop
         for k, v in data.items():
-            if hasattr(patient, k) and k not in ['doctor_id', 'version']:
+            if k in self.EDITABLE_FIELDS:
                 setattr(patient, k, v)
         patient.version += 1
         try:
             with transaction.atomic():
+                patient.full_clean()
                 patient.save()
         except IntegrityError:
             if patient.national_id and Patient.objects.filter(
@@ -277,23 +285,44 @@ class PatientService:
     def get_care_team(self, patient):
         return patient.care_team.select_related('user').all()
 
-    def add_care_team_member(self, patient, user_id, role):
-        role = str(role or '').strip()
-        if not role:
-            raise ValidationError({'role': ['دور عضو فريق الرعاية مطلوب']})
+    @staticmethod
+    def _member_id(user_id):
+        from core.mutation import parse_version
+        try:
+            return parse_version(user_id)
+        except ValidationError:
+            raise ValidationError({'user_id': ['معرف مستخدم صحيح مطلوب']})
+
+    @transaction.atomic
+    def add_care_team_member(self, patient, user_id, role, expected_version=None):
+        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        check_mutation(patient, expected_version)
+        user_id = self._member_id(user_id)
+        if not isinstance(role, str) or not role.strip() or len(role.strip()) > 50:
+            raise ValidationError({'role': ['دور عضو فريق الرعاية مطلوب وبحد أقصى 50 حرف']})
         if PatientCareTeam.objects.filter(patient=patient, user_id=user_id).exists():
             raise ValidationError(['العضو موجود بالفعل'])
         user = User.objects.filter(id=user_id, is_active=True).first()
         if not user:
             raise ValidationError(['المستخدم غير موجود'])
-        member = PatientCareTeam.objects.create(patient=patient, user=user, role=role)
-        return member
+        member = PatientCareTeam(patient=patient, user=user, role=role.strip())
+        member.full_clean()
+        member.save()
+        patient.version += 1
+        patient.save(update_fields=['version', 'updated_at'])
+        return member, patient.version
 
-    def remove_care_team_member(self, patient, user_id):
+    @transaction.atomic
+    def remove_care_team_member(self, patient, user_id, expected_version=None):
+        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        check_mutation(patient, expected_version)
+        user_id = self._member_id(user_id)
         deleted, _ = PatientCareTeam.objects.filter(patient=patient, user_id=user_id).delete()
         if deleted == 0:
             raise ValidationError(['العضو غير موجود'])
-        return True
+        patient.version += 1
+        patient.save(update_fields=['version', 'updated_at'])
+        return patient.version
 
 class PatientDocumentService:
     @transaction.atomic
@@ -317,9 +346,20 @@ class PatientDocumentService:
             raise
 
     @transaction.atomic
-    def soft_delete_document(self, doc):
+    def update_document(self, doc, data, expected_version):
         doc = PatientDocument.all_objects.select_for_update().get(pk=doc.pk)
-        if not doc.is_active or doc.deleted_at:
-            raise ConflictError('المستند مؤرشف')
+        check_mutation(doc, expected_version)
+        for field in ('category', 'description'):
+            if field in data:
+                setattr(doc, field, data[field])
+        doc.version += 1
+        doc.full_clean()
+        doc.save(update_fields=['category', 'description', 'version', 'updated_at'])
+        return doc
+
+    @transaction.atomic
+    def soft_delete_document(self, doc, expected_version):
+        doc = PatientDocument.all_objects.select_for_update().get(pk=doc.pk)
+        check_mutation(doc, expected_version)
         doc.soft_delete()
         return True

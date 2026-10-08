@@ -1,3 +1,4 @@
+from core.mutation import request_version
 # backend/apps/appointments/views.py
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
@@ -77,12 +78,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        version = self.request.data.get('version')
-        if version is not None:
-            try:
-                version = int(version)
-            except (ValueError, TypeError):
-                version = None
+        version = request_version(self.request)
         data = serializer.validated_data.copy()
         data.pop('version', None)
         serializer.instance = self.service.update_appointment(instance, data, version)
@@ -270,13 +266,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                 datetime.strptime(new_time, '%H:%M:%S')
             except (ValueError, TypeError):
                 return error_response(400, 'Invalid time format; expected HH:MM', {})
-        version = request.data.get('version')
-        if version is None:
-            return error_response(400, 'version is required', {})
-        try:
-            version = int(version)
-        except (ValueError, TypeError):
-            return error_response(400, 'version must be an integer', {})
+        version = request_version(request)
         updated = self.service.reschedule(apt, new_date, new_time, version)
         return Response({'data': self.get_serializer(updated).data, 'message': 'تم نقل الموعد'})
 

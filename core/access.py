@@ -26,7 +26,7 @@ def accessible_patients(user, include_archived=False):
 
 def accessible_visits(user):
     from apps.visits.models import Visit
-    return Visit.objects.filter(patient__in=accessible_patients(user, True)).distinct()
+    return Visit.objects.filter(patient__in=accessible_patients(user, True))
 
 
 def accessible_appointments(user):

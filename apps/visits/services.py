@@ -203,7 +203,7 @@ class VisitService:
     def mark_all_overdue(self, user):
         from core.access import accessible_visits
         visits = accessible_visits(user).select_for_update().filter(
-            follow_up_date__lt=timezone.localdate(), follow_up_outcome='pending')
+            follow_up_date__lt=timezone.localdate(), follow_up_outcome='pending').order_by('pk')
         count = 0
         for visit in visits:
             self.complete_follow_up(visit, user, visit.version, 'missed')

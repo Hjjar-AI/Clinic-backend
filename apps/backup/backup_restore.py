@@ -11,6 +11,8 @@ from django.core.files.base import ContentFile
 from django.core.management.color import no_style
 from django.core.exceptions import ValidationError
 from django.db import connection, transaction
+from django.db.models import Value
+from django.db.models.functions import Lower, Trim
 from django.contrib.sessions.models import Session
 from django.utils import timezone
 from .backup_validation import BackupValidationService
@@ -78,7 +80,10 @@ class BackupRestoreService:
             raise ValueError('Backup uses an incomplete legacy schema; full recovery is unsupported')
         models = {model._meta.label_lower: model for model in backup_models()}
         records = data.get('records')
-        if not isinstance(records, list) or set(metadata.get('counts', {})) != set(models):
+        declared_counts = metadata.get('counts')
+        if (not isinstance(records, list) or not isinstance(declared_counts, dict)
+                or set(declared_counts) != set(models)
+                or any(type(count) is not int or count < 0 for count in declared_counts.values())):
             raise ValueError('Backup schema does not match this installation')
         identifiers = set()
         objects = []
@@ -91,6 +96,7 @@ class BackupRestoreService:
                     raise ValueError('Invalid or duplicate record identifier')
                 identifiers.add(key)
                 obj.object.clean_fields(exclude=[field.name for field in model._meta.fields if field.is_relation])
+                obj.object.clean()
                 if label == 'visits.visit':
                     from apps.visits.input_validation import clinical_object
                     from apps.visits.lab_validation import normalize_lab_values
@@ -117,8 +123,21 @@ class BackupRestoreService:
                 path = obj.object.filepath
                 if not path or PurePosixPath(path).is_absolute() or '..' in PurePosixPath(path).parts or '\\' in path:
                     raise ValueError('Invalid attachment path')
-                if require_media and path not in media and not default_storage.exists(path):
-                    raise ValueError('Backup references missing files; use a complete ZIP backup with media')
+                if require_media:
+                    if path in media:
+                        content = media[path]
+                        size, checksum = len(content), hashlib.sha256(content).hexdigest()
+                    elif default_storage.exists(path):
+                        size, digest = 0, hashlib.sha256()
+                        with default_storage.open(path, 'rb') as stored:
+                            for chunk in stored.chunks():
+                                size += len(chunk)
+                                digest.update(chunk)
+                        checksum = digest.hexdigest()
+                    else:
+                        raise ValueError('Backup references missing files; use a complete ZIP backup with media')
+                    if size != obj.object.file_size or checksum != obj.object.checksum:
+                        raise ValueError('Attachment metadata does not match file content')
         return data, objects, media
 
     def _verify_backup(self, stream):
@@ -146,6 +165,8 @@ class BackupRestoreService:
                 'sessions_will_be_revoked': restore_patients}
 
     def execute_restore(self, stream, restore_patients=True, restore_diagnoses=True, restore_medications=True):
+        if not any((restore_patients, restore_diagnoses, restore_medications)):
+            raise ValueError('Select a restore scope')
         data, objects, media = self._read(stream, require_media=restore_patients)
         full = restore_patients and restore_diagnoses and restore_medications
         if restore_patients and not full:
@@ -169,13 +190,25 @@ class BackupRestoreService:
                         lookup = {key: values.pop(key) for key in ('generic_english', 'dosage', 'brand_english')}
                     values.pop('version', None)
                     values['archived_by'] = None
-                    existing = model._base_manager.select_for_update().filter(**lookup).first()
+                    queryset = model._base_manager.select_for_update()
+                    if model._meta.model_name == 'medicationoption':
+                        # Match the same database Lower/Trim identity as the unique constraint.
+                        for index, (key, value) in enumerate(lookup.items()):
+                            alias = f'identity_{index}'
+                            queryset = queryset.alias(**{alias: Lower(Trim(key))}).filter(
+                                **{alias: Lower(Trim(Value(value)))})
+                    else:
+                        queryset = queryset.filter(**lookup)
+                    existing = queryset.first()
                     if existing:
                         for key, value in values.items(): setattr(existing, key, value)
                         existing.version += 1
+                        existing.full_clean()
                         existing.save()
                     else:
-                        model._base_manager.create(**lookup, **values)
+                        restored = model(**lookup, **values)
+                        restored.full_clean()
+                        restored.save()
             return True
         # Restore media with compensation if database loading fails. Existing unrelated
         # files are retained; no whole-directory deletion is needed for recovery.

@@ -2,6 +2,8 @@
 
 Updated: 2026-10-08.
 
+- Second backend review: strict versions, document/care-team access and writes, service validation, stable lock queries, fractional billing constraints, scale bounds, doctor lookup privacy, backup integrity/catalog merge; coordinated frontend versions/member fields. Passed 101 isolated backend assertions (system Django 5.2.9; missing integration boundaries excluded), 10 frontend version assertions and source syntax checks. Pinned HTTP/browser/PostgreSQL verification remains pending. See [second-pass record](backend-second-pass.md).
+
 - Enhanced/compacted both root agent guides: agreed limits, docs/handoff locations, review/fix workflow, verification boundaries, model/API and CSS/layout/RTL conventions.
 
 - Moved both projects' handoffs to `docs/`; retained root `README.md`/`AGENTS.md`, updated local/cross-project links. Compacted other Markdown, preserving technical content/verification history.

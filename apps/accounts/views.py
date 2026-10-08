@@ -125,11 +125,8 @@ class UserViewSet(viewsets.ModelViewSet):
         data = serializer.validated_data.copy()
         # No need to pop/reinsert password; service handles it.
         # Remove version from data to avoid accidental overwrite.
-        version = data.pop('version', self.request.data.get('version'))
-        try:
-            version = int(version) if version is not None else None
-        except (ValueError, TypeError):
-            raise ValidationError({'version': ['رقم الإصدار غير صالح']})
+        data.pop('version', None)
+        version = request_version(self.request)
         updated_user = self.service.update_user(
             instance, request=self.request, expected_version=version, **data
         )
@@ -141,8 +138,7 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def doctors(self, request):
         doctors = self.queryset.filter(role__in=['doctor', 'admin'])
-        serializer = self.get_serializer(doctors, many=True)
-        return Response({'data': serializer.data})
+        return Response({'data': list(doctors.values('id', 'username', 'full_name', 'role'))})
 
     @action(detail=True, methods=['get'])
     def permissions(self, request, pk=None):
@@ -173,10 +169,7 @@ class UserViewSet(viewsets.ModelViewSet):
         perm_codenames = request.data.get('permissions', [])
         if not isinstance(perm_codenames, list) or any(not isinstance(item, str) for item in perm_codenames):
             raise ValidationError({'permissions': ['قائمة أسماء صلاحيات مطلوبة']})
-        try:
-            expected_version = int(request.data.get('version'))
-        except (ValueError, TypeError):
-            return error_response(400, 'version is required', {'version': ['رقم الإصدار مطلوب']})
+        expected_version = request_version(request)
         user = User.objects.select_for_update().get(pk=user.pk)
         if user.version != expected_version:
             raise ConflictError('تم تعديل صلاحيات المستخدم بواسطة مستخدم آخر')

@@ -41,7 +41,7 @@ AUDIT_FIELDS = {
                          'is_active', 'deleted_at'],
     'ClinicalScale': ['name', 'is_active', 'deleted_at'],
     'ClinicalNoteTemplate': ['name', 'category', 'is_active', 'deleted_at'],
-    'PatientDocument': ['original_filename', 'category', 'is_active', 'deleted_at'],
+    'PatientDocument': ['original_filename', 'category', 'version', 'is_active', 'deleted_at'],
     'VisitAttachment': ['original_filename', 'is_active', 'deleted_at'],
 }
 

@@ -39,9 +39,15 @@ def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None)
         if not isinstance(label, str) or len(label) > 200:
             raise ValidationError({'scale_responses': ['عنوان سؤال غير صالح']})
         field_type = field_value('field_type', 'slider')
-        minimum = float(field_value('min_val', 0))
-        maximum = float(field_value('max_val', 10))
-        if maximum <= minimum:
+        try:
+            minimum = float(field_value('min_val', 0))
+            maximum = float(field_value('max_val', 10))
+            step = float(field_value('step', 1))
+        except (TypeError, ValueError, OverflowError):
+            raise ValidationError({'scale_responses': ['تعريف رقمي غير صالح']})
+        if (not isinstance(field_type, str) or field_type not in {'slider', 'text'}
+                or not all(math.isfinite(v) for v in (minimum, maximum, step))
+                or step <= 0 or maximum <= minimum):
             raise ValidationError({'scale_responses': [f'نطاق غير صالح للسؤال: {label}']})
         default = field_value('default', minimum)
         key = str(field_id)
@@ -52,13 +58,12 @@ def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None)
             try:
                 if isinstance(value, bool): raise ValueError()
                 value = float(value)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 raise ValidationError({'scale_responses': [f'قيمة غير رقمية للسؤال: {label}']})
-            step = float(field_value('step', 1))
             if not all(math.isfinite(v) for v in (value, minimum, maximum, step)) or step <= 0:
                 raise ValidationError({'scale_responses': ['قيمة رقمية غير صالحة']})
             increments = (value - minimum) / step
-            if not math.isclose(increments, round(increments), abs_tol=1e-7):
+            if not math.isfinite(increments) or not math.isclose(increments, round(increments), abs_tol=1e-7):
                 raise ValidationError({'scale_responses': [f'القيمة لا تطابق الخطوة: {label}']})
             if value < minimum or value > maximum:
                 raise ValidationError({'scale_responses': [f'قيمة السؤال خارج النطاق: {label}']})
@@ -77,7 +82,7 @@ def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None)
             'field_type': field_type,
             'min_val': minimum,
             'max_val': maximum,
-            'step': float(field_value('step', 1)),
+            'step': step,
             'default': default,
             'options': field_value('options'),
             'order': int(field_value('order', 0)),

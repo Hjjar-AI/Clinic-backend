@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import re
 from django.conf import settings
 
 
@@ -13,7 +14,8 @@ class BackupValidationService:
         return hmac.new(settings.BACKUP_HMAC_KEY.encode(), data, hashlib.sha256).hexdigest()
 
     def verify_signature(self, data, signature):
-        return isinstance(signature, str) and hmac.compare_digest(self._sign_data(data), signature)
+        return (isinstance(signature, str) and re.fullmatch(r'[0-9a-f]{64}', signature) is not None
+                and hmac.compare_digest(self._sign_data(data), signature))
 
     def verify_envelope(self, envelope):
         if not isinstance(envelope, dict) or not isinstance(envelope.get('data'), dict):

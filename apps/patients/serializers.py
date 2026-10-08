@@ -83,7 +83,7 @@ class PatientDocumentSerializer(serializers.ModelSerializer):
             'id', 'patient', 'filename', 'original_filename', 'filepath',
             'file_size', 'mime_type', 'category', 'description',
             'uploaded_by', 'uploaded_by_name', 'created_at', 'updated_at',
-            'deleted_at'
+            'deleted_at', 'version'
         ]
         read_only_fields = [
             'id', 'patient', 'filename', 'original_filename', 'filepath',

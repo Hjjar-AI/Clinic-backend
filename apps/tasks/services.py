@@ -4,8 +4,8 @@ from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
 from .models import UserTask
 from apps.accounts.models import User
-from core.exceptions import ConflictError
-from core.lifecycle import enforce_transition
+from core.mutation import check_mutation
+from core.lifecycle import enforce_transition, transition_reason
 from core.query_utils import apply_ordering
 
 class TaskService:
@@ -57,30 +57,14 @@ class TaskService:
             due_date=data.get('due_date'),
             status='open',
         )
+        task.full_clean()
         task.save()
         return task
 
     @transaction.atomic
     def update_task(self, task, data, expected_version=None, actor=None):
-        """
-        Same optimistic-lock contract as the other mutating resources:
-          - AppointmentService.update_appointment
-          - PatientService.update_patient
-          - BillingService.update_invoice
-          - VisitService.update_visit
-          - AppointmentService.update_appointment
-
-        Missing version -> 400 (ValidationError). Stale version -> 409
-        (ConflictError). Previously the equivalent logic lived inline in
-        TaskViewSet.perform_update and treated a *missing* version as a 409,
-        which broke the contract every sibling resource implements and that
-        the frontend was built against.
-        """
         task = UserTask.objects.select_for_update().get(pk=task.pk)
-        if expected_version is None:
-            raise ValidationError(['يجب توفير رقم الإصدار'])
-        if task.version != expected_version:
-            raise ConflictError('تم تعديل المهمة بواسطة مستخدم آخر')
+        check_mutation(task, expected_version)
 
         if 'assigned_to' in data:
             if actor is None:
@@ -90,34 +74,32 @@ class TaskService:
                 raise PermissionDenied('لا يمكنك إسناد المهمة إلى مستخدم آخر')
         if task.status in {'completed', 'cancelled'}:
             raise ValidationError({'status': ['أعد فتح المهمة قبل تعديلها']})
+        data = data.copy()
         data.pop('status', None)
         reminder_changed = (
             ('due_date' in data and data['due_date'] != task.due_date)
             or ('assigned_to' in data and data['assigned_to'] != task.assigned_to)
         )
         for k, v in data.items():
-            if k != 'version' and hasattr(task, k):
+            if k in {'title', 'description', 'priority', 'due_date', 'assigned_to'}:
                 setattr(task, k, v)
         if reminder_changed:
             task.reminder_sent = False
         task.version += 1
+        task.full_clean()
         task.save()
         return task
 
     @transaction.atomic
     def transition_task(self, task, target_status, actor, expected_version=None, reason=''):
         task = UserTask.objects.select_for_update().get(pk=task.pk)
-        if expected_version is None:
-            raise ValidationError({'version': ['يجب توفير رقم الإصدار']})
-        if task.version != expected_version:
-            raise ConflictError('تم تعديل المهمة بواسطة مستخدم آخر')
+        check_mutation(task, expected_version)
         changed = enforce_transition('task', task.status, target_status)
         if not changed:
             return task
-        if target_status == 'cancelled' and not str(reason).strip():
-            raise ValidationError({'reason': ['سبب الإلغاء مطلوب']})
+        reason = transition_reason(reason, required=target_status == 'cancelled')
         task.status = target_status
-        task.status_reason = str(reason).strip() if reason else ''
+        task.status_reason = reason
         task.reminder_sent = False
         if target_status == 'completed':
             task.completed_at = timezone.now()
@@ -132,6 +114,7 @@ class TaskService:
             task.completed_by = None
             task.cancelled_at = None
         task.version += 1
+        task.full_clean()
         task.save(update_fields=[
             'status', 'status_reason', 'reminder_sent', 'completed_at',
             'completed_by', 'cancelled_at', 'version', 'updated_at',
@@ -167,19 +150,15 @@ class TaskService:
                 or any(type(task_id) is not int or task_id <= 0 for task_id in order_list)
                 or len(order_list) != len(set(order_list))):
             raise ValidationError({'order': ['يجب تقديم قائمة بمعرفات مهام صحيحة دون تكرار']})
-        # Get accessible task IDs for the user
-        accessible_qs = self.get_for_user(user)
-        accessible_ids = set(accessible_qs.values_list('id', flat=True))
-
-        # Check that all provided task IDs are accessible
-        provided_ids = set(order_list)
-        if not provided_ids.issubset(accessible_ids):
+        # Lock only task rows, in a stable order. Nullable user joins cannot
+        # participate in FOR UPDATE on PostgreSQL.
+        tasks = list(self.get_for_user(user).select_related(None).filter(
+            pk__in=order_list).order_by('pk').select_for_update())
+        if len(tasks) != len(order_list):
             raise PermissionDenied('لا يمكنك إعادة ترتيب مهام لا تملك صلاحية الوصول إليها')
-
-        # Perform reorder
-        for idx, task_id in enumerate(order_list):
-            task = self.get_for_user(user).select_for_update().get(pk=task_id)
-            task.order = idx
+        positions = {task_id: position for position, task_id in enumerate(order_list)}
+        for task in tasks:
+            task.order = positions[task.pk]
             task.version += 1
             task.save(update_fields=['order', 'version', 'updated_at'])
         return True

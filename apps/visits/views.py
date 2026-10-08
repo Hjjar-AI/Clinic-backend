@@ -1,3 +1,4 @@
+from core.mutation import request_version
 # backend/apps/visits/views.py
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
@@ -148,12 +149,7 @@ class VisitViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        version = self.request.data.get('version')
-        if version is not None:
-            try:
-                version = int(version)
-            except (ValueError, TypeError):
-                version = None
+        version = request_version(self.request)
         data = serializer.validated_data
         data.pop('version', None)
         updated = self.service.update_visit(instance, data, self.request.user, version)

@@ -98,7 +98,7 @@ def allowed_transitions(workflow, current):
 
 
 def enforce_transition(workflow, current, target):
-    if target not in valid_statuses(workflow):
+    if not isinstance(target, str) or target not in valid_statuses(workflow):
         raise ValidationError({'status': [f'حالة {workflow} غير صالحة: {target}']})
     if target == current:
         return False
@@ -107,6 +107,17 @@ def enforce_transition(workflow, current, target):
             'status': [f'لا يمكن تغيير الحالة من {current} إلى {target}']
         })
     return True
+
+
+def transition_reason(value, required=False):
+    if value is None:
+        value = ''
+    if not isinstance(value, str) or len(value.strip()) > 500:
+        raise ValidationError({'reason': ['يلزم نص لا يتجاوز 500 حرف']})
+    value = value.strip()
+    if required and not value:
+        raise ValidationError({'reason': ['سبب الإلغاء أو عدم الحضور مطلوب']})
+    return value
 
 
 def lifecycle_payload():

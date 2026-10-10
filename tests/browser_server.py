@@ -1,6 +1,7 @@
 """Disposable HTTP backend for Playwright; never loads the clinic environment."""
 import os
 import sys
+import signal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -17,6 +18,7 @@ from apps.patients.services import PatientService
 from tests.base import PASSWORD
 
 if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     call_command('migrate', run_syncdb=True, verbosity=0)
     users = {}
     for role in ('admin', 'doctor', 'receptionist'):

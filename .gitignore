@@ -22,3 +22,7 @@ venv/
 bin/
 .vscode
 !.vscode/extensions.json
+# Synthetic test coverage/artifacts
+.coverage*
+/htmlcov/
+/.test-artifacts/

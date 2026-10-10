@@ -96,3 +96,23 @@ class ReportingTests(ClinicTestCase):
             ('/api/v1/reports/monthly-summary/', {'year': '2026', 'month': '13'})]:
             with self.subTest(path=path, params=params):
                 self.assertEqual(self.api.get(path, params).status_code, 400)
+
+    def test_default_patient_excel_has_real_workbook_and_scoped_rows(self):
+        from openpyxl import load_workbook
+        self.patient_for(self.other_doctor, surname='PrivateWorkbook')
+        self.api.force_login(self.doctor)
+        response = self.api.get('/api/v1/exports/patients/excel/')
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(io.BytesIO(response.content), read_only=True)
+        try:
+            rows = list(workbook.active.values)
+            self.assertEqual(len(rows), 2)
+            self.assertNotIn('PrivateWorkbook', str(rows))
+        finally:
+            workbook.close()
+
+    def test_explicit_invalid_export_columns_fail_instead_of_using_defaults(self):
+        for extension in ('csv', 'excel'):
+            with self.subTest(extension=extension):
+                response = self.api.get(f'/api/v1/exports/patients/{extension}/', {'fields': 'password'})
+                self.assertEqual(response.status_code, 400)

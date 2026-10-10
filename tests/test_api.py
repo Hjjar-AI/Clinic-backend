@@ -17,6 +17,14 @@ class AuthenticationAPITests(ClinicTransactionTestCase):
         self.assertEqual(result.status_code, 200)
         return api, api.cookies['csrftoken'].value
 
+    def test_protected_auth_actions_reject_anonymous_sessions(self):
+        api = APIClient()
+        for method, path in [('get', 'me'), ('post', 'logout'), ('post', 'change-password')]:
+            with self.subTest(action=path):
+                response = getattr(api, method)(f'/api/v1/auth/{path}/')
+                self.assertIn(response.status_code, (401, 403))
+                self.assertNotIn('user', response.json().get('data', {}))
+
     def test_csrf_bootstrap_then_login_and_me(self):
         api, token = self.csrf_client()
         result = api.post('/api/v1/auth/login/', {'username': self.doctor.username, 'password': PASSWORD}, format='json', HTTP_X_CSRFTOKEN=token)

@@ -33,6 +33,12 @@ class AuthViewSet(viewsets.GenericViewSet):
     auth_service = AuthService()
     notification_service = NotificationService()
 
+    def get_permissions(self):
+        # Explicit URL mappings do not apply @action permission overrides.
+        if self.action in {'me', 'logout', 'change_password'}:
+            return [permissions.IsAuthenticated()]
+        return [permissions.AllowAny()]
+
     @action(detail=False, methods=['post'])
     @method_decorator(csrf_protect)
     def login(self, request):

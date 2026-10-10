@@ -32,8 +32,8 @@ class ExportPatientsCSV(APIView):
     service = PatientExportService()
 
     def get(self, request):
-        fields = request.query_params.getlist('fields')
-        if len(fields) == 1 and ',' in fields[0]:
+        fields = request.query_params.getlist('fields') or None
+        if fields and len(fields) == 1 and ',' in fields[0]:
             fields = fields[0].split(',')
         response = self.service.export_patients_csv(request.user, fields, request.query_params)
         log_action(request.user.id, 'export', 'Patient', None, {
@@ -46,8 +46,8 @@ class ExportPatientsExcel(APIView):
     service = PatientExportService()
 
     def get(self, request):
-        fields = request.query_params.getlist('fields')
-        if len(fields) == 1 and ',' in fields[0]:
+        fields = request.query_params.getlist('fields') or None
+        if fields and len(fields) == 1 and ',' in fields[0]:
             fields = fields[0].split(',')
         response = self.service.export_patients_excel(request.user, fields, request.query_params)
         log_action(request.user.id, 'export', 'Patient', None, {

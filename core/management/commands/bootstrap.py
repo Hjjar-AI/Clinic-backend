@@ -108,6 +108,18 @@ class Command(BaseCommand):
             help='Also run `pnpm install && pnpm build` in the frontend directory.',
         )
 
+    def execute(self, *args, **options):
+        # Model checks can open SQLite before handle() runs.
+        database = settings.DATABASES['default']
+        if database['ENGINE'] == 'django.db.backends.sqlite3':
+            name = str(database['NAME'])
+            if name and name != ':memory:' and not name.startswith('file:'):
+                try:
+                    Path(name).parent.mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    raise CommandError('Unable to create the SQLite database directory.') from exc
+        return super().execute(*args, **options)
+
     def handle(self, *args, **options):
         # backend/  (bootstrap.py lives at backend/core/management/commands/)
         # parents: [commands, management, core, backend]
@@ -125,7 +137,7 @@ class Command(BaseCommand):
 
         self.stdout.write('')
         self.stdout.write(self.style.SUCCESS('✓ Bootstrap complete.'))
-        self.stdout.write('  Start the dev server:  python manage.py runserver 0.0.0.0:8000')
+        self.stdout.write('  Start the dev server:  python manage.py runserver 127.0.0.1:5019')
 
     # ── path helpers ────────────────────────────────────────────────
 

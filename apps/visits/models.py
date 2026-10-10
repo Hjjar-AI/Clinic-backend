@@ -1,5 +1,6 @@
 # backend/apps/visits/models.py
 from django.db import models, transaction
+from core.constraints import check_constraint
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from core.models import TimeStampedModel, SoftDeleteModel, ImmutableModel
@@ -132,23 +133,23 @@ class Visit(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['deleted_at']),
         ]
         constraints = [
-            models.CheckConstraint(check=models.Q(version__gte=1, status__in=['draft', 'final', 'amended', 'locked']), name='visit_version_status_valid'),
-            models.CheckConstraint(
-                check=(
+            check_constraint(condition=models.Q(version__gte=1, status__in=['draft', 'final', 'amended', 'locked']), name='visit_version_status_valid'),
+            check_constraint(
+                condition=(
                     models.Q(pain_level__isnull=True)
                     | models.Q(pain_level__gte=0, pain_level__lte=10)
                 ),
                 name='visit_pain_level_valid',
             ),
-            models.CheckConstraint(
-                check=(
+            check_constraint(
+                condition=(
                     models.Q(anxiety_level__isnull=True)
                     | models.Q(anxiety_level__gte=0, anxiety_level__lte=10)
                 ),
                 name='visit_anxiety_level_valid',
             ),
-            models.CheckConstraint(
-                check=(
+            check_constraint(
+                condition=(
                     models.Q(follow_up_date__isnull=True)
                     | models.Q(follow_up_date__gte=models.F('visit_date'))
                 ),

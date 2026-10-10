@@ -1,6 +1,7 @@
 import math
 from django.core.exceptions import ValidationError
 from django.db import models
+from core.constraints import check_constraint
 from django.db.models.functions import Lower, Trim
 from django.core.validators import MinValueValidator
 from core.models import SoftDeleteModel, TimeStampedModel
@@ -12,7 +13,7 @@ class DiagnosisOption(SoftDeleteModel):
     order = models.PositiveIntegerField(default=0)
 
     class Meta:
-        constraints = [models.CheckConstraint(check=models.Q(version__gte=1), name='diagnosisoption_version_positive')]
+        constraints = [check_constraint(condition=models.Q(version__gte=1), name='diagnosisoption_version_positive')]
         ordering = ['order', 'code', 'id']
 
     def __str__(self):
@@ -30,7 +31,7 @@ class MedicationOption(SoftDeleteModel):
 
     class Meta:
         constraints = [
-            models.CheckConstraint(check=models.Q(version__gte=1), name='medicationoption_version_positive'),
+            check_constraint(condition=models.Q(version__gte=1), name='medicationoption_version_positive'),
             models.UniqueConstraint(Lower(Trim('generic_english')), Lower(Trim('dosage')), Lower(Trim('brand_english')), name='medication_identity_unique'),
         ]
         ordering = ['order', 'generic_english', 'id']
@@ -58,7 +59,7 @@ class ClinicalScale(SoftDeleteModel, TimeStampedModel):
     description = models.TextField(blank=True, default='')
 
     class Meta:
-        constraints = [models.CheckConstraint(check=models.Q(version__gte=1), name='clinicalscale_version_positive')]
+        constraints = [check_constraint(condition=models.Q(version__gte=1), name='clinicalscale_version_positive')]
         ordering = ['name', 'id']
 
     def __str__(self):
@@ -106,21 +107,21 @@ class ScaleField(SoftDeleteModel, TimeStampedModel):
     class Meta:
         ordering = ['order', 'id']
         constraints = [
-            models.CheckConstraint(check=models.Q(version__gte=1), name='scalefield_version_positive'),
-            models.CheckConstraint(
-                check=models.Q(max_val__gt=models.F('min_val')),
+            check_constraint(condition=models.Q(version__gte=1), name='scalefield_version_positive'),
+            check_constraint(
+                condition=models.Q(max_val__gt=models.F('min_val')),
                 name='scale_field_range_valid',
             ),
-            models.CheckConstraint(
-                check=models.Q(step__gt=0),
+            check_constraint(
+                condition=models.Q(step__gt=0),
                 name='scale_field_step_positive',
             ),
-            models.CheckConstraint(
-                check=models.Q(step__lte=models.F('max_val') - models.F('min_val')),
+            check_constraint(
+                condition=models.Q(step__lte=models.F('max_val') - models.F('min_val')),
                 name='scale_field_step_within_range',
             ),
-            models.CheckConstraint(
-                check=(
+            check_constraint(
+                condition=(
                     models.Q(default__gte=models.F('min_val'))
                     & models.Q(default__lte=models.F('max_val'))
                 ),

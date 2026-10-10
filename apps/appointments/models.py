@@ -1,5 +1,6 @@
 # backend/apps/appointments/models.py
 from django.db import models
+from core.constraints import check_constraint
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from core.models import TimeStampedModel, SoftDeleteModel
@@ -44,9 +45,9 @@ class Appointment(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['deleted_at']),
         ]
         constraints = [
-            models.CheckConstraint(check=models.Q(version__gte=1, status__in=['scheduled', 'confirmed', 'arrived', 'completed', 'cancelled', 'no-show']), name='appointment_version_status_valid'),
-            models.CheckConstraint(
-                check=models.Q(duration_minutes__gte=1, duration_minutes__lte=1440),
+            check_constraint(condition=models.Q(version__gte=1, status__in=['scheduled', 'confirmed', 'arrived', 'completed', 'cancelled', 'no-show']), name='appointment_version_status_valid'),
+            check_constraint(
+                condition=models.Q(duration_minutes__gte=1, duration_minutes__lte=1440),
                 name='appointment_duration_valid',
             ),
         ]

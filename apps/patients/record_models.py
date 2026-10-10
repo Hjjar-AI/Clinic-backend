@@ -1,6 +1,7 @@
 """Longitudinal patient records; encounter facts stay on visits/signed snapshots."""
 from django.conf import settings
 from django.db import models
+from core.constraints import check_constraint
 from django.db.models import Q
 from django.core.validators import RegexValidator
 from core.models import TimeStampedModel, ImmutableModel
@@ -67,7 +68,7 @@ class PatientRepresentative(PatientRecord):
     verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
 
     class Meta:
-        constraints = [models.CheckConstraint(check=Q(valid_from__isnull=True) | Q(valid_until__isnull=True) |
+        constraints = [check_constraint(condition=Q(valid_from__isnull=True) | Q(valid_until__isnull=True) |
                        Q(valid_until__gte=models.F('valid_from')), name='representative_dates_valid')]
 
 
@@ -102,7 +103,7 @@ class PatientMedication(ClinicalPatientRecord):
     ended_on = models.DateField(null=True, blank=True)
 
     class Meta:
-        constraints = [models.CheckConstraint(check=Q(started_on__isnull=True) | Q(ended_on__isnull=True) |
+        constraints = [check_constraint(condition=Q(started_on__isnull=True) | Q(ended_on__isnull=True) |
                        Q(ended_on__gte=models.F('started_on')), name='patient_medication_dates_valid')]
 
 
@@ -124,8 +125,8 @@ class PatientFollowUp(PatientRecord):
     class Meta:
         indexes = [models.Index(fields=['patient', 'status', 'due_date'])]
         constraints = [models.UniqueConstraint(fields=['source_visit'], condition=Q(legacy_visit_follow_up=True, is_active=True),
-                       name='one_legacy_followup_per_visit'), models.CheckConstraint(
-                       check=~Q(status='completed') | Q(completed_at__isnull=False, completed_by__isnull=False),
+                       name='one_legacy_followup_per_visit'), check_constraint(
+                       condition=~Q(status='completed') | Q(completed_at__isnull=False, completed_by__isnull=False),
                        name='followup_completion_metadata')]
 
 
@@ -148,7 +149,7 @@ class PatientDuplicateReview(TimeStampedModel):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['patient', 'other_patient'], name='unique_patient_duplicate_review'),
-                       models.CheckConstraint(check=Q(patient__lt=models.F('other_patient')), name='ordered_duplicate_pair')]
+                       check_constraint(condition=Q(patient__lt=models.F('other_patient')), name='ordered_duplicate_pair')]
 
 
 class PatientMerge(ImmutableModel):

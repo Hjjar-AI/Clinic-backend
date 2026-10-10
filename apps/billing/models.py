@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import models
+from core.constraints import check_constraint
 from django.db.models.functions import Round
 from django.core.validators import MinValueValidator
 from core.models import TimeStampedModel, SoftDeleteModel
@@ -64,13 +65,13 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['issued_date']),
         ]
         constraints = [
-            models.CheckConstraint(
-                check=~models.Q(status='paid') | models.Q(paid_at__isnull=False, paid_by__isnull=False),
+            check_constraint(
+                condition=~models.Q(status='paid') | models.Q(paid_at__isnull=False, paid_by__isnull=False),
                 name='paid_invoice_has_payment_metadata',
             ),
-            models.CheckConstraint(check=models.Q(version__gte=1, status__in=['draft', 'issued', 'paid', 'cancelled']), name='invoice_version_status_valid'),
-            models.CheckConstraint(
-                check=(
+            check_constraint(condition=models.Q(version__gte=1, status__in=['draft', 'issued', 'paid', 'cancelled']), name='invoice_version_status_valid'),
+            check_constraint(
+                condition=(
                     models.Q(total_amount__gte=0)
                     & models.Q(tax__gte=0)
                     & models.Q(discount__gte=0)
@@ -78,18 +79,18 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
                 ),
                 name='invoice_amounts_nonnegative',
             ),
-            models.CheckConstraint(
-                check=models.Q(discount__lte=Round(models.F('total_amount') + models.F('tax'), precision=2)),
+            check_constraint(
+                condition=models.Q(discount__lte=Round(models.F('total_amount') + models.F('tax'), precision=2)),
                 name='invoice_discount_not_excessive',
             ),
-            models.CheckConstraint(
-                check=models.Q(
+            check_constraint(
+                condition=models.Q(
                     final_amount=Round(models.F('total_amount') + models.F('tax') - models.F('discount'), precision=2)
                 ),
                 name='invoice_final_amount_matches',
             ),
-            models.CheckConstraint(
-                check=(
+            check_constraint(
+                condition=(
                     models.Q(issued_date__isnull=True)
                     | models.Q(due_date__isnull=True)
                     | models.Q(due_date__gte=models.F('issued_date'))
@@ -112,4 +113,4 @@ class InvoiceLine(models.Model):
 
     class Meta:
         ordering = ['order', 'pk']
-        constraints = [models.CheckConstraint(check=models.Q(quantity__gt=0, unit_price__gte=0, amount__gte=0), name='invoice_line_amounts_valid')]
+        constraints = [check_constraint(condition=models.Q(quantity__gt=0, unit_price__gte=0, amount__gte=0), name='invoice_line_amounts_valid')]

@@ -1,5 +1,6 @@
 # backend/apps/patients/models.py
 from django.db import models
+from core.constraints import check_constraint
 from django.db.models import Q
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -86,7 +87,7 @@ class Patient(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['dob_year']),
         ]
         constraints = [
-            models.CheckConstraint(check=models.Q(version__gte=1), name='patient_version_positive'),
+            check_constraint(condition=models.Q(version__gte=1), name='patient_version_positive'),
 
         ]
 
@@ -191,7 +192,7 @@ class PatientCareTeam(TimeStampedModel):
                 fields=['patient', 'user'], condition=Q(ended_at__isnull=True),
                 name='unique_active_care_team_member',
             ),
-            models.CheckConstraint(check=Q(ended_at__isnull=True) | Q(ended_at__gte=models.F('started_at')), name='care_team_dates_valid'),
+            check_constraint(condition=Q(ended_at__isnull=True) | Q(ended_at__gte=models.F('started_at')), name='care_team_dates_valid'),
         ]
         indexes = [models.Index(fields=['user'])]
 

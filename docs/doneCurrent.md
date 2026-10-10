@@ -1,6 +1,10 @@
 # Completed work
 
-Updated: 2026-10-08.
+Updated: 2026-10-11.
+
+- Fixed bootstrap SQLite startup when `data/` is absent: create the database parent directory before Django's command checks, without treating in-memory/URI databases as filesystem paths. Corrected the server hint to `127.0.0.1:5019`. With explicit user authorization, ran `bootstrap --with-demo-data` successfully: generated/applied initial migrations, seeded defaults, created 10 demo patients; `check --database default` reported no issues. Generated account credentials saved privately in ignored `data/bootstrap-credentials.txt` (0600), not printed in tool output. No destructive cleanup, test-suite work, builds, or dependency/version changes. Browser/API/PDF/PostgreSQL behavior remains unverified.
+
+- Fixed startup `CheckConstraint(check=...)` TypeError in user's Django 6.1.2 environment: shared native-constraint factory selects `check` for pinned Django 5.0 and `condition` for Django 5.1+, used by all 30 check constraints across eight model files. Isolated app loading passed using the user's environment with database connections forbidden; native constraint cloning/serialization passed, AST comparison confirmed unchanged rules, and `git diff --check` passed. Pinned Django 5.0 branch/full bootstrap not executed; no migration/test-suite access, project database operations, builds, or dependency/version changes.
 
 - Patient expansion: optional year-only birth, permanent numbers/nonblocking duplicate IDs and optional preview-bound merge, structured identifiers/contacts/representatives/allergies/ongoing medications/follow-ups, dated team history, document provenance, immutable corrections, tri-state clinical facts, configurable completeness; coordinated frontend/API/import/export/recovery. 89 isolated service/ORM/recovery assertions passed; pinned HTTP/browser/PostgreSQL checks pending. [Schema/retention](patient-record-schema.md), [verification](patient-record-verification.md).
 

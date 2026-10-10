@@ -1,4 +1,5 @@
 from django.db import models
+from core.constraints import check_constraint
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.utils import timezone
@@ -54,9 +55,9 @@ class UserTask(TimeStampedModel):
             models.Index(fields=['due_date']),
         ]
         constraints = [
-            models.CheckConstraint(check=models.Q(version__gte=1, status__in=['open', 'in_progress', 'completed', 'cancelled']), name='usertask_version_status_valid'),
-            models.CheckConstraint(
-                check=(
+            check_constraint(condition=models.Q(version__gte=1, status__in=['open', 'in_progress', 'completed', 'cancelled']), name='usertask_version_status_valid'),
+            check_constraint(
+                condition=(
                     models.Q(
                         status='completed',
                         completed_at__isnull=False,

@@ -6,6 +6,9 @@ from apps.prescriptions.models import IssuedDocument
 from apps.prescriptions.services import PrescriptionService
 from core.exceptions import ConflictError
 from core.pdf_utils import render_pdf_from_html
+from core.image_data import validate_embedded_image
+
+SIGNATURE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1sAAAAASUVORK5CYII='
 from .base import ClinicTestCase
 
 
@@ -38,7 +41,7 @@ class DocumentWorkflowTests(ClinicTestCase):
         visit = self.visit_for(status='final')
         preview = self.api.get(f'/api/v1/prescription/visit/{visit.pk}/').json()['data']
         with patch('apps.prescriptions.services.render_pdf_from_html', return_value=None):
-            response = self.write('post', '/api/v1/prescription/generate/', {'visit_id': visit.pk, 'preview_token': preview['preview_token']})
+            response = self.write('post', '/api/v1/prescription/generate/', {'visit_id': visit.pk, 'preview_token': preview['preview_token'], 'signature': SIGNATURE})
         self.assertEqual(response.status_code, 503, response.content)
         self.assertFalse(IssuedDocument.objects.exists())
 
@@ -46,7 +49,7 @@ class DocumentWorkflowTests(ClinicTestCase):
         visit = self.visit_for(status='final')
         preview = self.api.get(f'/api/v1/prescription/visit/{visit.pk}/').json()['data']
         pdf = b'%PDF-synthetic-http'
-        payload = {'visit_id': visit.pk, 'preview_token': preview['preview_token']}
+        payload = {'visit_id': visit.pk, 'preview_token': preview['preview_token'], 'signature': SIGNATURE}
         with patch('apps.prescriptions.services.render_pdf_from_html', return_value=pdf):
             response = self.write('post', '/api/v1/prescription/generate/', payload)
         self.assertEqual(response.status_code, 200, response.content)
@@ -66,3 +69,14 @@ class PDFRendererTests(SimpleTestCase):
         self.assertIsInstance(pdf, bytes)
         self.assertTrue(pdf.startswith(b'%PDF-'))
         self.assertGreater(len(pdf), 1000)
+
+
+class EmbeddedImageTests(SimpleTestCase):
+    def test_valid_signature_and_optional_empty_stamp(self):
+        self.assertEqual(validate_embedded_image(SIGNATURE, required=True), SIGNATURE)
+        self.assertIsNone(validate_embedded_image(None))
+
+    def test_missing_malformed_and_unsafe_formats_rejected(self):
+        for image in [None, 'https://example.invalid/image.png', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,invalid!', 'data:image/png;base64,dGV4dA==']:
+            with self.subTest(image=image), self.assertRaises(ValidationError):
+                validate_embedded_image(image, required=True)

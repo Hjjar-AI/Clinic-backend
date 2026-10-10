@@ -106,3 +106,8 @@ Before changes: [AGENTS.md](AGENTS.md), [workCurrent.md](docs/workCurrent.md), [
 References: [documentation index](docs/README.md), [implemented backend fixes](docs/backend-fixes-implementation.md), [workflow checklist](docs/critical-workflow-checklist.md). Current rules override older setup helpers' broader side effects. Unverified: PDF/Arabic rendering, browser workflows, PostgreSQL concurrency.
 
 Patient record design: [schema, API, duplicates and retention](docs/patient-record-schema.md).
+
+
+## Automated tests
+
+Repeatable commands, isolation, coverage and verification limits: [test suite guide](docs/testing.md).

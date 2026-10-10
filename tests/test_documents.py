@@ -39,7 +39,7 @@ class DocumentWorkflowTests(ClinicTestCase):
         preview = self.api.get(f'/api/v1/prescription/visit/{visit.pk}/').json()['data']
         with patch('apps.prescriptions.services.render_pdf_from_html', return_value=None):
             response = self.write('post', '/api/v1/prescription/generate/', {'visit_id': visit.pk, 'preview_token': preview['preview_token']})
-        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.status_code, 503, response.content)
         self.assertFalse(IssuedDocument.objects.exists())
 
     def test_successful_http_issuance_retains_bytes_and_consumes_preview(self):
@@ -49,7 +49,7 @@ class DocumentWorkflowTests(ClinicTestCase):
         payload = {'visit_id': visit.pk, 'preview_token': preview['preview_token']}
         with patch('apps.prescriptions.services.render_pdf_from_html', return_value=pdf):
             response = self.write('post', '/api/v1/prescription/generate/', payload)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response['Content-Type'], 'application/pdf')
         self.assertEqual(response.content, pdf)
         document = IssuedDocument.objects.get()

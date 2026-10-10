@@ -39,7 +39,7 @@ python -B -m coverage run --source=apps,core --omit='*/migrations/*' tests/run.p
 python -B -m coverage report --omit='*/migrations/*'
 ```
 
-Measured coverage before the additional document tests: **67%** of 7,750 backend statements. Node's separate JS measurement was **84.98% lines**, **83.99% branches**, **69.76% functions** in imported production JS. These are baseline measurements, not whole-system correctness or complete branch coverage; no 100% claim or arbitrary threshold is imposed.
+Measured coverage for the final 134 tests: **69%** of 7,750 backend statements. Node's separate JS measurement was **84.98% lines**, **83.99% branches**, **69.76% functions** in imported production JS. These are baseline measurements, not whole-system correctness or complete branch coverage; no 100% claim or arbitrary threshold is imposed.
 
 ## Runtime findings and limits
 

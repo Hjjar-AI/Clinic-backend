@@ -12,7 +12,7 @@ Before each release, run on clean and production-like databases; record build id
 ## End-to-end workflow
 
 1. **Login and session** — sign in; verify visible identity/permissions, dirty-form expiry warning, and clear expired/revoked-session return to login.
-2. **Patient** — Arabic-variant search; create complete patient, check identifier/phone duplicate feedback, reopen; audit includes actor/time/changed fields.
+2. **Patient** — Arabic-variant search; create patient with unknown/year-only demographics, check nonblocking identifier/phone duplicate feedback, reopen; audit includes actor/time/changed fields.
 3. **Appointment** — schedule; reject overlaps in form/API; scheduled → confirmed → arrived → completed. Calendar/dashboard/patient page agree on state/time.
 4. **Visit** — incomplete draft → refresh/recover → complete required fields → finalize → reject direct edits → reasoned amendment → re-finalize → lock.
 5. **Prescription/referral** — draft generation blocked; generate both from final visit, verify patient/visit/clinician/instructions/version/Arabic layout/audit.

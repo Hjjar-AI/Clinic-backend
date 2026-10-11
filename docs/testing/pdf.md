@@ -1,22 +1,10 @@
-# PDF appearance and full browser workflows
+# PDF appearance and clinical workflows
 
-Verified 2026-10-11 with synthetic records only. This follows the [earlier suite expansion](testing.md); historical results remain in the completed handoffs.
-
-## Results
-
-| Suite | Passed |
-| --- | ---: |
-| Backend service/HTTP/recovery | 174 |
-| Frontend Node service/state | 110 |
-| Vue DOM/import | 77 |
-| Chromium, desktop/tablet/mobile | 60 |
-| Separate PDF appearance inspector | 6 |
-
-The complete browser matrix passed in 9.1 minutes with zero retries. A focused three-viewport rerun additionally verified the final loaded-Cairo/computed-font assertions in print mode. Runtime: Python 3.14.4, Django 5.2.9, DRF 3.15.1, WeasyPrint 70, Node 24.21.0, Chromium 156. Optional PyMuPDF 1.28.2 was installed only in the disposable test environment. Project versions, requirements and lockfiles were preserved. No production build, migration inspection/change or clinic database/media/backup access was performed.
+Six appearance checks passed on 2026-10-11; not rerun during latest interaction expansion. PDF-stage runtime: Python 3.14.4 / Django 5.2.9 / DRF 3.15.1 / WeasyPrint 70 / Node 24.21.0 / Chromium 156; optional PyMuPDF 1.28.2 only in disposable tooling. Current aggregate results: [completed](../doneCurrent.md). Synthetic records, no production build or clinic-data/version changes.
 
 ## Complete browser scenarios
 
-`frontend/tests/e2e/clinical-workflows.spec.js` adds five scenarios; `zz-full-recovery.spec.js` adds one. Each runs in all three viewports, adding 18 cases to the previous 42. The tests use ordinary UI interactions and the real Django API; API requests prepare synthetic fixtures and independently inspect persisted outcomes.
+`frontend/tests/e2e/clinical-workflows.spec.js` and `zz-full-recovery.spec.js` exercise actual UI and Django API in all three viewports; synthetic fixture setup and persisted-outcome inspection use API requests.
 
 - Appointment booking uses the actual availability picker; the booked slot becomes unavailable, editing retains the current slot, rescheduling changes time and version, and reload succeeds.
 - Visit creation preserves unassessed clinical risks, saves without a dirty-navigation prompt, signs, opens a reasoned amendment, updates and resigns. Both immutable revisions are retained. Prescription issuance draws/saves a signature through the actual control. Referral issuance supplies the reason through its form. Both issued document types are verified; prescription/referral/patient/visit PDFs are downloaded.
@@ -49,7 +37,7 @@ Existing endpoint authorization, expected versions, idempotency, signed revision
 
 ## Repeatable commands and retained review output
 
-Run the ordinary suites with the commands in [backend testing](testing.md) and [frontend testing](../../frontend/docs/testing.md). To retain browser PDFs and inspect them:
+Run the ordinary suites with the commands in [backend testing](guide.md) and [frontend testing](../../../frontend/docs/testing/guide.md). To retain browser PDFs and inspect them:
 
 ```bash
 # From frontend, with backend dependencies and Chromium already installed:
@@ -68,4 +56,4 @@ The PDF renderer resolves `Cairo-VariableFont_slnt,wght.ttf` and `Inter-Variable
 
 ## Remaining limits
 
-Pinned Django/DRF still needs a supported-Python run. SQLite tests do not verify PostgreSQL concurrent writers/locking. Firefox/WebKit, physical printers, exhaustive accessibility/visual coverage, production bundles and workflows outside the documented matrix remain unverified. The previously reported coverage percentages are historical and were not recalculated; these counts do not imply 100% coverage.
+Pinned Django/DRF still needs a supported-Python run. SQLite tests do not verify PostgreSQL concurrent writers/locking. Firefox/WebKit, physical printers, exhaustive accessibility/visual coverage, production bundles and workflows outside the documented matrix remain unverified. Counts do not imply complete coverage.

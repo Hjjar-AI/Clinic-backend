@@ -1,6 +1,6 @@
 # Patient records: schema and behavior
 
-Implemented 2026-10-08 across backend/frontend. Fresh-schema design; no migrations created/applied. [Plan](patient-record-expansion-plan.md); [verification](patient-record-verification.md).
+Current schema, API and retention contract; [verification](../testing/guide.md), [results](../doneCurrent.md).
 
 ## Identity and ownership
 
@@ -80,9 +80,9 @@ Base: `/api/v1/patients/{id}/`. Shared session/CSRF/envelopes and permissions re
 | Endpoint | Contract |
 | --- | --- |
 | `records/?kind=…&offset=0` GET | Kinds identifiers/contacts/representatives/allergies/medications/follow-ups; `{items,total,version}`, 100/page, includes retired history |
-| `records/` POST | `{kind,record_id?,operation:"save"|"retire",fields,reason,version}` → `{record,version}`; use opening **patient** version |
+| `records/` POST | `{kind,record_id?,operation:"save"\|"retire",fields,reason,version}` → `{record,version}`; use opening **patient** version |
 | `corrections/?offset=0` GET | `{items,total,merges}`, 100 corrections/page plus latest 100 merge events; includes retained merged-source corrections; clinical corrections require clinical-view permission |
-| `duplicate_review/` POST | `{other_id,status:"dismissed"|"different",reason,version}` |
+| `duplicate_review/` POST | `{other_id,status:"dismissed"\|"different",reason,version}` |
 | `merge_preview/` POST | Source URL + `{target_id}` → token/source version/target version/counts |
 | `merge/` POST | Source URL + `{token,reason,version,target_version}` → survivor |
 | `team_candidates/` GET | Minimal eligible active users for assignment; permission checked |

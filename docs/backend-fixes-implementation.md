@@ -60,3 +60,11 @@ Checks used temporary scripts/new in-memory SQLite via Django schema editor; no 
 Unverified: PDF layout/rendering, browser interaction, PostgreSQL/concurrent writers. Probe runtime: Python 3.14; not proof every pinned dependency supports it. Migration generation/schema application remain excluded as requested.
 
 Second-pass findings and verification: [backend-second-pass.md](backend-second-pass.md).
+
+## HTTP no-content regression (2026-10-11)
+
+Expanded real-browser tests confirmed that document archive returned `204` with a JSON envelope, causing Vite's HTTP proxy to reject the response after the archive had committed. The shared renderer now returns empty bytes for 204/205/304 and preserves ordinary success/error envelopes. Renderer and persisted-idempotency-response tests prevent Django's test-client body stripping from hiding this defect. Browser-fixture request quotas were raised only for synthetic aggregate traffic; production throttles remain unchanged and dedicated 429/Retry-After tests cover rate enforcement. Current verification/results: [test guide](testing.md), [completed work](doneCurrent.md).
+
+## PDF and full workflow regression follow-on — 2026-10-11
+
+Full browser and rendered-PDF checks exposed additional confirmed defects; corrected full backup timestamp precision, explicit bundled font loading, mixed-script numeric direction and oversized keep-together pagination. Coordinated frontend controls/form/signature corrections preserve authorization, signed history and mutation contracts. [Locations, verification and limits](pdf-workflow-verification.md).

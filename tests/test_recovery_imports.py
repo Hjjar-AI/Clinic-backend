@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import zipfile
+from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -184,6 +185,22 @@ class BackupTests(ClinicTestCase):
 
 
 class FullRecoveryTests(ClinicTransactionTestCase):
+    def test_backup_and_restore_preserve_full_signed_timestamp_precision(self):
+        timestamp = timezone.now().replace(microsecond=123456)
+        with patch('apps.visits.services.timezone.now', return_value=timestamp):
+            visit = self.visit_for(status='final')
+        revision = visit.revisions.get()
+        original = revision.signed_at
+        self.assertNotEqual(original.microsecond % 1000, 0)
+        backup = BackupCreatorService().create_full_backup().getvalue()
+        with zipfile.ZipFile(io.BytesIO(backup)) as archive:
+            rows = json.loads(archive.read('backup.json'))['data']['records']
+        saved = next(row for row in rows if row['model'] == 'visits.visitrevision')
+        self.assertEqual(saved['fields']['signed_at'], original.isoformat())
+        BackupRestoreService().execute_restore(io.BytesIO(backup))
+        revision.refresh_from_db()
+        self.assertEqual(revision.signed_at, original)
+
     def test_full_recovery_replaces_inventory_retains_signed_history_and_revokes_sessions(self):
         visit = self.visit_for(status='final')
         snapshot = visit.revisions.get().snapshot

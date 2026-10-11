@@ -1,4 +1,5 @@
 import uuid
+from unittest.mock import patch
 from datetime import timedelta
 from django.core.cache import cache
 from django.utils import timezone
@@ -8,6 +9,27 @@ from apps.patients.models import Patient
 from apps.tasks.models import UserTask
 from core.models import IdempotencyOperation
 from .base import ClinicTestCase, ClinicTransactionTestCase, PASSWORD
+
+
+class ThrottleAPITests(ClinicTransactionTestCase):
+    def test_authenticated_throttle_returns_retry_hint_without_blocking_another_user(self):
+        with patch('rest_framework.throttling.UserRateThrottle.THROTTLE_RATES', {'user': '1/min', 'anon': '100/min'}):
+            self.assertEqual(self.api.get('/api/v1/auth/me/').status_code, 200)
+            rejected = self.api.get('/api/v1/auth/me/')
+            self.assertEqual(rejected.status_code, 429)
+            self.assertIn('error', rejected.json())
+            self.assertGreater(int(rejected['Retry-After']), 0)
+            self.api.force_login(self.doctor)
+            self.assertEqual(self.api.get('/api/v1/auth/me/').status_code, 200)
+
+    def test_anonymous_throttle_protects_public_config(self):
+        api = APIClient()
+        with patch('rest_framework.throttling.AnonRateThrottle.THROTTLE_RATES', {'anon': '1/min', 'user': '100/min'}):
+            self.assertEqual(api.get('/api/v1/system/config/').status_code, 200)
+            response = api.get('/api/v1/system/config/')
+            self.assertEqual(response.status_code, 429)
+            self.assertIn('error', response.json())
+            self.assertGreater(int(response['Retry-After']), 0)
 
 
 class AuthenticationAPITests(ClinicTransactionTestCase):

@@ -26,6 +26,7 @@ Before each release, run on clean and production-like databases; record build id
 - Repeat protected API reads/writes per role; hidden UI controls do not prove permission enforcement.
 - Submit stale `version` for patient/appointment/visit/task/invoice edits; expect 409 with recovery guidance.
 - Disconnect during save: no false success; reconnect/retry without duplicates.
+- Archive/delete a synthetic resource through the browser proxy; 204 responses and idempotent replays must have empty bodies and refresh the visible state successfully.
 - Cancelled/no-show appointments and completed/cancelled tasks must stop reminders.
 - Archived patients unavailable for new appointments/visits/invoices; readable in authorized history/explicitly included exports.
 

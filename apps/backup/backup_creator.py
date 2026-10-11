@@ -2,12 +2,24 @@ import io
 import json
 import zipfile
 import hashlib
+from datetime import datetime, time
+from django.core.serializers.json import DjangoJSONEncoder
 from django.apps import apps
 from django.core import serializers
 from django.core.files.storage import default_storage
 from django.db import transaction
 from django.utils import timezone
 from .backup_validation import BackupValidationService, payload_bytes
+
+
+class BackupJSONEncoder(DjangoJSONEncoder):
+    """Recovery must retain full temporal precision, including signed times."""
+    def default(self, value):
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, time) and value.tzinfo is None:
+            return value.isoformat()
+        return super().default(value)
 
 
 def backup_models():
@@ -44,7 +56,7 @@ class BackupCreatorService:
         records, counts = [], {}
         for model in models:
             rows = list(model._base_manager.order_by('pk'))
-            records.extend(json.loads(serializers.serialize('json', rows)))
+            records.extend(json.loads(serializers.serialize('json', rows, cls=BackupJSONEncoder)))
             counts[model._meta.label_lower] = len(rows)
         return {'metadata': {'created_at': timezone.now().isoformat(), 'format_version': 2,
                              'schema': 'complete-records', 'counts': counts,

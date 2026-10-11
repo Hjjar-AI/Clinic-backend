@@ -46,3 +46,5 @@ Clinic/
 Never commit `.env`, `data/`, `media/`, `backups/`, or `staticfiles/`.
 
 Patient record design: [schema, API, duplicates and retention](patient-record-schema.md).
+
+Automated verification: [suite commands and coverage](testing.md), [PDF appearance and complete browser workflows](pdf-workflow-verification.md).

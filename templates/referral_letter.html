@@ -5,7 +5,7 @@
   <style>
     @page { size: A4; margin: 18mm 15mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
     * { box-sizing: border-box; }
-    body { font-family: Arial, "Noto Sans Arabic", sans-serif; color: #172033; font-size: 12px; line-height: 1.8; }
+    body { font-family: "Clinic Arabic", "Clinic Latin", sans-serif; color: #172033; font-size: 12px; line-height: 1.8; }
     header { display: flex; justify-content: space-between; gap: 20px; border-bottom: 2px solid #2563eb; padding-bottom: 12px; }
     h1 { color: #1d4ed8; margin: 0; font-size: 22px; }
     h2 { font-size: 16px; color: #1e3a8a; margin: 20px 0 8px; }
@@ -22,7 +22,7 @@
   <header>
     <div>
       <h1>{{ clinic.name }}</h1>
-      <div class="muted">{{ clinic.address }}{% if clinic.phone %} — {{ clinic.phone }}{% endif %}</div>
+      <div class="muted">{{ clinic.address }}{% if clinic.phone %} — <bdi dir="ltr">{{ clinic.phone }}</bdi>{% endif %}</div>
     </div>
     <div>
       <strong>خطاب تحويل طبي</strong>
@@ -33,7 +33,7 @@
 
   <section class="meta">
     <div><span class="label">المريض:</span> {{ data.patient_name }}</div>
-    <div><span class="label">تاريخ الزيارة:</span> {{ data.visit_date }}</div>
+    <div><span class="label">تاريخ الزيارة:</span> <bdi dir="ltr">{{ data.visit_date }}</bdi></div>
     <div><span class="label">الطبيب المحيل:</span> {{ data.clinician }}</div>
   </section>
 

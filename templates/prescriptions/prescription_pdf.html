@@ -5,7 +5,7 @@
   <style>
     @page { size: A4; margin: 16mm 14mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
     * { box-sizing: border-box; }
-    body { font-family: Arial, "Noto Sans Arabic", sans-serif; color: #172033; font-size: 12px; line-height: 1.7; }
+    body { font-family: "Clinic Arabic", "Clinic Latin", sans-serif; color: #172033; font-size: 12px; line-height: 1.7; }
     header { display: flex; justify-content: space-between; gap: 20px; border-bottom: 2px solid #2563eb; padding-bottom: 12px; }
     h1 { color: #1d4ed8; margin: 0; font-size: 22px; }
     h2 { margin: 20px 0 8px; font-size: 16px; color: #1e3a8a; }
@@ -16,6 +16,7 @@
     th, td { padding: 9px; border: 1px solid #cbd5e1; text-align: right; vertical-align: top; overflow-wrap: anywhere; }
     th { background: #eff6ff; }
     tr { break-inside: avoid; }
+    .numeric { direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
     .diagnoses { margin: 0; padding-right: 18px; }
     .signatures { display: flex; justify-content: flex-start; gap: 36px; margin-top: 30px; break-inside: avoid; }
     .signature-box { min-width: 150px; text-align: center; }
@@ -26,7 +27,7 @@
   <header>
     <div>
       <h1>{{ clinic.name }}</h1>
-      <div class="muted">{{ clinic.address }}{% if clinic.phone %} — {{ clinic.phone }}{% endif %}</div>
+      <div class="muted">{{ clinic.address }}{% if clinic.phone %} — <bdi dir="ltr">{{ clinic.phone }}</bdi>{% endif %}</div>
     </div>
     <div>
       <strong>وصفة طبية</strong>
@@ -40,8 +41,8 @@
     <div><span class="label">رقم المريض:</span> {{ prescription.patient_id }}</div>
     <div><span class="label">العمر:</span> {{ prescription.patient_age }}</div>
     <div><span class="label">الجنس:</span> {{ prescription.patient_gender }}</div>
-    <div><span class="label">المعرّف الوطني/الطبي:</span> {{ prescription.patient_national_id }}</div>
-    <div><span class="label">تاريخ الزيارة:</span> {{ prescription.visit_date }}</div>
+    <div><span class="label">المعرّف الوطني/الطبي:</span> <bdi dir="ltr">{{ prescription.patient_national_id }}</bdi></div>
+    <div><span class="label">تاريخ الزيارة:</span> <bdi dir="ltr">{{ prescription.visit_date }}</bdi></div>
     <div><span class="label">الطبيب:</span> {{ prescription.doctor_name }}</div>
     <div><span class="label">القالب:</span> {{ prescription.template_version }}</div>
   </section>
@@ -62,7 +63,7 @@
       {% for medication in prescription.medications %}
         <tr>
           <td>{{ medication.name }}{% if medication.brand %}<div class="muted">{{ medication.brand }}</div>{% endif %}</td>
-          <td>{{ medication.dosage }}</td>
+          <td class="numeric">{{ medication.dosage }}</td>
           <td>{{ medication.instructions }}</td>
         </tr>
       {% empty %}

@@ -11,6 +11,29 @@ from core.normalization import normalize_identifier, normalize_phone, normalized
 from core.query_utils import parse_date_range
 from apps.visits.input_validation import clinical_object, text
 from apps.visits.lab_validation import normalize_lab_values
+from core.renderers import EnvelopeJSONRenderer
+
+
+class ResponseEnvelopeTests(SimpleTestCase):
+    def test_no_content_statuses_do_not_render_json_bytes(self):
+        renderer = EnvelopeJSONRenderer()
+        for status in (204, 205, 304):
+            for data in (None, {}, {'data': None}):
+                with self.subTest(status=status, data=data):
+                    self.assertEqual(renderer.render(data, renderer_context={
+                        'response': SimpleNamespace(status_code=status),
+                    }), b'')
+
+    def test_ordinary_null_response_retains_success_envelope(self):
+        self.assertEqual(EnvelopeJSONRenderer().render(None, renderer_context={
+            'response': SimpleNamespace(status_code=200),
+        }), b'{"data":null}')
+
+    def test_explicit_success_and_error_envelopes_are_preserved(self):
+        import json
+        for data in ({'data': False}, {'error': {'code': 'synthetic', 'message': 'Synthetic'}}):
+            with self.subTest(data=data):
+                self.assertEqual(json.loads(EnvelopeJSONRenderer().render(data)), data)
 
 
 class MutationTests(SimpleTestCase):

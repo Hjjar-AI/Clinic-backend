@@ -5,16 +5,17 @@
   <style>
     @page { size: A4; margin: 16mm 14mm 18mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
     * { box-sizing: border-box; }
-    body { font-family: Arial, "Noto Sans Arabic", sans-serif; color: #172033; font-size: 11px; line-height: 1.7; }
+    body { font-family: "Clinic Arabic", "Clinic Latin", sans-serif; color: #172033; font-size: 11px; line-height: 1.7; }
     header { border-bottom: 2px solid #2563eb; padding-bottom: 8px; margin-bottom: 14px; }
     h1 { font-size: 20px; margin: 0; color: #1d4ed8; }
     h2 { font-size: 15px; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin: 16px 0 8px; }
+    h2, h3 { break-after: avoid; }
     h3 { font-size: 13px; margin: 0 0 6px; color: #334155; }
     .clinic-meta, .document-meta { color: #64748b; font-size: 9px; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 16px; }
     .field { break-inside: avoid; }
     .label { font-weight: 700; color: #475569; }
-    .visit { border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; margin: 10px 0; break-inside: avoid; }
+    .visit { border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; margin: 10px 0; break-inside: auto; }
     ul { margin: 3px 0 7px; padding-right: 18px; }
     .pre { white-space: pre-wrap; overflow-wrap: anywhere; }
     .empty { color: #64748b; font-style: italic; }
@@ -23,7 +24,7 @@
 <body>
   <header>
     <h1>{{ clinic.name }}</h1>
-    <div class="clinic-meta">{{ clinic.address }}{% if clinic.phone %} — {{ clinic.phone }}{% endif %}</div>
+    <div class="clinic-meta">{{ clinic.address }}{% if clinic.phone %} — <bdi dir="ltr">{{ clinic.phone }}</bdi>{% endif %}</div>
     <div class="document-meta">تقرير مريض {{ report_data.patient_number }} • {{ report_data.generated_at }} • {{ report_data.timezone }}</div>
   </header>
 
@@ -32,8 +33,8 @@
     <div class="field"><span class="label">الاسم:</span> {{ report_data.patient_name }}</div>
     <div class="field"><span class="label">سنة الميلاد:</span> {{ report_data.dob_year|default:"غير محدد" }}</div>
     <div class="field"><span class="label">الجنس:</span> {{ report_data.gender }}</div>
-    <div class="field"><span class="label">الرقم الوطني:</span> {{ report_data.national_id }}</div>
-    <div class="field"><span class="label">الهاتف:</span> {{ report_data.phone }}</div>
+    <div class="field"><span class="label">الرقم الوطني:</span> <bdi dir="ltr">{{ report_data.national_id }}</bdi></div>
+    <div class="field"><span class="label">الهاتف:</span> <bdi dir="ltr">{{ report_data.phone }}</bdi></div>
     <div class="field"><span class="label">تاريخ التسجيل:</span> {{ report_data.registration_date }}</div>
     <div class="field"><span class="label">العنوان:</span> {{ report_data.address }}</div>
     <div class="field"><span class="label">جهة الطوارئ:</span> {{ report_data.emergency_contact }}</div>

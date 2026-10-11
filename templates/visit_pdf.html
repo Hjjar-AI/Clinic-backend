@@ -5,7 +5,7 @@
   <style>
     @page { size: A4; margin: 16mm 14mm 18mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
     * { box-sizing: border-box; }
-    body { font-family: Arial, "Noto Sans Arabic", sans-serif; color: #172033; font-size: 11px; line-height: 1.75; }
+    body { font-family: "Clinic Arabic", "Clinic Latin", sans-serif; color: #172033; font-size: 11px; line-height: 1.75; }
     header { border-bottom: 2px solid #2563eb; padding-bottom: 8px; margin-bottom: 14px; }
     h1 { font-size: 20px; margin: 0; color: #1d4ed8; }
     h2 { font-size: 15px; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; margin: 15px 0 7px; }
@@ -14,22 +14,26 @@
     .field { margin: 4px 0; break-inside: avoid; }
     .label { font-weight: 700; color: #475569; }
     .pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-    table { width: 100%; border-collapse: collapse; margin-top: 5px; break-inside: avoid; }
+    table { width: 100%; border-collapse: collapse; margin-top: 5px; break-inside: auto; }
     th, td { border: 1px solid #cbd5e1; padding: 5px; text-align: right; vertical-align: top; }
     th { background: #eff6ff; }
+    .numeric { direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+    h2 { break-after: avoid; }
+    .field.pre { break-inside: auto; }
+    tr { break-inside: avoid; }
     .signature { margin-top: 26px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
   </style>
 </head>
 <body>
   <header>
     <h1>{{ clinic.name }}</h1>
-    <div class="meta">{{ clinic.address }}{% if clinic.phone %} — {{ clinic.phone }}{% endif %}</div>
+    <div class="meta">{{ clinic.address }}{% if clinic.phone %} — <bdi dir="ltr">{{ clinic.phone }}</bdi>{% endif %}</div>
     <div class="meta">سجل زيارة #{{ data.visit_id }} • الإصدار {{ data.visit_version }} • {{ data.generated_at }} • {{ data.timezone }}</div>
   </header>
 
   <div class="grid">
     <div class="field"><span class="label">المريض:</span> {{ data.patient_name }}</div>
-    <div class="field"><span class="label">تاريخ الزيارة:</span> {{ data.visit_date }}</div>
+    <div class="field"><span class="label">تاريخ الزيارة:</span> <bdi dir="ltr">{{ data.visit_date }}</bdi></div>
     <div class="field"><span class="label">حالة التوثيق:</span> {{ data.status }}</div>
     <div class="field"><span class="label">الحالة السريرية:</span> {{ data.clinical_status }}</div>
   </div>
@@ -45,7 +49,7 @@
     <thead><tr><th>الدواء</th><th>الجرعة</th><th>التعليمات</th></tr></thead>
     <tbody>
       {% for medication in data.medications %}
-        <tr><td>{{ medication.name }}</td><td>{{ medication.dosage|default:"-" }}</td><td>{{ medication.schedule|default:"-" }}</td></tr>
+        <tr><td>{{ medication.name }}</td><td class="numeric">{{ medication.dosage|default:"-" }}</td><td>{{ medication.schedule|default:"-" }}</td></tr>
       {% empty %}
         <tr><td colspan="3">لا توجد أدوية مسجلة.</td></tr>
       {% endfor %}

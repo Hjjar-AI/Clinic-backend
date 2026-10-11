@@ -103,7 +103,7 @@ Never commit `.env`, `data/`, `media/`, `backups/`, `staticfiles/`; protect prod
 
 Before changes: [AGENTS.md](AGENTS.md), [workCurrent.md](docs/workCurrent.md), [doneCurrent.md](docs/doneCurrent.md). Migrations, test-suite access, builds/compilation/packaging, version changes require explicit authorization.
 
-References: [documentation index](docs/README.md), [implemented backend fixes](docs/backend-fixes-implementation.md), [workflow checklist](docs/critical-workflow-checklist.md). Current rules override older setup helpers' broader side effects. Unverified: PDF/Arabic rendering, browser workflows, PostgreSQL concurrency.
+References: [documentation index](docs/README.md), [implemented backend fixes](docs/backend-fixes-implementation.md), [workflow checklist](docs/critical-workflow-checklist.md). Current rules override older setup helpers' broader side effects. Requested PDF/Arabic and full browser workflow checks are complete; [verification and remaining limits](docs/pdf-workflow-verification.md). PostgreSQL concurrency remains unverified.
 
 Patient record design: [schema, API, duplicates and retention](docs/patient-record-schema.md).
 

@@ -11,6 +11,12 @@ from django.conf import settings
 # SQLite needs a temporary file because HTTP requests use separate connections.
 settings.DATABASES['default']['NAME'] = str(settings.TEST_WORKSPACE / 'browser.sqlite3')
 settings.CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:5174']
+# All viewport cases share synthetic accounts and a localhost IP. Keep the
+# application throttles enabled with browser-fixture quotas; production quotas
+# would measure aggregate suite traffic rather than an individual workflow.
+settings.REST_FRAMEWORK = {**settings.REST_FRAMEWORK, 'DEFAULT_THROTTLE_RATES': {
+    'anon': '10000/hour', 'user': '100000/hour',
+}}
 django.setup()
 from django.core.management import call_command
 from apps.accounts.services import UserService

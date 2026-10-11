@@ -65,3 +65,18 @@ SQLite tests exercise sequential stale writes and rollback, not PostgreSQL locki
 ## PDF and complete browser workflows (2026-10-11)
 
 Latest full suite: **174 backend tests passed**. Recovery now includes a deterministic full-microsecond signed-timestamp regression. The separate PDF inspector passed **6 checks**, covering five long template fixtures and all 18 actual browser PDF/print artifacts. [Commands, embedded fonts, review samples, browser matrix and corrections](pdf-workflow-verification.md).
+
+## Task and notification HTTP expansion (2026-10-11)
+
+Added **19 endpoint tests** in `tests/test_task_notification_http.py`. Full **193 backend tests passed** on Python 3.14.4 / Django 6.1.2 / DRF 3.18.3, using the existing clinic interpreter with isolated test settings. Runtime versions/requirements were unchanged.
+
+- Tasks: real serializers, optional null due dates, protected actor/lifecycle fields, invalid-create atomicity, permission grants independent of role, own/unassigned/foreign scope, self-assignment and reassignment rules, reminder resets, `If-Match`/missing/conflicting/stale versions, terminal metadata and reason validation, invalid transitions/edits, completion/reorder/delete replay, atomic rejected reordering, and scoped search/status/overdue behavior.
+- Notifications: cursor pagination and user-wide unread counts, unread filtering, foreign retrieve/delete denial and scoped mark-read no-op, repeated reads, bulk read/delete retaining unread/foreign rows, read-only content endpoints and anonymous action denial.
+
+Focused command:
+
+```bash
+python -B manage.py test tests.test_task_notification_http --settings=config.settings.testing --noinput
+```
+
+No backend production change was necessary. The corresponding frontend regressions exposed task creation and stale-list/availability defects; [coverage and corrections](../../frontend/docs/testing.md). These checks use synthetic in-memory SQLite and do not establish PostgreSQL concurrent-writer behavior or pinned-runtime compatibility.

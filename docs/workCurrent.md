@@ -1,5 +1,7 @@
 # Current work
 
+Testing continuation complete (2026-10-11): **193 backend / 110 Node / 109 Vue DOM/import / 66 Chromium cases passed**, including 19 new task/notification HTTP, 32 new DOM and six new browser cases. Backend production code unchanged; frontend task/availability regressions corrected. [Coverage and limits](testing.md), [frontend guide](../../frontend/docs/testing.md). PostgreSQL concurrent writers, pinned runtime and remaining UI workflows stay pending.
+
 Requested PDF/browser expansion complete (2026-10-11): **174 backend tests**, **110 Node tests**, **77 Vue DOM/import checks**, **60 Chromium cases**, and **6 PDF appearance checks** passed. Real workflows run across desktop/tablet/mobile with isolated synthetic data. [PDF review, workflow matrix, fixes and limits](pdf-workflow-verification.md). No production build, clinic-data, migration or dependency-version changes.
 
 Automated suite implemented and verified on the installed environment: [commands, coverage and limits](testing.md), [completed results](doneCurrent.md). Test tooling and Vue/Vite test transforms explicitly authorized on 2026-10-11; no production build or clinic-data changes for tests. Earlier pending UI/operational checks are superseded only for the scenarios listed in that guide.

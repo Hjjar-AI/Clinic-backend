@@ -1,7 +1,7 @@
 from .base import *
 
-DEBUG = True
-ALLOWED_HOSTS = ['*']
+# base.py reads DJANGO_DEBUG and DJANGO_ALLOWED_HOSTS from the environment.
+# Keep those choices rather than silently overriding the local .env.
 
 # Development deliberately inherits the SQLite + LocMemCache defaults from
 # base.py. Those defaults are correct here — the dev server runs as a single

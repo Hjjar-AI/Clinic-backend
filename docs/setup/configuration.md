@@ -1,6 +1,6 @@
 # Configuration by owning file
 
-`config/settings/base.py` loads ignored `backend/.env`; `.env.example` is an example, source defaults below are authoritative. `manage.py` defaults development; WSGI defaults production. Explicitly export `DJANGO_SETTINGS_MODULE=config.settings.production` and set environment `DJANGO_DEBUG=false` for deployment. Development forces debug/all hosts; production forces debug/demo/auto-seed off and secure session/CSRF cookies, rejects empty hosts/SQLite/LocMemCache.
+`config/settings/base.py` loads ignored `backend/.env`; `.env.example` is an example, source defaults below are authoritative. `manage.py` loads `.env` before selecting `DJANGO_SETTINGS_MODULE` (development fallback); shell variables and `--settings` override it; explicit `config.settings.testing` skips clinic `.env`. WSGI defaults production. Explicitly export `DJANGO_SETTINGS_MODULE=config.settings.production` and set environment `DJANGO_DEBUG=false` for deployment. Development honors configured debug/hosts; production forces debug/demo/auto-seed off and secure session/CSRF cookies, rejects empty hosts/SQLite/LocMemCache.
 
 ## Environment (`config/settings/base.py`)
 
@@ -9,9 +9,12 @@
 | `DJANGO_SECRET_KEY`, `BACKUP_HMAC_KEY` | Empty; required when environment debug is false. Keep separate keys; retain backup keys needed for existing archives. |
 | `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS` | `false`, empty; comma-separated production hosts, no wildcard. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173`; exact credentialed origins. |
-| `DATABASE_ENGINE` | `django.db.backends.sqlite3`; SQLite path fixed at `data/clinic.db`, WAL/foreign keys/20s timeout. |
-| `DATABASE_NAME/USER/PASSWORD/HOST/PORT`, `DATABASE_CONN_MAX_AGE` | External backend: `clinic` / empty credentials/host/port, max age `600`; install database driver separately. |
-| `CACHE_BACKEND`, `CACHE_LOCATION` | Unset backend means development LocMemCache `unique-snowflake`; explicit backend location defaults `127.0.0.1:11211`. Production needs shared cache/driver, e.g. PyMemcacheCache or RedisCache. |
+| `DATABASE_ENGINE` | Defaults SQLite; aliases `sqlite/sqlite3`, `postgres/postgresql`, `mysql/maria/mariadb`, or an installed full Django backend path. |
+| `DATABASE_NAME` | SQLite: backend-relative/absolute path, `:memory:` or `file:` URI; blank defaults `data/clinic.db`. External DB: blank defaults `clinic`. |
+| `DATABASE_USER/PASSWORD/HOST/PORT`, `DATABASE_CONN_MAX_AGE` | External credentials/server, default max age `600`; SQLite ignores them. |
+| `DATABASE_TIMEOUT` | SQLite seconds, default `20`; foreign keys native, WAL initialization only on Django 5.1+. |
+| `DATABASE_SSLMODE`, `DATABASE_SSL_CA`, `DATABASE_OPTIONS` | Optional PostgreSQL SSL mode/CA or MySQL CA; JSON object overrides driver options. MySQL/MariaDB defaults utf8mb4/strict mode; use InnoDB. |
+| `CACHE_BACKEND`, `CACHE_LOCATION` | Unset backend means development LocMemCache `unique-snowflake`; Blank location defaults to local-memory name, Redis URL or Memcached address according to backend. Production needs shared cache/driver, e.g. PyMemcacheCache or RedisCache. |
 | `TIME_ZONE` | `Asia/Damascus`; aware timestamps, clinic-local business dates. |
 | `SESSION_COOKIE_AGE`, `SESSION_COOKIE_SECURE` | `10800` seconds, `false` in base; session HttpOnly/SameSite Lax, CSRF readable by client. Production forces secure cookies. |
 | `MAX_LOGIN_ATTEMPTS`, `LOGIN_LOCKOUT_MINUTES` | `10`, `15`; durable lockout. |
@@ -35,6 +38,17 @@ python -c 'import secrets; print(secrets.token_hex(32))'
 ```
 
 Memcached Linux: `sudo systemctl enable --now memcached`; macOS: `brew services start memcached`. Probe with `echo stats | nc 127.0.0.1 11211`. Configure environment backend instead of editing shared settings; LocMemCache is per-process and unsuitable for production cache generations.
+
+## Dependency profiles and switching
+
+| Profile (from backend) | Includes |
+| --- | --- |
+| `pip install -r requirements/sqlite.txt` | Shared pinned `requirements.txt`; SQLite is included with Python, no DB driver. |
+| `pip install -r requirements/postgresql.txt` | Shared pins + psycopg binary driver. |
+| `pip install -r requirements/mysql.txt` or `requirements/mariadb.txt` | Shared pins + mysqlclient; system client headers/build tools needed when no wheel exists. MariaDB uses Django MySQL backend. |
+| `pip install -r requirements/cache-memcached.txt` or `requirements/cache-redis.txt` | Optional cache client only; cache server installed/running separately. |
+
+Replace active DB/cache assignments with the commented alternative in `.env`, supply server/name/credentials/SSL, restart and run via `python manage.py COMMAND`. Switching selects a connection; it does not transfer data or initialize schema. Existing values are preserved when organizing environment files. Other Django backends need their own installed driver/options; application/schema/locking compatibility is not implied by selection. [Django backend guidance](https://docs.djangoproject.com/en/5.0/ref/databases/), [SQLite init commands added in 5.1](https://docs.djangoproject.com/en/5.1/ref/databases/#setting-pragma-options).
 
 ## Storage, templates and fonts
 

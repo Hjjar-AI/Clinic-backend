@@ -1,10 +1,10 @@
 # Development by source/configuration area
 
-Canonical install/start sequence: [root README](../../README.md); frontend Node/setup: [frontend README](../../../frontend/README.md). Commands run from activated `backend/` environment. Use pinned `requirements.txt`; do not replace it with unpinned package lists. No hard-coded workstation paths.
+Canonical install/start sequence: [root README](../../README.md); frontend Node/setup: [frontend README](../../../frontend/README.md). Commands run from activated `backend/` environment. Use the matching database profile (SQLite/PostgreSQL/MySQL/MariaDB) including pinned `requirements.txt`; optional cache clients are separate. No hard-coded workstation paths.
 
 | Files / task | Behavior and options |
 | --- | --- |
-| `config/settings/base.py`, `.env.example` | SQLite at `data/clinic.db`, process-local cache for development; [configuration](configuration.md). `.env` startup reads require restart after changes. |
+| `manage.py`, `config/settings/base.py`, `database.py`, `.env.example` | `.env` selects settings/DB/cache before command dispatch; SQLite defaults `data/clinic.db` with configurable path, process-local cache for development; [configuration](configuration.md). `.env` startup reads require restart after changes. |
 | System dependencies | Debian/Ubuntu: `libmagic1`, Pango/Cairo/GObject dependencies, `libffi-dev`, `shared-mime-info`; macOS: `libmagic pango cairo gdk-pixbuf libffi`. `python -c "from weasyprint import HTML; print('ok')"` checks renderer import only. Memcached optional locally. |
 | Runtime directories | `data/`, `media/`, `backups/`, generated `staticfiles/` remain ignored; creating folders does not initialize schema. |
 | `bootstrap` command | Requires explicit migration authorization: prepares migrations/schema and seeds. `--with-demo-data` populates samples; `--with-frontend` installs/builds (separate build authorization). `--clean` deletes SQLite/custom migrations and needs explicit destructive authorization; `--yes` skips its DELETE prompt. |

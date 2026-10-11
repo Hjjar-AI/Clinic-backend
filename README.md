@@ -9,14 +9,14 @@ Use Python **3.10–3.12** for pinned Django 5.0.6, [requirements](requirements.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install -r requirements/sqlite.txt
 cp .env.example .env
 mkdir -p data media backups
 ```
 
 Copy `.env` only if absent; otherwise edit it. Set `DJANGO_DEBUG=True`, separate generated `DJANGO_SECRET_KEY`/`BACKUP_HMAC_KEY`, and `ALLOW_DEMO_DATA=false`/`AUTO_SEED=false` for an empty clinic. Retain signing keys for old-backup recovery. [Defaults/system libraries](docs/setup/configuration.md), [development](docs/setup/development.md).
 
-Fresh schema initialization requires explicit authorization; `bootstrap`/`runserver_auto` perform migration work. Once schema is ready, deliberately seed/start:
+Choose database/cache through the commented alternatives in `.env`; install the matching [dependency profile](docs/setup/configuration.md#dependency-profiles-and-switching). `manage.py` loads the file before choosing settings; configured debug/hosts are honored. SQLite file paths are configurable; switching does not move existing data. Fresh schema initialization requires explicit authorization; `bootstrap`/`runserver_auto` perform migration work. Once schema is ready, deliberately seed/start:
 
 ```bash
 python manage.py seed_db

@@ -1,0 +1,2 @@
+# Python includes SQLite; no separate database driver.
+-r ../requirements.txt

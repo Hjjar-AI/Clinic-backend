@@ -7,7 +7,7 @@ load_dotenv(BASE_DIR / '.env')
 
 # Item #4 / #1: read DEBUG first so the SECRET_KEY guard below can key off it.
 DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() == 'true'
-ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',') if os.environ.get('DJANGO_ALLOWED_HOSTS') else []
+ALLOWED_HOSTS = [host.strip() for host in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',') if host.strip()]
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '')
 BACKUP_HMAC_KEY = os.environ.get('BACKUP_HMAC_KEY', '')
@@ -157,41 +157,11 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# ---------------------------------------------------------------------
-# Database
-# ---------------------------------------------------------------------
-# Default is SQLite for local development. Production must override via
-# DATABASE_ENGINE (see config/settings/production.py, which refuses to boot
-# on SQLite). Accepts any Django database backend name; for non-SQLite
-# backends the standard DATABASE_NAME / USER / PASSWORD / HOST / PORT env
-# vars are read.
-DATABASE_ENGINE = os.environ.get('DATABASE_ENGINE', 'django.db.backends.sqlite3')
+# Database selection and options are shared by every settings entry point.
+from django import VERSION as DJANGO_VERSION
+from .database import database_config
 
-if DATABASE_ENGINE == 'django.db.backends.sqlite3':
-    DATABASES = {
-        'default': {
-            'ENGINE': DATABASE_ENGINE,
-            'NAME': BASE_DIR / 'data' / 'clinic.db',
-            'OPTIONS': {
-                'init_command': 'PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;',
-                'timeout': 20,
-            },
-            'ATOMIC_REQUESTS': True,
-        }
-    }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': DATABASE_ENGINE,
-            'NAME': os.environ.get('DATABASE_NAME', 'clinic'),
-            'USER': os.environ.get('DATABASE_USER', ''),
-            'PASSWORD': os.environ.get('DATABASE_PASSWORD', ''),
-            'HOST': os.environ.get('DATABASE_HOST', ''),
-            'PORT': os.environ.get('DATABASE_PORT', ''),
-            'CONN_MAX_AGE': int(os.environ.get('DATABASE_CONN_MAX_AGE', 600)),
-            'ATOMIC_REQUESTS': True,
-        }
-    }
+DATABASES = {'default': database_config(BASE_DIR, os.environ, DJANGO_VERSION)}
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -259,22 +229,17 @@ REST_FRAMEWORK = {
 # its own counter and its own cached values, so a write that invalidates
 # a group in worker A leaves workers B/C/D serving stale dashboard/report/
 # settings data until their process restarts.
-CACHE_BACKEND = os.environ.get('CACHE_BACKEND', '')
-
-if CACHE_BACKEND:
-    CACHES = {
-        'default': {
-            'BACKEND': CACHE_BACKEND,
-            'LOCATION': os.environ.get('CACHE_LOCATION', '127.0.0.1:11211'),
-        }
-    }
+CACHE_BACKEND = os.environ.get('CACHE_BACKEND', '').strip() or 'django.core.cache.backends.locmem.LocMemCache'
+if 'locmem' in CACHE_BACKEND.lower():
+    CACHE_DEFAULT_LOCATION = 'unique-snowflake'
+elif CACHE_BACKEND == 'django.core.cache.backends.redis.RedisCache':
+    CACHE_DEFAULT_LOCATION = 'redis://127.0.0.1:6379/1'
 else:
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-            'LOCATION': 'unique-snowflake',
-        }
-    }
+    CACHE_DEFAULT_LOCATION = '127.0.0.1:11211'
+CACHES = {'default': {
+    'BACKEND': CACHE_BACKEND,
+    'LOCATION': os.environ.get('CACHE_LOCATION', '').strip() or CACHE_DEFAULT_LOCATION,
+}}
 
 LOGGING = {
     'version': 1,

@@ -4,7 +4,7 @@ Deployment examples, not executed verification. Builds/packaging/schema changes 
 
 ## Application/environment
 
-Layout: `/srv/myclinic/{backend,frontend,venv}`; deploy user owns writable backend runtime directories. Install system PDF/libmagic libraries from [development](development.md), plus Nginx/shared-cache service. Install backend via `pip install -r requirements.txt`; production server/driver packages separately, preserve pins. No old Node 18/20 installer or unpinned Django list.
+Layout: `/srv/myclinic/{backend,frontend,venv}`; deploy user owns writable backend runtime directories. Install system PDF/libmagic libraries from [development](development.md), plus Nginx/shared-cache service. Install the chosen external-DB profile (e.g. `pip install -r requirements/postgresql.txt`) plus shared-cache profile; production WSGI package separately, preserve shared pins. No old Node 18/20 installer or unpinned Django list.
 
 Production `.env` (replace placeholders privately):
 

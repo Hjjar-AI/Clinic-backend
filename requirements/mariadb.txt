@@ -1,0 +1,2 @@
+# MariaDB uses Django's MySQL backend and mysqlclient driver.
+-r mysql.txt

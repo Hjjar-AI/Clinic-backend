@@ -1,0 +1,2 @@
+# Optional shared Redis cache; server must run separately.
+redis

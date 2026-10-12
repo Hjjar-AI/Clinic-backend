@@ -44,7 +44,9 @@ class PrescriptionGenerateView(APIView):
         snapshot = self.service.get_preview(preview_token, request.user.id, visit)
         if 'print_options' in request.data:
             from .printing import normalize_print_options
-            snapshot = {**snapshot, 'print_options': normalize_print_options(request.data['print_options'])}
+            from django.utils import timezone
+            snapshot = {**snapshot, 'print_options': normalize_print_options(request.data['print_options']),
+                        'issue_date': timezone.localdate().strftime('%d/%m/%Y')}
         result = self.service.generate_prescription_pdf(snapshot, signature_data, stamp_data)
 
         if isinstance(result, bytes):

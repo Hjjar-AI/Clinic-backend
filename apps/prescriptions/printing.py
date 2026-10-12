@@ -9,7 +9,8 @@ def normalize_print_options(value):
     if not isinstance(value, dict):
         raise ValidationError({'print_options': ['إعدادات الورق غير صالحة']})
     allowed = {'mode', 'width_mm', 'height_mm', 'offset_x_mm', 'offset_y_mm'}
-    if set(value) - allowed or value.get('mode', 'blank') not in {'blank', 'preprinted'}:
+    mode = value.get('mode', 'blank')
+    if set(value) - allowed or not isinstance(mode, str) or mode not in {'blank', 'preprinted'}:
         raise ValidationError({'print_options': ['نوع الورق أو إعداداته غير صالحة']})
     result = {'mode': value.get('mode', 'blank')}
     for key, default, minimum, maximum in (
@@ -50,7 +51,7 @@ def render_preprinted(prescription, options):
     stylesheet = CSS(string=document_font_css(), font_config=fonts)
     geometry = preprinted_geometry(options)
     medications = prescription.get('medications') or []
-    indexed = [{'index': index, **medication} for index, medication in enumerate(medications)]
+    indexed = [{**medication, 'index': index} for index, medication in enumerate(medications)]
     def render(sheets, measurement=False, field_font=6.5):
         html = render_to_string('prescriptions/prescription_preprinted.html', {
             'prescription': prescription, 'paper': geometry, 'sheets': sheets,

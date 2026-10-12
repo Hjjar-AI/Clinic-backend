@@ -36,6 +36,6 @@ h2 { font-size: 9pt; margin: 0 0 2mm; }
     </div>{% empty %}<p>لا توجد أدوية مسجلة</p>{% endfor %}
   </div>
   <div class="signatures"><img src="{{ prescription.signature_data }}" alt="">{% if prescription.stamp_data %}<img src="{{ prescription.stamp_data }}" alt="">{% endif %}</div>
-  <div class="date numeric">{{ prescription.visit_date }}</div>
+  <div class="date numeric">{{ prescription.issue_date|default:prescription.visit_date }}</div>
 </section>{% endfor %}
 </body></html>

@@ -117,7 +117,13 @@ class PrescriptionService:
             from .printing import normalize_print_options, render_preprinted
             options = normalize_print_options(options)
             if options['mode'] == 'preprinted':
-                return render_preprinted(prescription, options)
+                try:
+                    return render_preprinted(prescription, options)
+                except ValidationError:
+                    raise
+                except Exception:
+                    logger.error('Preprinted prescription rendering failed')
+                    return None
             if (options['width_mm'], options['height_mm']) != (210, 297):
                 context['paper'] = options
                 return render_pdf_from_html(render_to_string('prescriptions/prescription_blank.html', context))

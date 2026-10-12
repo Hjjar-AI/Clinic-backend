@@ -1,31 +1,13 @@
 # Backend agent guide
 
-## Workflow
-
-- Before editing, read [current](docs/workCurrent.md)/[completed](docs/doneCurrent.md) work, relevant plans, and applicable `AGENTS.md`; use [README.md](README.md) for setup. Read frontend instructions/handoffs for cross-project changes.
-- Keep `README.md`/`AGENTS.md` at root; other documentation, reviews, plans, and handoffs belong in `docs/`. Update local/cross-project references after moves; keep guides compact and link detailed records instead of duplicating them.
-- Preserve user changes and completed work. Reviews must identify findings, locations, impact, and corrections; fix requests require authorized implementation and verification, not suggestions alone.
-- Keep handoffs current: completions, outstanding work, verification, limitations. Separate confirmed defects from unverified behavior; do not reopen completed findings without evidence.
-
-## Limits
-
-- Unless explicitly requested, do not inspect/review/edit/create migration files or inspect/review test-suite files. The user normally starts with a fresh database. `bootstrap`/`runserver_auto` perform migration work and require authorization.
-- No Gradle, builds, compilation, or packaging without explicit permission. Simple development/debugging scripts/tools are allowed, but do not authorize project database changes. Preserve dependency/application versions, pinned requirements, and lockfiles unless version changes are explicitly requested.
-- At 20% remaining five-hour usage allowance, finish the current step and stop. Do not claim usage visibility when unavailable.
-
-## Models and contracts
-
-- Django/DRF: `apps/`; shared infrastructure: `core/`; settings: `config/`. API: port `5019`, `/api/v1/`; frontend: `5173`.
-- Requested model/logic changes may improve the fresh-database design without generating migrations. Trace services, serializers, endpoints, imports/exports, recovery, and frontend consumers; keep contracts consistent.
-- Put business validation/lifecycle transitions in services. Preserve endpoint permissions and shared patient/care-team/historical-author scope; UI permissions never replace backend authorization.
-- Preserve immutable signed visit revisions/issued documents, server-authorized signing, expected-version checks, replayable idempotency, and after-commit cache invalidation.
-- Preserve session/CSRF handling, response envelopes, frontend opening versions/`If-Match`, and stable operation keys across retries after uncertain responses.
-- Archive retains clinical history; pseudonymization retains signed identity snapshots. Keep full authenticated ZIP recovery distinct from catalog-only merge; imports/restores require bound previews/confirmations.
-- Patient design: [schema/API/retention](docs/contracts/patients.md). Preserve year-only/unknown birth, permanent file numbers, unchanged duplicate IDs/dismissible review, optional preview-bound merge, dated team memberships, clinical unknowns, longitudinal/encounter/signed fact ownership, correction reasons and parent versions.
-- Consult the [implementation record](docs/contracts/implementation.md) and [workflow checklist](docs/testing/release-checklist.md) when changing these contracts.
-
-## Verification and privacy
-
-- Use focused source/reference checks and isolated development probes within these limits. Exclude migrations, test suites, generated output, dependencies, and runtime data from broad searches; do not initialize/seed/restore project data merely to verify code.
-- Report checks and remaining uncertainty. Source parsing/SQLite probes do not verify browser/PDF rendering or PostgreSQL concurrency.
-- Never commit secrets/runtime data (`.env`, `data/`, `media/`, `backups/`, `staticfiles/`) or log patient records/credentials while debugging.
+- Read [current](docs/workCurrent.md), [completed](docs/doneCurrent.md), [contracts](docs/contracts.md) and applicable instructions before editing; verify current source. Setup is in [README](README.md)/[setup](docs/setup.md); cross-project changes also require frontend handoffs.
+- Root Markdown is limited to README/AGENTS. Keep remaining work in current, completed evidence/limits in completed, and durable details in the existing topic guides. Update links after moves; avoid duplicate reviews/plans/timelines.
+- Finish authorized scope, reuse existing authorization and preserve unrelated edits. Reviews identify source, impact and correction; fix requests require implementation plus permitted verification. Do not reopen completed findings without new evidence.
+- No migration inspection/changes or test-suite inspection/work without an explicit request. No Gradle, builds, compilation, packaging or version/dependency/lockfile changes without explicit permission. Production study/exam code is not a test suite. `bootstrap`/`runserver_auto` perform migrations; development probes do not authorize project-data/schema changes.
+- At 20% remaining of a visible five-hour allowance, finish the current step and stop. Never invent usage visibility.
+- Django/DRF features: `apps/`; shared infrastructure: `core/`; settings: `config/`; API **5019**, `/api/v1/`; frontend **5173**. Model fixes may improve fresh-database design without generating migrations; trace services, serializers, endpoints, import/export/recovery and UI consumers.
+- Services own validation/lifecycle. Preserve action permission plus shared patient/team/historical-author scope; server authorization remains authoritative. Keep patient-before-visit locking, opening versions/strict `If-Match`, session/CSRF/envelopes and stable uncertain-retry keys.
+- Preserve immutable signed revisions/exact issued bytes, authorized signing, durable idempotency and cache invalidation visible only for committed mutations. Archive retains clinical history; pseudonymization retains signed identities. Bound previews/confirmations distinguish full authenticated recovery from catalog merge.
+- Preserve year-only/unknown birth, permanent file numbers, unchanged duplicate IDs/nonblocking review, optional explicit merge, effective dated teams, clinical unknowns, fact ownership, reason-bearing corrections and parent versions. [Contracts](docs/contracts.md) are authoritative; [verification](docs/verification.md) defines release checks.
+- Use focused production-source/reference checks and isolated probes; exclude migrations, test suites, generated assets, dependencies and runtime data from broad searches. Source/SQLite checks do not verify browser/PDF/PostgreSQL behavior; report unperformed checks.
+- Never commit secrets/runtime data (`.env`, `data/`, `media/`, `backups/`, `staticfiles/`) or log patient values/credentials. Do not initialize/seed/restore clinic storage merely for verification.

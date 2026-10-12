@@ -47,6 +47,7 @@ class PrescriptionService:
             'patient_name': revision.snapshot['patient']['name'],
             'patient_age': visit.visit_date.year - revision.snapshot['patient']['dob_year'] if revision.snapshot['patient']['dob_year'] else 'غير محدد',
             'patient_gender': revision.snapshot['patient']['gender'] or 'غير محدد',
+            'patient_address': patient.permanent_address or 'غير مسجل',
             'patient_national_id': revision.snapshot['patient']['national_id'] or 'غير محدد',
             'visit_date': visit.visit_date.strftime('%d/%m/%Y'),
             'medications': [
@@ -111,6 +112,15 @@ class PrescriptionService:
                 'phone': clinic_info['clinic_phone'],
             }
         }
+        options = snapshot.get('print_options')
+        if options:
+            from .printing import normalize_print_options, render_preprinted
+            options = normalize_print_options(options)
+            if options['mode'] == 'preprinted':
+                return render_preprinted(prescription, options)
+            if (options['width_mm'], options['height_mm']) != (210, 297):
+                context['paper'] = options
+                return render_pdf_from_html(render_to_string('prescriptions/prescription_blank.html', context))
         html = render_to_string('prescriptions/prescription_pdf.html', context)
         pdf = render_pdf_from_html(html)
         return pdf

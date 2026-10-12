@@ -42,6 +42,9 @@ class PrescriptionGenerateView(APIView):
         self.check_object_permissions(request, visit)
         preview_token = request.data.get('preview_token')
         snapshot = self.service.get_preview(preview_token, request.user.id, visit)
+        if 'print_options' in request.data:
+            from .printing import normalize_print_options
+            snapshot = {**snapshot, 'print_options': normalize_print_options(request.data['print_options'])}
         result = self.service.generate_prescription_pdf(snapshot, signature_data, stamp_data)
 
         if isinstance(result, bytes):

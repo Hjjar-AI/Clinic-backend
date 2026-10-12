@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+@page { size: {{ paper.width }}mm {{ paper.height }}mm; margin: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Clinic Arabic", "Clinic Latin", sans-serif; color: #000; }
+.sheet { position: relative; width: {{ paper.width }}mm; height: {{ paper.height }}mm; break-after: page; }
+.sheet:last-child { break-after: auto; }
+.field { position: absolute; width: {{ paper.value_width }}mm; font-size: {{ field_font }}pt; line-height: 1; overflow-wrap: anywhere; }
+.name, .identity { left: {{ paper.name_left }}mm; }
+.age, .address { left: {{ paper.left }}mm; }
+.name, .age { top: {{ paper.row_one }}mm; }
+.identity, .address { top: {{ paper.row_two }}mm; }
+.summary { position: absolute; top: {{ paper.summary_top }}mm; left: {{ paper.left }}mm; width: {{ paper.summary_width }}mm; font-size: 6.5pt; line-height: 1.1; }
+.summary-item { margin-bottom: 1mm; overflow-wrap: anywhere; }
+.duration { position: absolute; top: {{ paper.duration_top }}mm; left: {{ paper.left }}mm; width: {{ paper.summary_width }}mm; font-size: 6pt; }
+.content { position: absolute; top: {{ paper.body_top }}mm; left: {{ paper.left }}mm; width: {{ paper.content_width }}mm; font-size: 9pt; line-height: 1.35; }
+h2 { font-size: 9pt; margin: 0 0 2mm; }
+.medication { margin: 0 0 2mm; overflow-wrap: anywhere; }
+.instructions { white-space: pre-wrap; }
+.signatures { position: absolute; top: {{ paper.signature_top }}mm; left: {{ paper.left }}mm; display: flex; gap: 2mm; }
+.signatures img { max-width: {{ paper.signature_width }}mm; max-height: {{ paper.signature_height }}mm; object-fit: contain; }
+.date { position: absolute; top: {{ paper.date_top }}mm; left: {{ paper.date_left }}mm; width: {{ paper.date_width }}mm; font-size: 6.5pt; }
+.numeric { direction: ltr; unicode-bidi: isolate; }
+</style></head><body>
+{% for medications in sheets %}<section class="sheet">
+  <div class="field name" data-field="name">{{ prescription.patient_name }}</div>
+  <div class="field age" data-field="age">{{ prescription.patient_age }}</div>
+  <div class="field identity" data-field="identity"><bdi dir="ltr">{{ prescription.patient_national_id }}</bdi></div>
+  <div class="field address" data-field="address">{{ prescription.patient_address|default:"غير مسجل" }}</div>
+  <div class="summary">{% for medication in medications %}<div class="summary-item" data-kind="summary" data-index="{{ medication.index }}">{{ medication.name }}{% if medication.brand %} · {{ medication.brand }}{% endif %}</div>{% endfor %}</div>
+  <div class="duration">وفق التعليمات أدناه</div>
+  <div class="content"><h2>الأدوية والتعليمات</h2>
+    {% for medication in medications %}<div class="medication" data-kind="body" data-index="{{ medication.index }}">
+      <strong>{{ medication.name }}</strong> · <bdi dir="ltr">{{ medication.dosage }}</bdi>
+      <div class="instructions">{{ medication.instructions }}</div>
+    </div>{% empty %}<p>لا توجد أدوية مسجلة</p>{% endfor %}
+  </div>
+  <div class="signatures"><img src="{{ prescription.signature_data }}" alt="">{% if prescription.stamp_data %}<img src="{{ prescription.stamp_data }}" alt="">{% endif %}</div>
+  <div class="date numeric">{{ prescription.visit_date }}</div>
+</section>{% endfor %}
+</body></html>

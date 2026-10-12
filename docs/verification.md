@@ -1,11 +1,12 @@
 # Verification
 
-Explicit test authorization is required to inspect/work/run suites; builds/schema work are separate. This guide consolidates existing commands/coverage, not new verification. [Recorded evidence](doneCurrent.md), [remaining checks](workCurrent.md), [frontend verification](../../frontend/docs/verification.md).
+Explicit test authorization is required to inspect/work/run suites; builds/schema work are separate. Use synthetic isolated storage; never substitute a clinic database. [Recorded evidence](doneCurrent.md), [remaining checks](workCurrent.md), [frontend verification](../../frontend/docs/verification.md).
 
 ## Isolated commands
 
 ```bash
 python -B tests/run.py
+python -B tests/run_postgres.py  # owned temporary cluster; needs PostgreSQL binaries + psycopg
 python -B manage.py test tests --settings=config.settings.testing --noinput
 python -B -m coverage run --source=apps,core --omit='*/migrations/*' tests/run.py
 python -B -m coverage report --omit='*/migrations/*'
@@ -22,7 +23,7 @@ Runner fixes isolated settings/refuses non-memory DB; testing skips clinic .env/
 | Catalog/import/recovery/report | Identity/version/retirement/scales, CSV/XLSX/formula protection/preview/scope/transactional replacement, full signed ZIP/media/time precision/relogin, scoped periods/revenue/audit/cache rollback. |
 | Browser fixture | `tests/browser_server.py` owns only temporary localhost 5018 and synthetic accounts/storage; used by frontend 5174 tests. Cleanup/fixture quotas do not establish production capacity. |
 
-SQLite tests verify exercised sequential behavior/rollback, not real DB locking/concurrent writers. Full suite preceded R1–R29; supported pinned Python/runtime remains open. Earlier source/fail-closed stubs are superseded only by explicit later exercised integration cases.
+SQLite verifies sequential behavior/rollback. `run_postgres.py` creates an unprivileged private Unix-socket cluster with TCP disabled, rejects replacement settings and removes its storage; no existing database or migration files are accessed. Its three simultaneous-writer cases exercise appointment overlap and patient/task opening-version races. SQLite explicitly skips them. Transaction-boundary tests exercise real receipt/mutation rollback, permission changes, cache rollback, receipt expiry, interrupted recovery reconciliation and streaming cleanup. Recovery receipt tests exercise restored-admin HTTP replay and pre-media failure. Anonymous denial and explicit-grant matrices cover 14 endpoint families. These checks do not certify arbitrary worker termination or every DB/cache profile.
 
 ## PDF inspection
 
@@ -51,4 +52,4 @@ Record build/tester/timezone/browser/DB profile/results; use clean and authorize
 8. Authentic full backup/digest/member inventory; preview/consent/safety restore/relogin/exact records/media, catalog-only separation and interrupted-receipt reconciliation.
 9. Stale writes, uncertain disconnect/retry without duplicates, empty archive/replay bodies through proxy, reminder stop/reopen occurrences and final frontend matrix.
 
-Verify demo disabled, intended roles, sufficient backup space and no unexplained API failures. Hidden UI is not API authorization evidence. Release requires passing critical steps or recorded owner-approved exceptions; source completion alone is insufficient. Production bundles, supported pinned runtime, external DB/cache/worker failures, other engines/LTR/accessibility and physical printing remain open.
+Verify demo disabled, intended roles, sufficient backup space and no unexplained API failures. Hidden UI is not API authorization evidence. Release requires passing critical steps or recorded owner-approved exceptions; source completion alone is insufficient. Production bundles, MySQL/MariaDB, Redis/Memcached, arbitrary worker failures, other engines/accessibility and physical printing remain open. Supported pinned runtime and disposable PostgreSQL results are recorded in completed.

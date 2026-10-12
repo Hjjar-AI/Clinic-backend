@@ -156,7 +156,7 @@ class LongitudinalHTTPTests(PatientHTTPFixtures):
         self.assertEqual(self.patient.version, 1)
 
     def test_followup_rejects_foreign_visit_and_nonmember_owner(self):
-        foreign_visit = self.visit_for(self.patient_for())
+        foreign_visit = self.visit_for(self.patient_for(), self.admin)
         for fields in ({'source_visit': foreign_visit.pk}, {'owner': self.other_doctor.pk}):
             with self.subTest(fields=fields):
                 self.status(self.record({'title': 'Synthetic followup', 'due_date': '2026-10-20', **fields}, kind='follow-ups'), 400)
@@ -253,9 +253,10 @@ class PatientDocumentHTTPTests(PatientHTTPFixtures):
         downloaded = self.api.get(self.document_url(row['id']) + 'download/')
         self.assertEqual(downloaded.status_code, 200)
         try:
-            self.assertEqual(b''.join(downloaded.streaming_content), self.PDF)
+            self.assertEqual(b''.join(downloaded.streaming_content) if downloaded.streaming else downloaded.content, self.PDF)
         finally:
-            downloaded.close()
+            if not downloaded.closed:
+                downloaded.close()
         self.patient.refresh_from_db()
         self.assertEqual(self.patient.version, 1)
 

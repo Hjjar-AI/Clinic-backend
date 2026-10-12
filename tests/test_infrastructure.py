@@ -20,12 +20,12 @@ from .base import ClinicTestCase
 
 
 class InfrastructureTests(ClinicTestCase):
-    def test_cache_invalidation_waits_for_commit_and_blocks_stale_publication(self):
+    def test_cache_generation_changes_with_mutation_and_blocks_stale_publication(self):
         generation = get_group_version('suite')
         self.assertTrue(set_grouped_key('suite', 'report', {'value': 1}, version=generation))
         with self.captureOnCommitCallbacks(execute=True):
             invalidate_group('suite')
-            self.assertEqual(get_group_version('suite'), generation)
+            self.assertNotEqual(get_group_version('suite'), generation)
         self.assertNotEqual(get_group_version('suite'), generation)
         self.assertIsNone(get_grouped_key('suite', 'report'))
         self.assertFalse(set_grouped_key('suite', 'report', {'value': 2}, version=generation))

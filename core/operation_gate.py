@@ -77,6 +77,10 @@ class OperationGateMiddleware:
                 # Protected downloads are buffered before releasing recovery's read gate.
                 from django.http import HttpResponse
                 buffered = HttpResponse(b''.join(response.streaming_content), status=response.status_code, headers=dict(response.items()))
-                response.close()
+                # Transfer stream cleanup to the final response. Calling
+                # response.close() here emits request_finished while the
+                # PostgreSQL gate still owns its database connection.
+                buffered._resource_closers.extend(response._resource_closers)
+                response._resource_closers.clear()
                 return buffered
             return response

@@ -186,7 +186,7 @@ class BackupTests(ClinicTestCase):
 
 class FullRecoveryTests(ClinicTransactionTestCase):
     def test_backup_and_restore_preserve_full_signed_timestamp_precision(self):
-        timestamp = timezone.now().replace(microsecond=123456)
+        timestamp = (timezone.now() + timezone.timedelta(seconds=1)).replace(microsecond=123456)
         with patch('apps.visits.services.timezone.now', return_value=timestamp):
             visit = self.visit_for(status='final')
         revision = visit.revisions.get()

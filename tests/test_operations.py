@@ -113,7 +113,7 @@ class BillingTests(ClinicTestCase):
 
     def test_mismatched_visit_or_archived_patient_rejected(self):
         other = self.patient_for()
-        visit = self.visit_for(patient=other)
+        visit = self.visit_for(patient=other, actor=self.admin)
         with self.assertRaises(ValidationError):
             self.invoice(visit=visit)
         self.patient.soft_delete(self.admin)

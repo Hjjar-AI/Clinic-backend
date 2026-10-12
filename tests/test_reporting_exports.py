@@ -43,7 +43,7 @@ class ReportingTests(ClinicTestCase):
         report = StatisticsService().get_reconciliation()['invoices']
         self.assertEqual(report['total'], 4)
         self.assertEqual(report['by_status'], {'cancelled': 1, 'draft': 1, 'issued': 1, 'paid': 1})
-        self.assertEqual(Decimal(report['paid_amount']), Decimal('12.50'))
+        self.assertEqual(Decimal(report['paid_by_currency']['SYP']), Decimal('12.50'))
 
     def test_cancelled_appointments_do_not_inflate_active_counts(self):
         service = AppointmentService()

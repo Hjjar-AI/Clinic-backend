@@ -20,7 +20,7 @@ from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 from core.pdf_utils import render_pdf_from_html
 from apps.prescriptions.services import PrescriptionService
-from apps.prescriptions.printing import normalize_print_options
+from apps.prescriptions.printing import normalize_print_options, render_calibration
 from django.core.exceptions import ValidationError
 import pymupdf
 from fontTools.ttLib import TTFont
@@ -156,7 +156,7 @@ class PrintAppearanceTests(SimpleTestCase):
 
     def paper_snapshot(self):
         prescription = contexts()['prescription'][1]['prescription']
-        return {**prescription, 'patient_name': 'مريض اصطناعي', 'patient_address': 'عنوان اصطناعي',
+        return {**prescription, 'patient_name': 'مريض اصطناعي', 'patient_number': 'FILE-SYNTH-123', 'patient_address': 'عنوان اصطناعي',
                 'patient_national_id': 'SYNTH-123', 'issue_date': '12/10/2026',
                 'clinic': {'clinic_name': clinic['name'], 'clinic_address': clinic['address'], 'clinic_phone': clinic['phone']}}
 
@@ -187,6 +187,8 @@ class PrintAppearanceTests(SimpleTestCase):
             for page in document:
                 self.assertEqual(len(page.get_images()), 1, 'Only the signature image belongs in the PDF')
                 self.assertIn('12/10/2026', page.get_text())
+                self.assertIn('FILE-SYNTH-123', page.get_text())
+                self.assertIn(f'صفحة {page.number + 1} من {len(document)}', page.get_text())
                 for word in page.get_text('words'):
                     if word[4].startswith('RX'):
                         self.assertLess(word[3], page.rect.height * .75)
@@ -210,6 +212,17 @@ class PrintAppearanceTests(SimpleTestCase):
         with self.assertRaises(ValidationError):
             self.paper_pdf({**snapshot, 'medications': [], 'patient_name': ARABIC * 10}, mode='preprinted')
 
+    def test_calibration_has_actual_size_50mm_ruler_and_no_patient_data(self):
+        for width, height in [(105, 148), (80, 120), (105, 198)]:
+            with self.subTest(size=(width, height)):
+                pdf = render_calibration(normalize_print_options({'mode': 'preprinted', 'width_mm': width, 'height_mm': height, 'offset_x_mm': 2, 'offset_y_mm': 1}))
+                self.inspect(f'calibration-{width}-{height}', pdf, multipage=False, size_mm=(width, height))
+                with pymupdf.open(stream=pdf, filetype='pdf') as document:
+                    self.assertEqual(len(document), 1)
+                    self.assertIn('ليست وصفة طبية', document[0].get_text())
+                    self.assertNotIn('SYNTH', document[0].get_text())
+                    self.assertTrue(any(abs(drawing['rect'].width - 50 * 72 / 25.4) < .1 for drawing in document[0].get_drawings()))
+
     def test_actual_browser_downloads(self):
         if options.downloads is None:
             self.skipTest('Pass --downloads after the browser run to inspect actual issued/exported documents.')
@@ -221,7 +234,7 @@ class PrintAppearanceTests(SimpleTestCase):
         for pdf in pdfs:
             with self.subTest(pdf=pdf.name):
                 self.inspect('download-' + pdf.stem, pdf.read_bytes(), multipage=False,
-                             size_mm=(105, 148) if pdf.stem.endswith('-prescription') else (105, 198) if pdf.stem.endswith('-preprinted') else (210, 297))
+                             size_mm=(105, 148) if pdf.stem.endswith(('-prescription', '-calibration')) else (105, 198) if pdf.stem.endswith('-preprinted') else (210, 297))
 
 
 if __name__ == '__main__':

@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <style>
-    @page { size: A4; margin: 16mm 14mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
+    @page { size: A4; margin: 16mm 14mm; @top-center { content: element(running-header); } @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 9px; color: #64748b; } }
+    .running-header { position: running(running-header); font-size: 9px; }
     * { box-sizing: border-box; }
     body { font-family: "Clinic Arabic", "Clinic Latin", sans-serif; color: #172033; font-size: 12px; line-height: 1.7; }
     header { display: flex; justify-content: space-between; gap: 20px; border-bottom: 2px solid #2563eb; padding-bottom: 12px; }
@@ -24,6 +25,7 @@
   </style>
 </head>
 <body>
+  <div class="running-header">{{ prescription.patient_name }} · ملف <bdi dir="ltr">{{ prescription.patient_number|default:prescription.patient_id }}</bdi> · زيارة #{{ prescription.visit_id }}</div>
   <header>
     <div>
       <h1>{{ clinic.name }}</h1>

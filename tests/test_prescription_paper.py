@@ -29,6 +29,26 @@ class PrescriptionPaperOptionsTests(SimpleTestCase):
 
 
 class PrescriptionPaperIssuanceTests(ClinicTestCase):
+    def test_calibration_requires_permission_and_never_issues_or_consumes_preview(self):
+        visit, payload = self.prepare()
+        response = self.write('post', '/api/v1/prescription/calibration/', {'print_options': {'mode': 'preprinted', 'height_mm': 198}})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.content.startswith(b'%PDF-'))
+        self.assertEqual(response['Cache-Control'], 'no-store')
+        self.assertFalse(IssuedDocument.objects.exists())
+        PrescriptionService().get_preview(payload['preview_token'], self.admin.pk, visit)
+        self.api.force_login(self.receptionist)
+        self.assertEqual(self.write('post', '/api/v1/prescription/calibration/', {}).status_code, 403)
+        self.api.logout()
+        self.assertEqual(self.write('post', '/api/v1/prescription/calibration/', {}).status_code, 403)
+
+    def test_calibration_rejects_bad_dimensions_and_renderer_failure(self):
+        response = self.write('post', '/api/v1/prescription/calibration/', {'print_options': {'height_mm': 0}})
+        self.assertEqual(response.status_code, 400)
+        with patch('apps.prescriptions.printing.render_calibration', return_value=None):
+            self.assertEqual(self.write('post', '/api/v1/prescription/calibration/', {}).status_code, 503)
+        self.assertFalse(IssuedDocument.objects.exists())
+
     def prepare(self):
         visit = self.visit_for(status='final')
         preview = self.api.get(f'/api/v1/prescription/visit/{visit.pk}/').json()['data']

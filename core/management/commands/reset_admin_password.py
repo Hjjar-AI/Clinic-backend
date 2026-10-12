@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 # backend/core/management/commands/reset_admin_password.py
 """
 Reset a user's password and print it (or show a QR code).
@@ -25,6 +26,7 @@ import secrets
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+from django.db import transaction
 
 User = get_user_model()
 
@@ -44,28 +46,20 @@ class Command(BaseCommand):
             help='Print a QR code containing the new password (requires qrcode).',
         )
 
+    @gated()
     def handle(self, *args, **options):
         username = options['username']
-        user = User.objects.filter(username=username).first()
-        if not user:
-            self.stderr.write(f'User "{username}" not found.')
-            return
-
         new_pass = secrets.token_urlsafe(12)
-        user.set_password(new_pass)
-
-        # Admin recovery should not force a rotation on next login; the
-        # operator just performed the rotation by running this command.
-        if hasattr(user, 'force_password_change'):
+        with transaction.atomic():
+            user = User.objects.select_for_update().filter(username=username).first()
+            if not user:
+                self.stderr.write(f'User "{username}" not found.')
+                return
+            user.set_password(new_pass)
             user.force_password_change = False
-
-        # Invalidate every existing session for this user. The
-        # SessionRevocationMiddleware compares each session's stored
-        # login_time against this field on every request.
-        if hasattr(user, 'session_revoked_at'):
             user.session_revoked_at = timezone.now()
-
-        user.save()
+            user.version += 1
+            user.save(update_fields=['password', 'force_password_change', 'session_revoked_at', 'version'])
 
         self.stdout.write(self.style.SUCCESS(f'Username: {username}'))
         self.stdout.write(self.style.SUCCESS(f'New password: {new_pass}'))

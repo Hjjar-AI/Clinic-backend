@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 # backend/core/management/commands/cleanup_backups.py
 """
 Apply the backup retention policy to the backups directory.
@@ -36,6 +37,7 @@ class Command(BaseCommand):
             help='Override the backup directory (default: settings.BACKUP_DIR).',
         )
 
+    @gated()
     def handle(self, *args, **options):
         directory = options['dir'] or str(settings.BACKUP_DIR)
         dry_run = options['dry_run']

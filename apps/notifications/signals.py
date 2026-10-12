@@ -62,5 +62,5 @@ def task_reminders(sender, instance, created, **kwargs):
                 f'المهمة "{instance.title}" مستحقة بعد {reminder_days} يوم/أيام',
                 link=_safe_url('/tasks'),
                 type='warning',
-                dedupe_key=f'task-due:{instance.pk}:{instance.due_date.isoformat()}',
+                dedupe_key=f'task-due:{instance.pk}:{instance.reminder_generation}:{instance.due_date.isoformat()}',
             )

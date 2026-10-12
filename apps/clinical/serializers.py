@@ -61,10 +61,11 @@ class ScaleFieldSerializer(serializers.ModelSerializer):
 class ClinicalScaleSerializer(serializers.ModelSerializer):
     fields = ScaleFieldSerializer(many=True, read_only=True)
     usage_count = serializers.SerializerMethodField()
+    max_active_fields = serializers.IntegerField(read_only=True, default=100)
 
     class Meta:
         model = ClinicalScale
-        fields = ['id', 'name', 'description', 'fields', 'is_active', 'usage_count', 'created_at', 'updated_at', 'version']
+        fields = ['id', 'name', 'description', 'fields', 'max_active_fields', 'is_active', 'usage_count', 'created_at', 'updated_at', 'version']
         read_only_fields = ['id', 'is_active', 'created_at', 'updated_at', 'version']
 
     def get_usage_count(self, obj):

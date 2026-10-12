@@ -1,3 +1,4 @@
+import uuid
 from core.mutation import check_mutation
 # backend/apps/appointments/services.py
 from django.db import transaction
@@ -58,7 +59,10 @@ class AppointmentService:
         # attached and avoids instantiating a full User object. Placed inside
         # @transaction.atomic on all callers, so Django will not raise
         # TransactionManagementError.
-        User.objects.select_for_update().filter(pk=doctor_id).values_list('id', flat=True).first()
+        doctor = User.objects.select_for_update().filter(pk=doctor_id).first()
+        if not doctor or not doctor.is_active or doctor.role not in {'doctor', 'admin'}:
+            raise ValidationError({'doctor': ['الطبيب غير متاح للحجز']})
+        return doctor
 
     def _get_occupied_intervals(self, doctor_id, date_obj, exclude_id=None):
         appointments = Appointment.objects.filter(
@@ -99,7 +103,8 @@ class AppointmentService:
         if not isinstance(duration, int) or isinstance(duration, bool) or not 1 <= duration <= 1440:
             raise ValidationError({'duration_minutes': ['المدة يجب أن تكون بين 1 و1440 دقيقة']})
 
-    def generate_time_slots(self, doctor_id, date_obj, duration=30):
+    def generate_time_slots(self, doctor_id, date_obj, duration=None):
+        duration = settings.DEFAULT_APPOINTMENT_DURATION if duration is None else duration
         self._validate_duration(duration)
         occupied = self._get_occupied_intervals(doctor_id, date_obj)
         slots = []
@@ -144,7 +149,7 @@ class AppointmentService:
         # F5: the serializer declares `duration_minutes` (the frontend now sends
         # the same key). Read from the canonical name; fall back to `duration`
         # only for legacy callers that still pass the old key.
-        duration = data.get('duration_minutes', data.get('duration', 30))
+        duration = data.get('duration_minutes', data.get('duration', settings.DEFAULT_APPOINTMENT_DURATION))
 
         date_obj, time_obj = self._schedule_values(date_str, time_obj)
 
@@ -222,6 +227,7 @@ class AppointmentService:
         self._validate_duration(new_duration)
         data['duration_minutes'] = new_duration
         if schedule_changed:
+            appointment.reminder_generation = uuid.uuid4()
             appointment.reminder_sent = False
             appointment.reminder_sent_hour = False
         # Check availability if date/time/duration changed. Lock the doctor's
@@ -235,6 +241,7 @@ class AppointmentService:
             self._lock_doctor_schedule(appointment.doctor_id)
             if not self.is_time_available(appointment.doctor_id, new_date, new_time, new_duration, exclude_id=appointment.id):
                 raise ValidationError(['هذا الوقت محجوز بالفعل'])
+            appointment.reminder_generation = uuid.uuid4()
             appointment.reminder_sent = False
             appointment.reminder_sent_hour = False
 
@@ -287,6 +294,7 @@ class AppointmentService:
             enforce_transition('appointment', appointment.status, 'scheduled')
             appointment.status = 'scheduled'
             appointment.status_reason = ''
+        appointment.reminder_generation = uuid.uuid4()
         appointment.reminder_sent = False
         appointment.reminder_sent_hour = False
         appointment.version += 1
@@ -317,6 +325,7 @@ class AppointmentService:
         appointment.status = target_status
         appointment.status_reason = reason
         if target_status == 'scheduled':
+            appointment.reminder_generation = uuid.uuid4()
             appointment.reminder_sent = False
             appointment.reminder_sent_hour = False
         else:
@@ -325,7 +334,7 @@ class AppointmentService:
         appointment.version += 1
         appointment.full_clean()
         appointment.save(update_fields=[
-            'status', 'status_reason', 'reminder_sent', 'reminder_sent_hour', 'version', 'updated_at',
+            'status', 'status_reason', 'reminder_generation', 'reminder_sent', 'reminder_sent_hour', 'version', 'updated_at',
         ])
         return appointment
 

@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 # backend/core/management/commands/send_appointment_reminders.py
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -11,6 +12,7 @@ from apps.settings.services import SettingsService
 class Command(BaseCommand):
     help = 'Send appointment reminders'
 
+    @gated()
     def handle(self, *args, **options):
         service = NotificationService()
         today = timezone.localdate()
@@ -45,10 +47,10 @@ class Command(BaseCommand):
                 service.create(
                     apt.doctor_id,
                     f'تذكير موعد: {apt.patient.get_full_name()}',
-                    f'لديك موعد بعد {reminder_days} يوم/أيام الساعة {apt.appointment_time}',
+                    f'لديك موعد بتاريخ {apt.appointment_date} الساعة {apt.appointment_time}',
                     link=f'/appointments?date={apt.appointment_date}',
                     type='info',
-                    dedupe_key=f'appointment-day:{apt.pk}:{apt.appointment_date.isoformat()}:{apt.appointment_time}',
+                    dedupe_key=f'appointment-day:{apt.pk}:{apt.reminder_generation}:{apt.appointment_date.isoformat()}:{apt.appointment_time}',
                 )
                 apt.reminder_sent = True
                 apt.save(update_fields=['reminder_sent', 'updated_at'])
@@ -56,12 +58,14 @@ class Command(BaseCommand):
         # Hour-before reminders
         now = timezone.localtime()
         hour_later = now + timedelta(hours=reminder_hours)
+        from django.conf import settings
+        late_since = now - timedelta(minutes=getattr(settings, 'APPOINTMENT_REMINDER_GRACE_MINUTES', 60))
         with transaction.atomic():
             appointments = (
                 Appointment.objects
                 .select_for_update()
                 .filter(
-                    appointment_date__range=(today, timezone.localdate(hour_later)),
+                    appointment_date__range=(timezone.localdate(late_since), timezone.localdate(hour_later)),
                     status__in=['scheduled', 'confirmed'],
                     reminder_sent_hour=False,
                     deleted_at__isnull=True,
@@ -74,14 +78,14 @@ class Command(BaseCommand):
                 # need the conversion. The old if/else did the same thing twice.
                 if timezone.is_naive(apt_datetime):
                     apt_datetime = timezone.make_aware(apt_datetime, timezone.get_current_timezone())
-                if now <= apt_datetime <= hour_later:
+                if late_since <= apt_datetime <= hour_later:
                     service.create(
                         apt.doctor_id,
                         f'موعد قريب: {apt.patient.get_full_name()}',
-                        f'لديك موعد خلال {reminder_hours} ساعة/ساعات عند الساعة {apt.appointment_time}',
+                        f'لديك موعد بتاريخ {apt.appointment_date} عند الساعة {apt.appointment_time}',
                         link=f'/appointments?date={apt.appointment_date}',
                         type='warning',
-                        dedupe_key=f'appointment-hour:{apt.pk}:{apt.appointment_date.isoformat()}:{apt.appointment_time}',
+                        dedupe_key=f'appointment-hour:{apt.pk}:{apt.reminder_generation}:{apt.appointment_date.isoformat()}:{apt.appointment_time}',
                     )
                     apt.reminder_sent_hour = True
                     apt.save(update_fields=['reminder_sent_hour', 'updated_at'])

@@ -68,3 +68,7 @@ if 'locmem' in CACHES['default']['BACKEND'].lower():
         '  CACHE_BACKEND=django.core.cache.backends.redis.RedisCache\n'
         '  CACHE_LOCATION=redis://127.0.0.1:6379/1'
     )
+
+OPERATION_LOCK_DIR = os.environ.get('OPERATION_LOCK_DIR')
+if DATABASES['default']['ENGINE'] != 'django.db.backends.postgresql' and not OPERATION_LOCK_DIR:
+    raise RuntimeError('Non-PostgreSQL recovery requires OPERATION_LOCK_DIR on shared POSIX lock storage for every worker and job')

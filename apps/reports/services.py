@@ -29,9 +29,8 @@ class StatisticsService(
 
     def get_reconciliation(self):
         invoices = Invoice.objects.all()
-        paid_amount = (
-            invoices.filter(status='paid').aggregate(total=Sum('final_amount'))['total'] or 0
-        )
+        paid_by_currency = {row['currency']: str(row['total']) for row in
+            invoices.filter(status='paid').values('currency').annotate(total=Sum('final_amount')).order_by('currency')}
         return {
             'patients': {'total': Patient.objects.count()},
             'visits': {
@@ -49,7 +48,7 @@ class StatisticsService(
             'invoices': {
                 'total': invoices.count(),
                 'by_status': self._status_counts(invoices),
-                'paid_amount': str(paid_amount),
+                'paid_by_currency': paid_by_currency,
                 'revenue_definition': 'إجمالي الفواتير المدفوعة فقط؛ المسودات والملغاة مستثناة',
             },
             '_meta': {

@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 # backend/core/management/commands/send_task_reminders.py
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -11,6 +12,7 @@ from apps.settings.services import SettingsService
 class Command(BaseCommand):
     help = 'Send task reminders for tasks due tomorrow'
 
+    @gated()
     def handle(self, *args, **options):
         service = NotificationService()
         today = timezone.localdate()
@@ -34,10 +36,10 @@ class Command(BaseCommand):
                 service.create(
                     user_id,
                     f'موعد تسليم المهمة: {task.title}',
-                    f'المهمة "{task.title}" مستحقة بعد {reminder_days} يوم/أيام',
+                    f'المهمة "{task.title}" مستحقة بتاريخ {task.due_date}',
                     link='/tasks',  # safe relative URL
                     type='warning',
-                    dedupe_key=f'task-due:{task.pk}:{task.due_date.isoformat()}',
+                    dedupe_key=f'task-due:{task.pk}:{task.reminder_generation}:{task.due_date.isoformat()}',
                 )
                 task.reminder_sent = True
                 task.save(update_fields=['reminder_sent', 'updated_at'])

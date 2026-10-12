@@ -5,6 +5,7 @@ from django.http import HttpResponse
 from core.permissions import CanAccessVisit, HasViewReferrals
 from core.exceptions import error_response
 from .services import ReferralService
+from core.mutation import request_version
 
 class ReferralLetterView(APIView):
     permission_classes = [IsAuthenticated, HasViewReferrals, CanAccessVisit]
@@ -17,7 +18,7 @@ class ReferralLetterView(APIView):
         self.check_object_permissions(request, visit)
         pdf = self.service.generate_pdf(
             visit,
-            request.data.get('version'),
+            request_version(request),
             request.data.get('reason'),
             request.user.id,
         )

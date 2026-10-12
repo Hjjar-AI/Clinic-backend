@@ -23,18 +23,16 @@ class ReferralService:
         from apps.prescriptions.issuance import finalized_revision
         revision = finalized_revision(visit)
 
-        try:
-            requested_version = int(requested_version)
-        except (TypeError, ValueError):
-            raise ValidationError({
-                'version': ['رقم إصدار الزيارة مطلوب لإنشاء خطاب مطابق للمعاينة'],
-            })
+        from core.mutation import parse_version
+        requested_version = parse_version(requested_version)
         if requested_version != visit.version:
             raise ConflictError(
                 'تغيرت الزيارة بعد المعاينة؛ راجع البيانات المحدثة قبل إنشاء خطاب التحويل'
             )
 
-        referral_reason = str(referral_reason or '').strip()
+        if not isinstance(referral_reason, str):
+            raise ValidationError({'reason': ['يلزم نص لسبب التحويل']})
+        referral_reason = referral_reason.strip()
         if not referral_reason:
             raise ValidationError({'reason': ['أدخل سبب التحويل قبل إنشاء الخطاب']})
         if len(referral_reason) > 2000:

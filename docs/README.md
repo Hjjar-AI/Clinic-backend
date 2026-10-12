@@ -11,7 +11,7 @@
 | Diagnose a failure | [Troubleshooting](operations/troubleshooting.md) | Startup, session, proxy, media, restore |
 | Routes/commands/dependencies | [Reference](reference.md) | `core/urls.py`, permissions, command options |
 | Implemented logic by source area | [Implementation](contracts/implementation.md) | Models/services, auth/scope, versions, recovery, reports |
-| Models and deep logic review | [Consolidated review](reviews/models-and-logic-2026-10-12.md) | Model inventory, all related areas, findings, design suggestions and verification limits |
+| Models and deep logic review | [Consolidated review](reviews/models-and-logic-2026-10-12.md) | R1–R29 completed dispositions, model inventory, chosen design policies and rollout limits |
 | Patient schema/API/retention | [Patients](contracts/patients.md) | `apps/patients/`, related visit/team/document flows |
 | Test commands and coverage | [Testing](testing/guide.md) | Isolated HTTP/service/recovery tests |
 | Arabic PDF/print verification | [PDF](testing/pdf.md) | `core/pdf_utils.py`, templates, browser documents |

@@ -1,3 +1,4 @@
+import uuid
 # backend/apps/appointments/models.py
 from django.db import models
 from core.constraints import check_constraint
@@ -27,12 +28,13 @@ class Appointment(SoftDeleteModel, TimeStampedModel):
     appointment_date = models.DateField()
     appointment_time = models.TimeField()  # changed from CharField to TimeField
     duration_minutes = models.PositiveSmallIntegerField(
-        default=30,
+        default=settings.DEFAULT_APPOINTMENT_DURATION,
         validators=[MinValueValidator(1), MaxValueValidator(1440)],
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
     status_reason = models.CharField(max_length=500, blank=True, default='')
     notes = models.TextField(blank=True, default='')
+    reminder_generation = models.UUIDField(default=uuid.uuid4, editable=False)
     reminder_sent = models.BooleanField(default=False)
     reminder_sent_hour = models.BooleanField(default=False)
     version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])

@@ -29,16 +29,31 @@ class Command(BaseCommand):
         self.stdout.write(
             f'Starting scheduler loop (interval: {interval_hours}h / {interval_seconds}s)'
         )
+        last_backup = None
+        backup_interval = max(60, float(getattr(settings, 'BACKUP_CHECK_INTERVAL_HOURS', 6)) * 3600)
         while True:
             for name in (
                 'send_appointment_reminders',
                 'send_task_reminders',
                 'auto_backup',
                 'cleanup_backups',
+                'cleanup_operations',
             ):
+                if name == 'auto_backup' and last_backup is not None and time.monotonic() - last_backup < backup_interval:
+                    continue
                 try:
                     call_command(name)
+                    if name == 'auto_backup':
+                        last_backup = time.monotonic()
                 except Exception as e:
                     # A failure in one command must not stop the others.
                     self.stderr.write(self.style.ERROR(f'{name} failed: {e}'))
-            time.sleep(interval_seconds)
+            from apps.settings.services import SettingsService
+            from core.operation_gate import operation_gate
+            try:
+                with operation_gate():
+                    window = SettingsService().get_clinic_info()['appointment_reminder_hours'] * 3600
+            except Exception as exc:
+                self.stderr.write(self.style.ERROR(f'Reminder configuration failed: {exc}'))
+                window = 120  # Retry promptly when configuration becomes available.
+            time.sleep(min(interval_seconds, max(60, window / 2)))

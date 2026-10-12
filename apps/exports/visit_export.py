@@ -2,6 +2,7 @@
 import csv
 import io
 from openpyxl import Workbook
+from core.spreadsheets import csv_cell, text_cells
 from django.http import HttpResponse
 from datetime import datetime
 from .base import BaseExportService
@@ -13,13 +14,13 @@ class VisitExportService(BaseExportService):
         writer = csv.writer(output)
         writer.writerow(['المريض', 'تاريخ الزيارة', 'الشكوى', 'حالة التوثيق', 'الحالة السريرية'])
         for v in visits:
-            writer.writerow([
+            writer.writerow([csv_cell(value) for value in [
                 v.patient.get_full_name(),
                 v.visit_date.isoformat() if v.visit_date else '',
                 v.main_complaints or '',
                 v.status or '',
                 v.clinical_status or '',
-            ])
+            ]])
         response = HttpResponse(output.getvalue(), content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="visits_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
         return self.stamp_response(response)
@@ -40,6 +41,8 @@ class VisitExportService(BaseExportService):
             ])
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="visits_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+        for sheet in wb.worksheets:
+            text_cells(sheet)
         wb.save(response)
         return self.stamp_response(response)
 

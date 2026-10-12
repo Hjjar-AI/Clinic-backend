@@ -63,7 +63,7 @@ def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None)
             if not all(math.isfinite(v) for v in (value, minimum, maximum, step)) or step <= 0:
                 raise ValidationError({'scale_responses': ['قيمة رقمية غير صالحة']})
             increments = (value - minimum) / step
-            if not math.isfinite(increments) or not math.isclose(increments, round(increments), abs_tol=1e-7):
+            if not math.isfinite(increments) or not math.isclose(increments, round(increments), rel_tol=0, abs_tol=1e-7):
                 raise ValidationError({'scale_responses': [f'القيمة لا تطابق الخطوة: {label}']})
             if value < minimum or value > maximum:
                 raise ValidationError({'scale_responses': [f'قيمة السؤال خارج النطاق: {label}']})

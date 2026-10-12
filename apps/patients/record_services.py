@@ -100,8 +100,11 @@ class PatientRecordService:
                 related = field.remote_field.model._base_manager.filter(pk=identifier).first()
                 if not related or (hasattr(related, 'patient_id') and related.patient_id != patient.pk):
                     raise ValidationError({name: ['المرجع لا يخص هذا المريض']})
-                if name == 'owner' and old.get('owner') != related.pk and (not related.is_active or not patient.care_team.filter(user=related, ended_at__isnull=True).exists()):
+                if name == 'owner' and old.get('owner') != related.pk and (not related.is_active or not patient.care_team.filter(user=related, ended_at__isnull=True, started_at__lte=timezone.now()).exists()):
                     raise ValidationError({name: ['المسؤول يجب أن يكون عضواً حالياً في فريق الرعاية']})
+                if name == 'completed_visit' and old.get(name) != related.pk:
+                    if not related.is_active or related.deleted_at or related.status not in {'final', 'locked'} or not related.revisions.exists():
+                        raise ValidationError({name: ['اختر زيارة نشطة معتمدة وموقعة']})
                 value = related
             if isinstance(field, models.DateField) and not field.is_relation:
                 value = field.to_python(value)
@@ -117,14 +120,16 @@ class PatientRecordService:
             if not row.due_date:
                 raise ValidationError({'due_date': ['تاريخ الاستحقاق مطلوب']})
             previous_status = old.get('status', 'pending')
-            if previous_status != row.status and previous_status != 'pending':
-                raise ValidationError({'status': ['أضف متابعة جديدة بدلاً من إعادة فتح نتيجة مكتملة']})
+            from core.follow_up import follow_up_transition
+            follow_up_transition(previous_status, row.status)
+            if previous_status != 'pending' and any(old.get(name) != record_values(row, fields).get(name) for name in ('outcome_reason', 'completed_visit')):
+                raise ValidationError({'status': ['نتيجة المتابعة محفوظة؛ أضف متابعة جديدة']})
             if row.status != 'pending' and not row.outcome_reason.strip():
                 raise ValidationError({'outcome_reason': ['سبب نتيجة المتابعة مطلوب']})
             if row.status != 'pending' and (not row.pk or previous_status == 'pending'):
                 row.completed_at, row.completed_by = timezone.now(), actor
             # A legacy scheduled follow-up is edited through VisitService only.
-            if row.legacy_visit_follow_up and (retire or any(name in data for name in ('due_date', 'source_visit', 'status'))):
+            if row.legacy_visit_follow_up and (retire or any(name in data for name in ('due_date', 'source_visit', 'status', 'completed_visit', 'outcome_reason'))):
                 raise ValidationError('عدّل متابعة الزيارة من شاشة الزيارة')
             if row.completed_visit_id and row.status != 'completed':
                 raise ValidationError({'completed_visit': ['تربط الزيارة المنجزة بمتابعة مكتملة فقط']})
@@ -148,13 +153,17 @@ class PatientRecordService:
         row.updated_by = actor
         row.full_clean()
         row.save()
-        was_primary_identifier = kind == 'identifiers' and old.get('identifier_type') == 'national_id' and old.get('value') == patient.national_id
-        new_primary_identifier = kind == 'identifiers' and not patient.national_id and row.identifier_type == 'national_id' and not retire
+        was_primary_identifier = kind == 'identifiers' and old.get('identifier_type') == 'national_id' and old.get('value') == patient.national_id and old.get('issuer') == '' and old.get('issuing_country') == ''
+        new_primary_identifier = kind == 'identifiers' and not patient.national_id and row.identifier_type == 'national_id' and row.issuer == '' and row.issuing_country == '' and not retire
         if was_primary_identifier or new_primary_identifier:
-            patient.national_id = row.value if row.identifier_type == 'national_id' and not retire else ''
+            patient.national_id = row.value if row.identifier_type == 'national_id' and row.issuer == '' and row.issuing_country == '' and not retire else ''
             patient.identity_verification = 'reported'
             patient.identity_verified_at = None
             patient.identity_verified_by = None
+        if kind == 'contacts' and (row.is_primary or old.get('is_primary')):
+            primary = PatientContact.objects.filter(patient=patient, is_active=True, is_primary=True, is_emergency=True).first()
+            for profile, field in [('emergency_contact_name', 'name'), ('emergency_contact_relation', 'relationship'), ('emergency_contact_phone', 'phone')]:
+                setattr(patient, profile, getattr(primary, field) if primary else '')
         new = record_values(row, fields)
         changes = {name: {'before': old.get(name), 'after': value} for name, value in new.items() if old.get(name) != value}
         if retire:
@@ -168,5 +177,5 @@ class PatientRecordService:
             if positive:
                 setattr(patient, 'allergy_status' if kind == 'allergies' else 'medication_status', 'recorded')
         patient.version += 1
-        patient.save(update_fields=['version', 'updated_at', 'allergy_status', 'medication_status', 'national_id', 'identity_verification', 'identity_verified_at', 'identity_verified_by'])
+        patient.save(update_fields=['version', 'updated_at', 'allergy_status', 'medication_status', 'national_id', 'identity_verification', 'identity_verified_at', 'identity_verified_by', 'emergency_contact_name', 'emergency_contact_relation', 'emergency_contact_phone'])
         return row, patient.version

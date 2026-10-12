@@ -18,8 +18,13 @@ def finalized_revision(visit):
 def record_document(visit, actor, kind, snapshot, pdf, signature='', stamp=''):
     if actor.role not in {'admin', 'doctor'} or not actor.has_perm('edit_visit'):
         raise PermissionDenied('إصدار المستندات مخصص للطبيب المخول')
-    from apps.visits.models import Visit
-    visit = Visit.all_objects.select_for_update().get(pk=visit.pk)
+    from apps.visits.services import lock_visit
+    visit = lock_visit(visit.pk, actor)
+    permission = 'export_pdf' if kind == 'prescription' else 'view_referrals'
+    if not actor.has_perm(permission):
+        raise PermissionDenied('غير مصرح بإصدار المستند')
+    if 'patient_version' in snapshot and visit.patient.version != snapshot['patient_version']:
+        raise ConflictError('تغير ملف المريض؛ أعد معاينة المستند')
     if not visit.is_active or visit.deleted_at or visit.version != snapshot.get('visit_version'):
         raise ConflictError('تغيرت الزيارة؛ أعد المعاينة قبل إصدار المستند')
     revision = finalized_revision(visit)

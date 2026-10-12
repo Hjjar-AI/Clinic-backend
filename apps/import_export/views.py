@@ -175,6 +175,7 @@ class OptionsImportView(APIView):
                     'category': category,
                     'merge_mode': merge_mode,
                     'digest': digest,
+                    'inventory': self.service.inventory_digest('diagnosis'),
                 }, timeout=1800)
                 result['preview_token'] = token
                 return Response({'data': result})
@@ -190,7 +191,7 @@ class OptionsImportView(APIView):
                 return error_response(409, 'الملف أو خياراته تغيرت بعد المعاينة', {
                     'preview_token': ['نفّذ معاينة جديدة أولاً'],
                 })
-            result = self.service.import_diagnoses(file, merge_mode)
+            result = self.service.import_diagnoses(file, merge_mode, expected_inventory=preview.get('inventory', ''))
             cache.delete(f'options-import-preview:{token}')
             log_action(request.user.id, 'import', 'DiagnosisOption', 0, {
                 'summary': 'Diagnosis options import',
@@ -270,12 +271,12 @@ class MedicationMapView(APIView):
         if request.data.get('preview') == 'true':
             result = self.service.preview_medications(file, column_map, merge_mode)
             token = secrets.token_urlsafe(24)
-            cache.set(f'options-import-preview:{token}', {**preview, 'column_map':column_map, 'merge_mode':merge_mode}, timeout=1800)
+            cache.set(f'options-import-preview:{token}', {**preview, 'column_map':column_map, 'merge_mode':merge_mode, 'inventory': self.service.inventory_digest('medication')}, timeout=1800)
             result['preview_token'] = token
             return Response({'data':result})
         if preview.get('column_map') != column_map or preview.get('merge_mode') != merge_mode:
             return error_response(409, 'أعد معاينة خريطة الأعمدة وخيارات الدمج', {})
-        result = self.service.import_medications(file, column_map, merge_mode)
+        result = self.service.import_medications(file, column_map, merge_mode, expected_inventory=preview.get('inventory', ''))
         cache.delete(f'options-import-preview:{preview_token}')
         log_action(request.user.id, 'import', 'MedicationOption', 0, {
             'summary': 'Medication options import',

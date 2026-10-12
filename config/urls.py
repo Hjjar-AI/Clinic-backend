@@ -1,7 +1,5 @@
 from django.contrib import admin
 from django.urls import path, include, re_path
-from django.conf import settings
-from django.conf.urls.static import static
 from django.views.generic import TemplateView
 
 urlpatterns = [
@@ -9,8 +7,7 @@ urlpatterns = [
     path('api/v1/', include('core.urls')),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Clinical media is available only through authorized API downloads, including DEBUG.
 
 # SPA fallback – must be last to avoid catching API/admin/static paths
 urlpatterns += [

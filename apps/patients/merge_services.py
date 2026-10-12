@@ -91,7 +91,8 @@ class PatientMergeService:
                     row.is_active = False
                     row.retired_at, row.retired_by = timezone.now(), actor
                     row.retirement_reason = 'Duplicate identifier retained during patient merge'
-                if model == PatientContact and row.is_primary and PatientContact.objects.filter(patient=target, is_active=True, is_primary=True).exists():
+                if model == PatientContact and row.is_primary:
+                    # Survivor contact projection stays unchanged; transferred contacts remain additional contacts.
                     before['adjustments'].append({'model': model._meta.label_lower, 'id': row.pk, 'field': 'is_primary', 'before': True, 'after': False})
                     row.is_primary = False
                 row.patient = target

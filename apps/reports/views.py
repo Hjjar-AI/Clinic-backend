@@ -62,6 +62,7 @@ class StatisticsView(APIView):
         )
         doctor_distribution = stats.get_patients_by_doctor(request.user)
 
+        average_age = stats.get_average_age(request.user)
         data = {
             'total_patients': stats.get_total_patients(request.user),
             'total_visits': stats.get_total_visits(request.user, date_from, date_to),
@@ -69,7 +70,7 @@ class StatisticsView(APIView):
             'male_count': male_count,
             'female_count': female_count,
             'gender_ratio': round(gender_ratio, 1),
-            'avg_age': round(stats.get_average_age(request.user), 1),
+            'avg_age': round(average_age, 1) if average_age is not None else None,
             'avg_visits_per_patient': round(stats.get_avg_visits_per_patient(request.user, date_from, date_to), 1),
             'top_diagnosis': [top_diag_label, top_diag_count] if top_diag else None,
             'top_medication': [top_med_label, top_med_count] if top_med else None,

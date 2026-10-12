@@ -1,3 +1,4 @@
+import uuid
 # backend/apps/tasks/services.py
 from django.db import transaction, models
 from django.core.exceptions import ValidationError, PermissionDenied
@@ -84,6 +85,7 @@ class TaskService:
             if k in {'title', 'description', 'priority', 'due_date', 'assigned_to'}:
                 setattr(task, k, v)
         if reminder_changed:
+            task.reminder_generation = uuid.uuid4()
             task.reminder_sent = False
         task.version += 1
         task.full_clean()
@@ -98,9 +100,12 @@ class TaskService:
         if not changed:
             return task
         reason = transition_reason(reason, required=target_status == 'cancelled')
+        reopening = task.status in {'completed', 'cancelled'} and target_status == 'open'
         task.status = target_status
         task.status_reason = reason
-        task.reminder_sent = False
+        if reopening:
+            task.reminder_generation = uuid.uuid4()
+            task.reminder_sent = False
         if target_status == 'completed':
             task.completed_at = timezone.now()
             task.completed_by = actor
@@ -116,7 +121,7 @@ class TaskService:
         task.version += 1
         task.full_clean()
         task.save(update_fields=[
-            'status', 'status_reason', 'reminder_sent', 'completed_at',
+            'status', 'status_reason', 'reminder_generation', 'reminder_sent', 'completed_at',
             'completed_by', 'cancelled_at', 'version', 'updated_at',
         ])
         return task

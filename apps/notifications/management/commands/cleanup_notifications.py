@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 from datetime import timedelta
 
 from django.conf import settings
@@ -13,6 +14,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--dry-run', action='store_true')
 
+    @gated()
     def handle(self, *args, **options):
         now = timezone.now()
         read_before = now - timedelta(days=settings.NOTIFICATION_READ_RETENTION_DAYS)

@@ -144,3 +144,19 @@ class ImmutableModel(models.Model):
     def delete(self, *args, **kwargs):
         from django.core.exceptions import ValidationError
         raise ValidationError('Historical records are immutable')
+
+
+class CacheGeneration(models.Model):
+    name = models.CharField(max_length=100, primary_key=True)
+    token = models.CharField(max_length=32)
+
+
+class RecoveryOperation(models.Model):
+    """Installation-local receipts; no FK into the restored account inventory."""
+    key = models.CharField(max_length=100, unique=True)
+    fingerprint = models.CharField(max_length=64)
+    initiator = models.JSONField(default=dict)
+    state = models.CharField(max_length=20, default='processing')
+    result = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()

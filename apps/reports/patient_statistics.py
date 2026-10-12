@@ -23,7 +23,7 @@ class PatientStatisticsService(BaseStatisticsService):
         avg_year = patients.aggregate(avg_year=Avg('dob_year'))['avg_year']
         if avg_year:
             return timezone.localdate().year - avg_year
-        return 0
+        return None
 
     def get_monthly_patients_acquired(self, user, months=12, date_from=None, date_to=None):
         start, end = monthly_period(months, date_from, date_to)
@@ -50,14 +50,8 @@ class PatientStatisticsService(BaseStatisticsService):
         return [(r['marital_status'] or 'غير محدد', r['count']) for r in results]
 
     def get_patients_by_doctor(self, user):
-        rows = (
-            self.get_accessible_patients(user)
-            .filter(doctor__isnull=False)
-            .values('doctor__full_name', 'doctor__username')
-            .annotate(count=Count('id'))
-            .order_by('doctor__full_name', 'doctor__username')
-        )
-        return [
-            (row['doctor__full_name'] or row['doctor__username'], row['count'])
-            for row in rows
-        ]
+        from apps.patients.models import PatientCareTeam
+        rows = PatientCareTeam.objects.filter(patient__in=self.get_accessible_patients(user),
+            ended_at__isnull=True, started_at__lte=timezone.now(), user__role='doctor', user__is_active=True).values(
+            'user_id', 'user__full_name', 'user__username').annotate(count=Count('patient_id', distinct=True)).order_by('user_id')
+        return [(row['user__full_name'] or row['user__username'], row['count']) for row in rows]

@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 import io
 import json
 import hashlib
@@ -105,6 +106,13 @@ class BackupRestoreService:
                 objects.append(obj)
         except (ValidationError, DeserializationError, TypeError, KeyError) as exc:
             raise ValueError('Backup record validation failed') from exc
+        active_fields = {}
+        for obj in objects:
+            if obj.object._meta.label_lower == 'clinical.scalefield' and obj.object.is_active and obj.object.deleted_at is None:
+                scale_id = obj.object.scale_id
+                active_fields[scale_id] = active_fields.get(scale_id, 0) + 1
+        if any(count > 100 for count in active_fields.values()):
+            raise ValueError('Backup contains a scale with more than 100 active questions')
         counts = {label: sum(obj.object._meta.label_lower == label for obj in objects) for label in models}
         if counts != metadata['counts']:
             raise ValueError('Backup record counts do not match inventory')
@@ -164,7 +172,8 @@ class BackupRestoreService:
                 'restores_media': restore_patients and bool(media),
                 'sessions_will_be_revoked': restore_patients}
 
-    def execute_restore(self, stream, restore_patients=True, restore_diagnoses=True, restore_medications=True):
+    @gated(exclusive=True)
+    def execute_restore(self, stream, restore_patients=True, restore_diagnoses=True, restore_medications=True, completion=None, started=None, rolled_back=None):
         if not any((restore_patients, restore_diagnoses, restore_medications)):
             raise ValueError('Select a restore scope')
         data, objects, media = self._read(stream, require_media=restore_patients)
@@ -209,10 +218,20 @@ class BackupRestoreService:
                         restored = model(**lookup, **values)
                         restored.full_clean()
                         restored.save()
+                if completion:
+                    completion()
             return True
         # Restore media with compensation if database loading fails. Existing unrelated
         # files are retained; no whole-directory deletion is needed for recovery.
         previous, written = {}, []
+        committed = False
+        def mark_committed():
+            nonlocal committed
+            committed = True
+        if connection.in_atomic_block:
+            raise ValueError('Full recovery must own its outer database transaction')
+        if started:
+            started()
         try:
             for path, content in media.items():
                 if default_storage.exists(path):
@@ -224,6 +243,7 @@ class BackupRestoreService:
                 if saved != path:
                     raise ValueError('Storage changed a restored file path')
             with connection.constraint_checks_disabled(), transaction.atomic():
+                transaction.on_commit(mark_committed)
                 from core.models import IdempotencyOperation
                 IdempotencyOperation.objects.all()._raw_delete('default')
                 models = backup_models()
@@ -248,10 +268,16 @@ class BackupRestoreService:
                 from core.cache_utils import invalidate_group
                 for group in ('settings', 'dashboard', 'reports', 'context', 'context_users', 'context_doctors', 'context_appointments', 'context_patients', 'tasks', 'patients', 'visits'):
                     invalidate_group(group)
+                if completion:
+                    completion()
         except Exception:
+            if committed:
+                raise
             for path in written:
                 default_storage.delete(path)
             for path, content in previous.items():
                 default_storage.save(path, ContentFile(content))
+            if rolled_back:
+                rolled_back()
             raise
         return True

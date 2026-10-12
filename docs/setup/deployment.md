@@ -1,6 +1,6 @@
 # Production hosting by configuration file
 
-Deployment examples, not executed verification. Builds/packaging/schema changes require explicit authorization. Use pinned backend requirements/supported Python, frontend Node engine from `package.json`, HTTPS, external database/shared cache and installed WSGI/database/cache drivers. Production rejects SQLite/LocMemCache. [Configuration](configuration.md), [release checklist](../testing/release-checklist.md).
+Deployment examples, not executed verification. Builds/packaging/schema changes require explicit authorization. Use pinned backend requirements/supported Python, frontend Node engine from `package.json`, HTTPS, external database/shared cache and installed WSGI/database/cache drivers. Production rejects SQLite/LocMemCache. PostgreSQL uses a shared advisory operation gate; other databases additionally require `OPERATION_LOCK_DIR` on common POSIX lock storage for every worker/job. External writers must be quiesced for recovery. Schedule `cleanup_operations` daily for completed 30-day receipts. Apply the new receipt/cache-generation tables and reminder fields under authorized schema work before starting corrected source. [Configuration](configuration.md), [release checklist](../testing/release-checklist.md).
 
 ## Application/environment
 

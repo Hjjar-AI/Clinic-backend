@@ -101,7 +101,7 @@ class ScaleField(SoftDeleteModel, TimeStampedModel):
             raise ValidationError({'default': ['القيمة الافتراضية خارج النطاق']})
         if self.field_type == 'slider':
             increments = (self.default - self.min_val) / self.step
-            if not math.isfinite(increments) or not math.isclose(increments, round(increments), abs_tol=1e-7):
+            if not math.isfinite(increments) or not math.isclose(increments, round(increments), rel_tol=0, abs_tol=1e-7):
                 raise ValidationError({'default': ['القيمة الافتراضية لا تطابق الخطوة']})
 
     class Meta:

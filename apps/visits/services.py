@@ -16,13 +16,19 @@ from .lab_validation import normalize_lab_values
 from .input_validation import normalize_rows, clinical_object, text
 
 
-def lock_visit(visit_id):
+def lock_visit(visit_id, actor=None, permission=None):
     """Lock the patient before its encounter, matching patient reconciliation."""
     patient_id = Visit.all_objects.values_list('patient_id', flat=True).get(pk=visit_id)
     Patient.all_objects.select_for_update().get(pk=patient_id)
     visit = Visit.all_objects.select_for_update().get(pk=visit_id)
     if visit.patient_id != patient_id:
         raise ConflictError('تغير ملف المريض؛ أعد تحميل الزيارة')
+    if actor is not None:
+        from apps.accounts.models import User
+        actor = User.objects.get(pk=actor.pk)
+        from core.access import accessible_visits
+        if not actor.has_perm(permission or 'edit_visit') or not accessible_visits(actor).filter(pk=visit.pk).exists():
+            raise PermissionDenied('غير مصرح بهذا الإجراء على الزيارة')
     return visit
 
 
@@ -107,6 +113,10 @@ class VisitService:
     @transaction.atomic
     def create_visit(self, patient, data, current_user):
         patient = Patient.objects.select_for_update().get(pk=patient.pk)
+        from apps.patients.record_services import require_access
+        require_access(patient, current_user)
+        if not current_user.has_perm('add_visit'):
+            raise PermissionDenied('غير مصرح بإضافة زيارة')
         data = data.copy()
         status = data.pop('status', 'draft')
         if status not in {'draft', 'final'}:
@@ -126,7 +136,7 @@ class VisitService:
 
     @transaction.atomic
     def update_visit(self, visit, data, current_user, expected_version=None):
-        visit = lock_visit(visit.pk)
+        visit = lock_visit(visit.pk, current_user)
         check_mutation(visit, expected_version)
         if visit.status in {'final', 'locked'}:
             raise ValidationError({'status': ['افتح تعديلاً قبل تغيير الزيارة المعتمدة']})
@@ -160,7 +170,7 @@ class VisitService:
 
     @transaction.atomic
     def transition(self, visit, target_status, current_user, expected_version=None, reason=''):
-        visit = lock_visit(visit.pk)
+        visit = lock_visit(visit.pk, current_user)
         check_mutation(visit, expected_version)
         previous = visit.status
         if not enforce_transition('visit', previous, target_status):
@@ -196,8 +206,13 @@ class VisitService:
                                          responses_json=row['responses'])
 
     @transaction.atomic
-    def soft_delete_visit(self, visit, expected_version=None):
-        visit = lock_visit(visit.pk)
+    def soft_delete_visit(self, visit, expected_version=None, actor=None):
+        from core.request_context import get_current_request
+        request = get_current_request()
+        actor = actor or (request.user if request else None)
+        if actor is None:
+            raise PermissionDenied('المستخدم المنفذ مطلوب')
+        visit = lock_visit(visit.pk, actor, 'delete_visit')
         check_mutation(visit, expected_version)
         if visit.status != 'draft':
             raise ValidationError({'status': ['السجلات المعتمدة تحفظ تاريخياً']})
@@ -208,10 +223,13 @@ class VisitService:
 
     @transaction.atomic
     def complete_follow_up(self, visit, actor, expected_version=None, outcome='completed'):
-        visit = lock_visit(visit.pk)
+        visit = lock_visit(visit.pk, actor)
         check_mutation(visit, expected_version)
-        if not visit.follow_up_date or outcome not in {'completed', 'missed', 'cancelled', 'waived'}:
+        if not visit.follow_up_date or not isinstance(outcome, str) or outcome not in {'completed', 'missed', 'cancelled', 'waived'}:
             raise ValidationError({'follow_up': ['تاريخ ونتيجة متابعة صالحان مطلوبان']})
+        from core.follow_up import follow_up_transition
+        if not follow_up_transition(visit.follow_up_outcome, outcome):
+            return visit
         visit.follow_up_outcome = outcome
         visit.follow_up_completed = outcome == 'completed'
         visit.follow_up_completed_at = timezone.now()
@@ -228,7 +246,8 @@ class VisitService:
         from apps.patients.follow_up_services import accessible_follow_ups
         rows = accessible_follow_ups(user).filter(legacy_visit_follow_up=False,
             due_date__lt=timezone.localdate(), status='pending')
-        visits = accessible_visits(user).filter(
+        from core.access import accessible_patients
+        visits = accessible_visits(user).filter(patient__in=accessible_patients(user),
             follow_up_date__lt=timezone.localdate(), follow_up_outcome='pending')
         patient_ids = set(rows.values_list('patient_id', flat=True)) | set(visits.values_list('patient_id', flat=True))
         # Batch operations acquire all parent locks in the same order as merge.
@@ -251,7 +270,7 @@ class VisitService:
 class VisitAttachmentService:
     @transaction.atomic
     def upload_attachment(self, visit, file, uploaded_by, expected_version=None):
-        visit = lock_visit(visit.pk)
+        visit = lock_visit(visit.pk, uploaded_by, 'manage_patient_documents')
         check_mutation(visit, expected_version)
         if visit.status not in {'draft', 'amended'}:
             raise ValidationError({'visit': ['افتح تعديلاً قبل إضافة مرفق إلى سجل معتمد']})
@@ -271,8 +290,13 @@ class VisitAttachmentService:
             raise
 
     @transaction.atomic
-    def soft_delete_attachment(self, attachment, expected_version=None):
-        visit = lock_visit(attachment.visit_id)
+    def soft_delete_attachment(self, attachment, expected_version=None, actor=None):
+        from core.request_context import get_current_request
+        request = get_current_request()
+        actor = actor or (request.user if request else None)
+        if actor is None:
+            raise PermissionDenied('المستخدم المنفذ مطلوب')
+        visit = lock_visit(attachment.visit_id, actor, 'manage_patient_documents')
         check_mutation(visit, expected_version)
         if visit.status not in {'draft', 'amended'}:
             raise ValidationError({'visit': ['لا يمكن حذف مرفقات سجل معتمد']})

@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from core.mutation import check_mutation
@@ -21,6 +22,7 @@ def _validate(instance):
             raise ValidationError({'generic_english': ['الدواء موجود؛ أعد تفعيله إن كان متقاعداً']})
 
 
+@gated(exclusive=True)
 @transaction.atomic
 def create_catalog(model, data):
     data = data.copy()
@@ -32,6 +34,7 @@ def create_catalog(model, data):
     return instance
 
 
+@gated(exclusive=True)
 @transaction.atomic
 def update_catalog(model, pk, data, expected_version=None):
     data = data.copy()
@@ -49,6 +52,7 @@ def update_catalog(model, pk, data, expected_version=None):
     return instance
 
 
+@gated(exclusive=True)
 @transaction.atomic
 def archive_catalog(model, pk, version):
     instance = model.all_objects.select_for_update().get(pk=pk)
@@ -57,6 +61,7 @@ def archive_catalog(model, pk, version):
     return True
 
 
+@gated(exclusive=True)
 @transaction.atomic
 def restore_catalog(instance, version):
     instance = instance.__class__.all_objects.select_for_update().get(pk=instance.pk)
@@ -84,10 +89,13 @@ class MedicationService:
         return archive_catalog(MedicationOption, med_id, expected_version)
 
 class ScaleService:
+    @gated(exclusive=True)
     @transaction.atomic
     def add_field(self, scale, data, expected_version=None):
         scale = ClinicalScale.all_objects.select_for_update().get(pk=scale.pk)
         check_mutation(scale, expected_version)
+        if scale.fields.filter(is_active=True).count() >= 100:
+            raise ValidationError({'fields': ['الحد الأقصى 100 سؤال نشط']})
         field = ScaleField(scale=scale, **data)
         field.full_clean()
         field.save()

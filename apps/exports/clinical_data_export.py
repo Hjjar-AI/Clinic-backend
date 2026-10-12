@@ -1,5 +1,6 @@
 # backend/apps/exports/clinical_data_export.py
 from openpyxl import Workbook
+from core.spreadsheets import csv_cell, text_cells
 from django.http import HttpResponse
 from django.db.models import Q
 from django.utils import timezone
@@ -44,6 +45,8 @@ class ClinicalDataExportService:
         self._metadata_sheet(wb, filters)
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = 'attachment; filename="diagnosis_export.xlsx"'
+        for sheet in wb.worksheets:
+            text_cells(sheet)
         wb.save(response)
         return response
 
@@ -82,5 +85,7 @@ class ClinicalDataExportService:
         self._metadata_sheet(wb, filters)
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = 'attachment; filename="medications_export.xlsx"'
+        for sheet in wb.worksheets:
+            text_cells(sheet)
         wb.save(response)
         return response

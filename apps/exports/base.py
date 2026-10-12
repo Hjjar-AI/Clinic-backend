@@ -76,7 +76,8 @@ class BaseExportService:
                 'main_complaints': visit.main_complaints or '',
                 'history_presenting_complaint': visit.history_presenting_complaint or '',
                 'diagnoses': [diag.get('arabic_name') or diag.get('name', '') for diag in visit.get_diagnoses()],
-                'status': STATUS_PRESENTATION['visit'].get(visit.status, {}).get('label', visit.status or 'غير محدد'),
+                'status': (STATUS_PRESENTATION['visit'].get(visit.status, {}).get('label', visit.status or 'غير محدد') +
+                       (' — نسخة عمل غير معتمدة' if visit.status in {'draft', 'amended'} else '')),
                 'clinical_status': visit.clinical_status or 'غير محدد',
                 'accompanied_by': visit.accompanied_by or '',
                 'companion_relation': visit.companion_relation or '',
@@ -97,8 +98,8 @@ class BaseExportService:
                     'detailed': visit.clinical_data.get('plan_details', '') if visit.clinical_data else '',
                 },
                 'administrative': {
-                    'date_signed': visit.date_signed.strftime('%d/%m/%Y') if visit.date_signed else '',
-                    'signed_by': visit.signed_by.full_name if visit.signed_by else '',
+                    'date_signed': visit.date_signed.strftime('%d/%m/%Y') if visit.date_signed and visit.status in {'final', 'locked'} else '',
+                    'signed_by': visit.signed_by.full_name if visit.signed_by and visit.status in {'final', 'locked'} else '',
                     'supervisor': visit.supervisor.full_name if visit.supervisor else '',
                     'diagnosis_discussed': 'غير مسجل' if visit.diagnosis_discussed is None else 'نعم' if visit.diagnosis_discussed else 'لا',
                     'plan_discussed': 'غير مسجل' if visit.plan_discussed is None else 'نعم' if visit.plan_discussed else 'لا',
@@ -151,7 +152,8 @@ class BaseExportService:
             'treatment_text': visit.treatment_text or '',
             'medications': visit.get_medications(),
             'lab_values': visit.get_lab_values(),
-            'status': STATUS_PRESENTATION['visit'].get(visit.status, {}).get('label', visit.status or 'غير محدد'),
+            'status': (STATUS_PRESENTATION['visit'].get(visit.status, {}).get('label', visit.status or 'غير محدد') +
+                       (' — نسخة عمل غير معتمدة' if visit.status in {'draft', 'amended'} else '')),
             'clinical_status': visit.clinical_status or 'غير محدد',
             'accompanied_by': visit.accompanied_by or '',
             'companion_relation': visit.companion_relation or '',
@@ -167,8 +169,8 @@ class BaseExportService:
                 'follow_up_type': visit.follow_up_type or 'غير محدد',
             },
             'administrative': {
-                'date_signed': visit.date_signed.strftime('%d/%m/%Y') if visit.date_signed else '',
-                'signed_by': visit.signed_by.full_name if visit.signed_by else '',
+                'date_signed': visit.date_signed.strftime('%d/%m/%Y') if visit.date_signed and visit.status in {'final', 'locked'} else '',
+                'signed_by': visit.signed_by.full_name if visit.signed_by and visit.status in {'final', 'locked'} else '',
                 'supervisor': visit.supervisor.full_name if visit.supervisor else '',
                 'diagnosis_discussed': 'غير مسجل' if visit.diagnosis_discussed is None else 'نعم' if visit.diagnosis_discussed else 'لا',
                 'plan_discussed': 'غير مسجل' if visit.plan_discussed is None else 'نعم' if visit.plan_discussed else 'لا',

@@ -16,6 +16,8 @@ Prefix commands with activated `python manage.py`; production requires explicit 
 | `run_scheduler` | Development loop; production timers call individual commands. |
 | `send_appointment_reminders`, `send_task_reminders` | Clinic-local windows/occurrence dedupe. |
 | `reconcile_media --older-than-hours 24` | Report missing/old orphan files; `--delete` needs explicit removal authorization. |
+| `cleanup_operations` | Expire completed responses after 30 days; interrupted receipts retained. |
+| `reconcile_recovery --key KEY --reason TEXT --confirm-inventory-and-media` | Acknowledge an operator-reconciled interrupted restore under the exclusive gate; does not repair inventory. |
 | `reset_admin_password --username NAME --qr` | Private one-time recovery password/session revocation; QR optional package. |
 | Django `check [--deploy]`, `shell`, `createsuperuser` | Configuration check/admin tools; shell/admin writes need intended authorization. |
 | `makemigrations`, `migrate`, `collectstatic --noinput` | Schema/asset operations require their explicit scope; not performed by documentation checks. |

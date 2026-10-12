@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 import csv
 import io
 from django.utils import timezone
@@ -151,6 +152,13 @@ class BulkImportService:
         return self._patients(file_stream, doctor_id, created_by_id, True)
 
 class OptionsImportService(BulkImportService):
+    def inventory_digest(self, kind):
+        import hashlib, json
+        model = DiagnosisOption if kind == 'diagnosis' else MedicationOption
+        rows = list(model.all_objects.order_by('pk').values())
+        from django.core.serializers.json import DjangoJSONEncoder
+        return hashlib.sha256(json.dumps(rows, cls=DjangoJSONEncoder, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
     def _catalog_rows(self, file_stream, kind, column_map=None):
         model = DiagnosisOption if kind == 'diagnosis' else MedicationOption
         keys = ('code', 'english_name', 'arabic_name') if kind == 'diagnosis' else ('generic_english', 'generic_arabic', 'dosage', 'brand_english', 'brand_arabic')
@@ -209,10 +217,16 @@ class OptionsImportService(BulkImportService):
         result['will_retire_existing'] = MedicationOption.objects.exclude(pk__in=valid_ids).count() if merge_mode == 'overwrite' else 0
         return result
 
+    @gated(exclusive=True)
     @transaction.atomic
-    def _import_catalog(self, file_stream, kind, column_map=None, merge_mode='merge'):
+    def _import_catalog(self, file_stream, kind, column_map=None, merge_mode='merge', expected_inventory=None):
         allowed = {'merge','replace'} if kind == 'diagnosis' else {'merge','overwrite'}
         if merge_mode not in allowed: raise ValidationError('طريقة الدمج غير صالحة')
+        model = DiagnosisOption if kind == 'diagnosis' else MedicationOption
+        list(model.all_objects.select_for_update().order_by('pk'))
+        if expected_inventory is not None and expected_inventory != self.inventory_digest(kind):
+            from core.exceptions import ConflictError
+            raise ConflictError('تغيرت القائمة بعد المعاينة؛ أعد المعاينة قبل الاستيراد')
         rows = self._catalog_rows(file_stream, kind, column_map)
         valid = [r for r in rows if '_data' in r]
         if not valid: raise ValidationError('لا توجد صفوف صالحة؛ لم تتغير القائمة')
@@ -242,8 +256,8 @@ class OptionsImportService(BulkImportService):
                 result['rows'].append({'row':row['row'], 'outcome':outcome, 'reason':''})
         return result
 
-    def import_diagnoses(self, file_stream, merge_mode='merge'):
-        return self._import_catalog(file_stream, 'diagnosis', merge_mode=merge_mode)
+    def import_diagnoses(self, file_stream, merge_mode='merge', expected_inventory=None):
+        return self._import_catalog(file_stream, 'diagnosis', merge_mode=merge_mode, expected_inventory=expected_inventory)
 
-    def import_medications(self, file_stream, column_map=None, merge_mode='merge'):
-        return self._import_catalog(file_stream, 'medication', column_map, merge_mode)
+    def import_medications(self, file_stream, column_map=None, merge_mode='merge', expected_inventory=None):
+        return self._import_catalog(file_stream, 'medication', column_map, merge_mode, expected_inventory)

@@ -4,15 +4,15 @@ Use activated backend interpreter and explicit production settings for deployed 
 
 ## `apps/backup/`: backup and recovery
 
-`auto_backup` writes `clinic_backup_YYYYMMDD_HHMMSS.zip` to `BACKUP_DIR` on each invocation. Current portable ZIP contains complete managed logical inventory (including archived rows/auth/history), referenced media, canonical signed `manifest.json` with member hashes/sizes, `signature.txt` and `backup.json`. JSON envelopes sign canonical inner data; JSON carries no media bytes. Do not treat a raw SQLite file copy or signature of `backup.json` alone as current full-archive verification.
+`auto_backup` writes `clinic_backup_YYYYMMDD_HHMMSS_microseconds_random.zip` (atomic publication) to `BACKUP_DIR` on each invocation. Current portable ZIP contains complete managed logical inventory (including archived rows/auth/history), referenced media, canonical signed `manifest.json` with member hashes/sizes, `signature.txt` and `backup.json`. JSON envelopes sign canonical inner data; JSON carries no media bytes. Do not treat a raw SQLite file copy or signature of `backup.json` alone as current full-archive verification.
 
 | API under `/api/v1/backup/` | Required contract |
 | --- | --- |
 | POST base | `backup_type=full` or `json`; returns file, `X-Backup-SHA256`, `X-Backup-Type`; authenticated manage-backup permission. |
 | POST `restore/preview/` | Multipart `backup_file`, string booleans `restore_patients`, `restore_diagnoses`, `restore_medications`; authenticates/validates inventory/media, returns counts/impact/scope and `preview_token`. Token binds user/file digest/selection, expires after 30 minutes. |
-| POST `restore/execute/` | Same file/selection/token, `confirm_clear=true`, `confirmation_phrase=RESTORE CLINIC`; UI requires execution consent. Rejected stale/wrong-actor/digest/scope token does not authorize mutation. |
+| POST `restore/execute/` | Authorized administrator; same file/selection/token, `confirm_clear=true`, `confirmation_phrase=RESTORE CLINIC`; UI requires execution consent. Rejected stale/wrong-actor/digest/scope token does not authorize mutation. |
 
-Full patient recovery replaces managed app/auth inventory and media, preserves IDs/complete timestamps/signed revisions/exact issued bytes, creates `safety_before_restore_*.zip`, revokes old sessions and requires relogin. Catalog-only scope merges selected catalogs while preserving clinical records/current users; empty scope rejected. JSON recovery fails if referenced bytes are absent or mismatch. Unsupported/incomplete legacy formats, tampered manifest/media, unsafe paths/expanded sizes/counts/references fail before writes. Preserve installation HMAC key; do not hand-edit archive envelopes or bypass preview via a shell one-liner. No dedicated restore CLI.
+Full patient recovery replaces managed app/auth inventory and media, preserves IDs/complete timestamps/signed revisions/exact issued bytes, creates `safety_before_restore_*.zip`, revokes old sessions and requires relogin. Catalog-only scope merges selected catalogs while preserving clinical records/current users; empty scope rejected. JSON recovery fails if referenced bytes are absent or mismatch. Unsupported/incomplete legacy formats, tampered manifest/media, unsafe paths/expanded sizes/counts/references fail before writes. Preserve installation HMAC key; do not hand-edit archive envelopes or bypass preview via a shell one-liner. No dedicated restore CLI. Installation-local recovery receipts and cache generations stay outside replaced inventory. A completed restore replays only its bounded safety-copy receipt to a currently authorized administrator after relogin. Interrupted receipts block further restores until inventory/media reconciliation and explicit `reconcile_recovery --key KEY --reason TEXT --confirm-inventory-and-media` acknowledgment; this command acknowledges operator verification, it does not repair files/database.
 
 Validate/rehearse full recovery in authorized staging using actual preview and release workflow; inspect checksums/counts/signed artifacts/media and reconcile after restore. [Automated synthetic recovery](../testing/guide.md), [clinical/PDF checks](../testing/pdf.md), [patient retention](../contracts/patients.md).
 
@@ -26,11 +26,13 @@ Store authenticated copies off-site with appropriate access/encryption; same-fil
 
 | Command | Current behavior |
 | --- | --- |
-| `send_appointment_reminders` | Clinic-local day/hour windows from clinic reminder settings, catches eligible future scheduled/confirmed occurrences across midnight, occurrence-specific dedupe and updated bookkeeping; terminal/cancelled rows excluded. |
+| `send_appointment_reminders` | Clinic-local day/hour windows from clinic reminder settings, catches eligible scheduled/confirmed occurrences across midnight, with up to 60 minutes of late hour-reminder delivery, occurrence-specific dedupe and updated bookkeeping; terminal/cancelled rows excluded. |
 | `send_task_reminders` | Open/in-progress tasks through local due window, recipient assignee or owner; dedupe per due occurrence; completion/cancellation stops reminders. |
-| `run_scheduler` | Development loop: appointment reminders, tasks, backup, cleanup; configured interval (minimum 60s), one failure does not stop others. Production uses individually monitored timers. |
+| `run_scheduler` | Development loop: appointment reminders, tasks, backup, cleanup; polling capped at half the current hour-reminder window (minimum 60s); backup cadence independently uses `BACKUP_CHECK_INTERVAL_HOURS`; also expires completed operation receipts. Production uses individually monitored timers. |
 | `reconcile_media [--older-than-hours 24]` | Reports missing references and old orphan uploads; deletes only with explicit `--delete` authorization, does not replace patient retention policy. |
-| `reset_admin_password --username admin [--qr]` | Generates/prints one private password, clears forced rotation and revokes existing sessions; optional qrcode tooling. |
+| `cleanup_operations` | Removes completed ordinary/recovery receipts after their 30-day retry window; interrupted receipts retained. Old keys must not be reused after that window. |
+| `reconcile_recovery` | Explicitly acknowledge verified inventory/media reconciliation of one interrupted receipt; use a new preview/key for subsequent recovery. |
+| `reset_admin_password --username admin [--qr]` | Locks the account, updates only password/security fields and version, generates/prints one private password, clears forced rotation and revokes existing sessions; optional qrcode tooling. |
 
 ## System endpoints and monitoring
 
@@ -42,3 +44,9 @@ Store authenticated copies off-site with appropriate access/encryption; same-fil
 | Logs | App/Gunicorn stdout via `journalctl -u myclinic`; Nginx access/error logs; default INFO console handler. |
 
 Monitor health hourly, errors/fresh backups daily, dependency advisories weekly, staged restore/reconciliation monthly. Review secret rotation/recovery quarterly; retaining original backup keys is essential. User password/security flows and `SessionRevocationMiddleware` revoke affected sessions; avoid blanket ORM edits bypassing canonical validation/version/audit. [Troubleshooting](troubleshooting.md), [release sign-off](../testing/release-checklist.md).
+
+## Recovery coordination and inventory scope
+
+Every HTTP request and scheduled maintenance/reminder job participates in the operation gate. Exclusive snapshot/restore/catalog work drains earlier requests before reading safety inventory or replacing media; protected downloads are buffered before releasing the read gate. PostgreSQL coordinates workers/hosts with session advisory locks. Other DB profiles require `OPERATION_LOCK_DIR` pointing to the same reliable POSIX lock storage for all workers/jobs; production refuses an unset path. Direct external database/storage writers must be stopped or explicitly use this protocol. Actual external DB/storage behavior remains unverified.
+
+Medication spreadsheet import is content-only (five mapped text fields), retains existing controlled classification, creates new drugs uncontrolled and activates imported content; exported status/controlled columns are not a full round trip. Full authenticated ZIP remains recovery. Catalog preview binds current inventory/content/versions and rejects both merge/replacement execution after intervening edits.

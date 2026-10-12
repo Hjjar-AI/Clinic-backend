@@ -31,7 +31,7 @@ class PatientService:
         'preferred_language', 'preferred_contact_channel', 'communication_restrictions', 'allergy_status', 'medication_status',
     }
     IDENTITY_FIELDS = ('first_name', 'father_name', 'surname', 'mother_name')
-    CORRECTION_FIELDS = set(IDENTITY_FIELDS) | {'dob_year', 'gender', 'national_id', 'phone', 'permanent_address', 'marital_status'}
+    CORRECTION_FIELDS = set(IDENTITY_FIELDS) | {'dob_year', 'gender', 'national_id', 'phone', 'permanent_address', 'marital_status', 'emergency_contact_name', 'emergency_contact_relation', 'emergency_contact_phone', 'family_history', 'important_notes'}
 
     def _normalize(self, data):
         data = data.copy()
@@ -74,6 +74,9 @@ class PatientService:
         dob_year = data.get('dob_year')
         if dob_year is not None and (type(dob_year) is not int or not (1900 <= dob_year <= timezone.localdate().year)):
             errors.append('سنة الميلاد غير صالحة')
+        emergency_name = data.get('emergency_contact_name', getattr(existing, 'emergency_contact_name', ''))
+        if not emergency_name and any(data.get(key, getattr(existing, key, '')) for key in ('emergency_contact_relation', 'emergency_contact_phone')):
+            errors.append('اسم جهة اتصال الطوارئ مطلوب عند تسجيل بيانات الاتصال')
         if errors:
             raise ValidationError(errors)
 
@@ -95,13 +98,13 @@ class PatientService:
     def _sync_identifier(self, patient, actor, previous=''):
         from .models import PatientIdentifier
         if previous and previous != patient.national_id:
-            PatientIdentifier.objects.filter(patient=patient, identifier_type='national_id', value=previous, is_active=True).update(is_active=False, retired_at=timezone.now(), retired_by=actor, retirement_reason='Primary identity corrected')
+            PatientIdentifier.objects.filter(patient=patient, identifier_type='national_id', value=previous, issuer='', issuing_country='', is_active=True).update(is_active=False, retired_at=timezone.now(), retired_by=actor, retirement_reason='Primary identity corrected')
         if patient.national_id:
             PatientIdentifier.objects.get_or_create(patient=patient, identifier_type='national_id',
-                value=patient.national_id, issuer='', is_active=True,
+                value=patient.national_id, issuer='', issuing_country='', is_active=True,
                 defaults={'created_by': actor, 'updated_by': actor, 'verification': 'reported'})
 
-    def _verify_profile(self, patient, data, actor, identity_changed=False, previous_verification=None):
+    def _verify_profile(self, patient, data, actor, identity_changed=False, previous_verification=None, previous_summaries=None):
         from .models import PatientAllergy, PatientMedication
         if patient.identity_verification == 'verified' and (previous_verification != 'verified' or identity_changed):
             if actor.role not in {'admin', 'doctor'}:
@@ -109,12 +112,15 @@ class PatientService:
             patient.identity_verified_at, patient.identity_verified_by = timezone.now(), actor
         elif patient.identity_verification != 'verified':
             patient.identity_verified_at, patient.identity_verified_by = None, None
+        for field in ('family_history', 'important_notes'):
+            if field in data and data[field] != (previous_summaries or {}).get(field, '') and not actor.has_perm('edit_visit'):
+                raise PermissionDenied('تعديل المعلومات السريرية يتطلب صلاحية تعديل الزيارات')
         for field in ('allergy_status', 'medication_status'):
-            if field in data and data[field] != 'unknown' and not actor.has_perm('edit_visit'):
+            if field in data and data[field] != (previous_summaries or {}).get(field, 'unknown') and not actor.has_perm('edit_visit'):
                 raise PermissionDenied('تسجيل المعلومات السريرية يتطلب صلاحية تعديل الزيارات')
         for field, model, statuses in [('allergy_status', PatientAllergy, ['suspected', 'confirmed']),
                                         ('medication_status', PatientMedication, ['active', 'on_hold'])]:
-            if getattr(patient, field) == 'none_known' and patient.pk and model.objects.filter(patient=patient, is_active=True, status__in=statuses).exists():
+            if getattr(patient, field) in {'none_known', 'unknown'} and patient.pk and model.objects.filter(patient=patient, is_active=True, status__in=statuses).exists():
                 raise ValidationError({field: ['توجد سجلات حالية؛ راجعها قبل تسجيل عدم وجود معلومات']})
 
     @transaction.atomic
@@ -155,6 +161,7 @@ class PatientService:
         from .record_services import json_value
         patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
         check_mutation(patient, expected_version)
+        previous_summaries = {field: getattr(patient, field) for field in ('allergy_status', 'medication_status', 'family_history', 'important_notes')}
         previous_identifier = patient.national_id
         previous_verification = patient.identity_verification
         data = self._normalize(data)
@@ -168,15 +175,37 @@ class PatientService:
             if key in self.EDITABLE_FIELDS:
                 setattr(patient, key, value)
         # Changing verified identity requires explicit re-verification; never silently carry the old assertion.
-        if changes and 'identity_verification' not in data:
+        identity_changed = any(key in changes for key in set(self.IDENTITY_FIELDS) | {'dob_year', 'gender', 'national_id'})
+        if identity_changed and 'identity_verification' not in data:
             patient.identity_verification = 'reported'
-        self._verify_profile(patient, data, current_user, bool(changes), previous_verification)
+        self._verify_profile(patient, data, current_user, identity_changed, previous_verification, previous_summaries)
         patient.version += 1
         patient.full_clean()
         patient.save()
         self._sync_identifier(patient, current_user, previous_identifier)
+        contact_fields = {'emergency_contact_name': 'name', 'emergency_contact_relation': 'relationship', 'emergency_contact_phone': 'phone'}
+        if any(key in changes for key in contact_fields):
+            from .models import PatientContact
+            from .record_services import PatientRecordService
+            primary = PatientContact.objects.filter(patient=patient, is_active=True, is_primary=True).first()
+            if primary and not primary.is_emergency:
+                raise ValidationError({'emergency_contact_name': ['عدّل الاتصال الأساسي من سجل الاتصالات أولاً']})
+            fields = {value: getattr(patient, key) for key, value in contact_fields.items()}
+            fields.update(is_primary=True, is_emergency=True)
+            retire = not fields['name']
+            if retire and (fields['phone'] or fields['relationship']):
+                raise ValidationError({'emergency_contact_name': ['اسم جهة الاتصال مطلوب']})
+            if primary or not retire:
+                PatientRecordService().save(patient, 'contacts', {} if retire else fields,
+                    current_user, patient.version, primary.pk if primary else None, retire=retire, reason=reason)
+                patient.refresh_from_db()
         if changes:
-            PatientCorrection.objects.create(patient=patient, actor=current_user, reason=reason.strip(), changes=changes)
+            narrative = {key: value for key, value in changes.items() if key in {'family_history', 'important_notes'}}
+            demographic = {key: value for key, value in changes.items() if key not in narrative}
+            if demographic:
+                PatientCorrection.objects.create(patient=patient, actor=current_user, reason=reason.strip(), changes=demographic)
+            if narrative:
+                PatientCorrection.objects.create(patient=patient, actor=current_user, reason=reason.strip(), changes=narrative, record_type='clinical-profile')
         return patient
 
     @transaction.atomic

@@ -81,48 +81,93 @@ class RequestContextMiddleware:
                 return csrf_error
             fingerprint = hashlib.sha256(request.method.encode() + b'\0' +
                 request.get_full_path().encode() + b'\0' + body_hash).hexdigest()
-            try:
-                with transaction.atomic():
-                    operation = IdempotencyOperation.objects.create(user=user, key=key,
-                        fingerprint=fingerprint, expires_at=timezone.now() + timezone.timedelta(days=30))
-            except IntegrityError:
-                operation = IdempotencyOperation.objects.get(user=user, key=key)
-                if operation.fingerprint != fingerprint:
-                    return JsonResponse({'error': {'code': 'idempotency_key_reused',
-                        'message': 'Key was used for a different request', 'errors': {}}}, status=409)
-                if operation.state != 'completed':
-                    return JsonResponse({'error': {'code': 'request_in_progress',
-                        'message': 'Request is still processing; retry with the same key', 'errors': {}}}, status=409)
-                response = HttpResponse(bytes(operation.response_body), status=operation.response_status)
-                for name, value in operation.response_headers.items():
-                    response[name] = value
-                response['X-Idempotency-Replayed'] = 'true'
-                return response
-            try:
-                from contextlib import nullcontext
-                # Recovery controls their own snapshot/media transaction boundaries.
-                boundary = nullcontext() if request.path.startswith('/api/v1/backup/') else transaction.atomic()
-                with boundary:
-                    response = self.get_response(request)
-                    if not 200 <= response.status_code < 300 and not request.path.startswith('/api/v1/backup/'):
-                        transaction.set_rollback(True)
-                    if 200 <= response.status_code < 300:
-                        if getattr(response, 'streaming', False):
-                            raise RuntimeError('Idempotent writes must return a buffered response')
-                        IdempotencyOperation.objects.filter(pk=operation.pk).update(
-                            state='completed', response_body=response.content,
-                            response_status=response.status_code,
-                            response_headers={name: value for name, value in response.items()
-                                if name.lower() in {'content-type', 'content-disposition', 'location',
-                                    'x-backup-sha256', 'x-backup-type', 'x-resource-version'}})
+            if request.path == '/api/v1/backup/restore/execute/':
+                return self._recovery(request, key, fingerprint)
+            # Reservation, mutation and receipt share one commit. A killed worker
+            # rolls all three back; an overlapping retry waits on the unique key.
+            with transaction.atomic():
+                try:
+                    with transaction.atomic():
+                        operation = IdempotencyOperation.objects.create(user=user, key=key,
+                            fingerprint=fingerprint, expires_at=timezone.now() + timezone.timedelta(days=30))
+                    created = True
+                except IntegrityError:
+                    operation = IdempotencyOperation.objects.select_for_update().get(user=user, key=key)
+                    created = False
+                if not created:
+                    if operation.fingerprint != fingerprint:
+                        return self._error('idempotency_key_reused', 'Key was used for a different request', 409)
+                    if operation.expires_at <= timezone.now():
+                        return self._error('operation_expired', 'Operation receipt expired; do not retry this key', 410)
+                    if operation.state != 'completed':
+                        # Old independently committed reservations cannot be
+                        # assumed safe to rerun. New ordinary writes cannot leave these.
+                        return self._error('operation_interrupted', 'Interrupted legacy operation requires reconciliation', 409)
+                    from .replay import authorize_replay
+                    try:
+                        authorize_replay(request, operation)
+                    except Exception:
+                        return self._error('replay_forbidden', 'Current authorization does not allow this result', 403)
+                    response = HttpResponse(bytes(operation.response_body), status=operation.response_status)
+                    for name, value in operation.response_headers.items():
+                        response[name] = value
+                    response['X-Idempotency-Replayed'] = 'true'
+                    return response
+                response = self.get_response(request)
                 if not 200 <= response.status_code < 300:
-                    IdempotencyOperation.objects.filter(pk=operation.pk).delete()
+                    transaction.set_rollback(True)
+                    return response
+                if getattr(response, 'streaming', False):
+                    raise RuntimeError('Idempotent writes must return a buffered response')
+                IdempotencyOperation.objects.filter(pk=operation.pk).update(
+                    state='completed', response_body=response.content,
+                    response_status=response.status_code,
+                    response_headers={name: value for name, value in response.items()
+                        if name.lower() in {'content-type', 'content-disposition', 'location',
+                            'x-backup-sha256', 'x-backup-type', 'x-resource-version'}})
                 return response
-            except Exception:
-                IdempotencyOperation.objects.filter(pk=operation.pk).delete()
-                raise
         finally:
             set_current_request(None)
+
+    @staticmethod
+    def _error(code, message, status):
+        return JsonResponse({'error': {'code': code, 'message': message, 'errors': {}}}, status=status)
+
+    def _recovery(self, request, key, fingerprint):
+        from django.utils import timezone
+        from .models import RecoveryOperation
+        user = request.user
+        if user.role != 'admin' or not user.has_perm('manage_backup'):
+            return self._error('recovery_forbidden', 'Recovery requires an authorized administrator', 403)
+        # The exclusive gate makes a processing receipt from an earlier worker
+        # interrupted, never a license to repeat an independently committed restore.
+        operation = RecoveryOperation.objects.filter(key=key).first()
+        if operation:
+            if operation.fingerprint != fingerprint:
+                return self._error('idempotency_key_reused', 'Key was used for a different request', 409)
+            if operation.expires_at <= timezone.now():
+                return self._error('operation_expired', 'Recovery receipt expired', 410)
+            if operation.state == 'reconciled':
+                return self._error('recovery_reconciled', 'Recovery reconciled by operator; use a new preview and key', 409)
+            if operation.state != 'completed':
+                RecoveryOperation.objects.filter(pk=operation.pk).update(state='interrupted')
+                return self._error('recovery_interrupted', 'Recovery was interrupted; reconcile database/media using the safety backup before another restore', 409)
+            # Only a bounded receipt is retrievable in the restored auth namespace.
+            response = JsonResponse({'data': operation.result, 'message': 'تمت الاستعادة بنجاح'})
+            response['X-Idempotency-Replayed'] = 'true'
+            return response
+        if RecoveryOperation.objects.filter(state__in=['processing', 'interrupted']).exists():
+            return self._error('recovery_interrupted', 'An interrupted recovery requires reconciliation before another restore', 409)
+        initiator = {'id': user.pk, 'username': user.username[:150], 'name': (user.full_name or '')[:200]}
+        operation = RecoveryOperation.objects.create(key=key, fingerprint=fingerprint, initiator=initiator,
+            expires_at=timezone.now() + timezone.timedelta(days=30))
+        request.recovery_operation = operation
+        response = self.get_response(request)
+        if not 200 <= response.status_code < 300:
+            # Validation failures before media replacement are safe to release.
+            if not getattr(request, 'recovery_started', False):
+                RecoveryOperation.objects.filter(pk=operation.pk, state='processing').delete()
+        return response
 
 
 class SessionRevocationMiddleware:

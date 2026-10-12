@@ -8,7 +8,7 @@ Current schema, API and retention contract; [verification](../testing/guide.md),
 | --- | --- |
 | `id`, permanent `patient_number` | Internal key and immutable, unique `P-…` file number; distinguish people with the same identifier |
 | Names, nullable `dob_year`, optional gender | Year-only birth precision; unknown remains unknown, displayed age is approximate |
-| `national_id` | Compatibility primary identifier; structured register supports additional identifiers |
+| `national_id` | Compatibility primary national identifier with blank issuer/country; structured register supports distinct issued identifiers |
 | `identity_verification`, server actor/time | `unknown` / `reported` / `verified`; only authorized doctor/admin can assert verification |
 | Marital status, occupation, address, phone | Controlled marital choices; optional text stored as `""`, optional dates/references as `NULL` |
 | `registration_date` | Clinic registration, not hospital admission; `admission_date` remains a compatibility alias |
@@ -19,7 +19,7 @@ Current schema, API and retention contract; [verification](../testing/guide.md),
 
 First name/surname remain required; birth year/gender/ID/phone may be unknown. Recommended completeness is independent from validity: configurable `patient_completeness_fields` in clinic settings (birth year/gender/registration by default; ID, phone, team, language available). Missing recommendations never block saving.
 
-Care-team membership owns assignment/access. Legacy `doctor` is compatibility display/create input only, restricted to an actual doctor; no administrator-as-doctor fallback or access grant from that field. Nonadmin creators join the current team; administrators may select team members without becoming a treating clinician. Existing historical-author/creator scope is preserved alongside current membership; ending membership does not revoke independent historical scope.
+Care-team membership owns assignment/access. Legacy `doctor` is compatibility display/create input only, restricted to an actual doctor; no administrator-as-doctor fallback or access grant from that field. Nonadmin creators join the current team; administrators may select team members without becoming a treating clinician. Existing historical-author/creator scope is preserved alongside current membership; ending membership does not revoke independent historical scope. Membership is effective only after its start time.
 
 ## Related records
 
@@ -39,9 +39,9 @@ Each mutable longitudinal record has patient, creator/updater/timestamps, active
 | `PatientDuplicateReview` | Ordered patient pair, dismiss/review-later or different-person decision, reviewer/reason/time; reviewed matches can be shown again |
 | `PatientMerge` | Immutable source, surviving patient, actor/reason/time, original record IDs, demographic/team snapshots, reconciliation adjustments |
 
-Linked clinical records/appointments must belong to the same patient. New follow-up owners must be current active team members; historical owners remain visible. Terminal action outcomes cannot be reopened: create a new action. Existing visit follow-up dates/results have one synchronized bridge action; edit those dates/results from the visit. Additional actions are independent, and dashboard/reports count actions without double-counting the bridge.
+Linked clinical records/appointments must belong to the same patient. New follow-up owners must be current active team members; historical owners remain visible. Terminal action outcomes cannot be reopened: create a new action. New completion evidence must be an active final/locked visit with an approved revision; historical references remain retainable. Existing visit follow-up dates/results have one synchronized active bridge action; terminal scheduling changes retire the old occurrence, edit those dates/results from the visit. Additional actions are independent, and dashboard/reports count actions without double-counting the bridge.
 
-Allergies/medications copy positive evidence to `recorded`; retiring/stopping entries does not silently assert `none_known`. Explicit negative summaries require clinical-edit permission and cannot contradict active positive entries. Verification is invalidated or must be reasserted when identifying/provenance facts change; editing unrelated fields preserves it.
+Allergies/medications copy positive evidence to `recorded`; retiring/stopping entries does not silently assert `none_known`. Any changed summary, including unknown, requires clinical-edit permission; unchanged echoes are accepted. Unknown/negative summaries cannot contradict positive evidence. Explicit negative summaries require clinical-edit permission and cannot contradict active positive entries. Verification is invalidated or must be reasserted when identifying/provenance facts change; editing unrelated fields preserves it.
 
 ```mermaid
 erDiagram
@@ -71,11 +71,11 @@ Identifiers stay unchanged: no `*`/`-1` suffixes on official IDs. Active and arc
 
 Admin with patient-edit/archive permissions explicitly previews source→active survivor, reviews transfer counts/access warning, supplies reason and confirms. Preview expires after 10 minutes and binds actor, both versions, source record inventory/content and team. A stale or changed preview fails safely. Source may already be archived.
 
-Visits, appointments, invoices, documents and longitudinal records move to survivor; survivor demographics remain unchanged. Current active team access combines explicitly. Identical active identifiers transfer retired, conflicting source primary contacts become nonprimary; adjustments are recorded. Source archives and links to survivor; restoring a merged source is blocked. Signed revisions/issued bytes stay unchanged. Merge is intentionally not an automatic or reversible button: recovery requires a deliberate recovery process.
+Visits, appointments, invoices, documents and longitudinal records move to survivor; survivor demographics remain unchanged. Current active team access combines explicitly. Identical active identifiers transfer retired, source primary contacts become nonprimary; adjustments are recorded. Source archives and links to survivor; restoring a merged source is blocked. Signed revisions/issued bytes stay unchanged. Merge is intentionally not an automatic or reversible button: recovery requires a deliberate recovery process.
 
 ## API and concurrency
 
-Base: `/api/v1/patients/{id}/`. Shared session/CSRF/envelopes and permissions remain authoritative. Profile updates require opening patient version and `correction_reason` for important demographic changes.
+Base: `/api/v1/patients/{id}/`. Shared session/CSRF/envelopes and permissions remain authoritative. Profile updates require opening patient version and `correction_reason` for important demographic/contact/narrative changes. Family history/important notes require clinical-edit permission and clinical-view access to their correction history. Legacy emergency-contact fields project the active primary emergency contact; profile edits use the same versioned contact correction service. Bridge follow-up writes also advance the patient version.
 
 | Endpoint | Contract |
 | --- | --- |

@@ -1,22 +1,18 @@
-# backend/apps/reports/doctor_performance.py
+from django.db.models import Q
+from django.utils import timezone
 from apps.accounts.models import User
-from apps.visits.models import Visit
+from apps.patients.models import PatientCareTeam
+
 
 class DoctorPerformanceService:
     def get_doctor_performance(self, user):
-        accessible_patient_ids = self.get_accessible_patients(user).values_list('id', flat=True)
-        doctors = User.objects.filter(
-            role__in=['doctor', 'admin'],
-            is_active=True,
-            patients__id__in=accessible_patient_ids,
-        ).distinct()
-        result = []
-        for doctor in doctors:
-            patients_count = doctor.patients.filter(id__in=accessible_patient_ids).count()
-            visits_count = Visit.objects.filter(patient_id__in=accessible_patient_ids, patient__doctor=doctor).count()
-            result.append({
-                'doctor_name': doctor.full_name or doctor.username,
-                'patient_count': patients_count,
-                'visit_count': visits_count,
-            })
-        return result
+        patients = self.get_accessible_patients(user)
+        visits = self.get_accessible_visits(user)
+        teams = PatientCareTeam.objects.filter(patient__in=patients, ended_at__isnull=True,
+            started_at__lte=timezone.now(), user__is_active=True, user__role__in=['doctor', 'admin'])
+        doctors = User.objects.filter(Q(pk__in=teams.values('user_id')) | Q(pk__in=visits.values('author_id'))).order_by('pk')
+        return [{'doctor_id': doctor.pk, 'doctor_name': doctor.full_name or doctor.username,
+                 'patient_count': teams.filter(user=doctor).values('patient_id').distinct().count(),
+                 'treated_patient_count': visits.filter(author=doctor).values('patient_id').distinct().count(),
+                 'visit_count': visits.filter(author=doctor).count()}
+                for doctor in doctors]

@@ -113,27 +113,40 @@ class RestoreExecuteView(APIView):
             return error_response(400, 'اختر نطاقاً للاستعادة', {})
         if preview.get('digest') != _upload_digest(file):
             return error_response(409, 'ملف الاستعادة تغير بعد المعاينة', {})
+        from core.models import RecoveryOperation
+        operation = getattr(request._request, 'recovery_operation', None)
+        initiator = operation.initiator if operation else {'id': request.user.pk, 'username': request.user.username[:150], 'name': (request.user.full_name or '')[:200]}
         try:
             safety_buffer = BackupCreatorService().create_full_backup()
             backup_dir = Path(settings.BACKUP_DIR)
             backup_dir.mkdir(parents=True, exist_ok=True)
             safety_name = f'safety_before_restore_{timezone.now().strftime("%Y%m%d_%H%M%S_%f")}.zip'
             (backup_dir / safety_name).write_bytes(safety_buffer.getvalue())
+            def completion():
+                log_action(None if restore_patients else request.user.pk, 'restore', 'System', 0, {
+                    'summary': 'Clinic data restored from validated backup',
+                    'safety_backup': safety_name, 'initiator': initiator,
+                })
+                if operation:
+                    RecoveryOperation.objects.filter(pk=operation.pk).update(state='completed', result={'safety_backup': safety_name})
+            if operation:
+                RecoveryOperation.objects.filter(pk=operation.pk).update(result={'safety_backup': safety_name})
+            def started():
+                request._request.recovery_started = True
+            def rolled_back():
+                request._request.recovery_started = False
             self.service.execute_restore(
                 file,
                 restore_patients=restore_patients,
                 restore_diagnoses=restore_diagnoses,
-                restore_medications=restore_medications,
+                restore_medications=restore_medications, completion=completion, started=started, rolled_back=rolled_back,
             )
-            cache.delete(f'restore-preview:{preview_token}')
-            from apps.accounts.models import User
-            actor_id = request.user.id if User.objects.filter(pk=request.user.id).exists() else None
+            try:
+                cache.delete(f'restore-preview:{preview_token}')
+            except Exception:
+                pass  # Durable receipt, not cache availability, establishes completion.
             if restore_patients:
                 request.session.flush()
-            log_action(actor_id, 'restore', 'System', 0, {
-                'summary': 'Clinic data restored from validated backup',
-                'safety_backup': safety_name,
-            })
             return Response({'data': {'safety_backup': safety_name}, 'message': 'تمت الاستعادة بنجاح'})
         except ValueError as e:
             return error_response(400, str(e), {})

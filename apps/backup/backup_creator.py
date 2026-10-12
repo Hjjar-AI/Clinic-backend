@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 import io
 import json
 import zipfile
@@ -8,6 +9,7 @@ from django.apps import apps
 from django.core import serializers
 from django.core.files.storage import default_storage
 from django.db import transaction
+from django.conf import settings
 from django.utils import timezone
 from .backup_validation import BackupValidationService, payload_bytes
 
@@ -27,7 +29,7 @@ def backup_models():
         config.label for config in apps.get_app_configs() if config.name.startswith('apps.')
     }
     return sorted([model for model in apps.get_models() if model._meta.app_label in labels
-                   and model._meta.managed and model.__name__ != 'IdempotencyOperation'],
+                   and model._meta.managed and model.__name__ not in {'IdempotencyOperation', 'RecoveryOperation', 'CacheGeneration'}],
                   key=lambda model: model._meta.label_lower)
 
 
@@ -47,12 +49,7 @@ def media_paths(directory=''):
 class BackupCreatorService:
     def _data(self):
         models = backup_models()
-        # PostgreSQL uses one repeatable-read snapshot for the entire inventory.
-        # Set isolation before this transaction's first query.
-        from django.db import connection
-        if connection.vendor == 'postgresql':
-            with connection.cursor() as cursor:
-                cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+        # Caller holds the exclusive gate across the DB and media snapshot.
         records, counts = [], {}
         for model in models:
             rows = list(model._base_manager.order_by('pk'))
@@ -67,10 +64,12 @@ class BackupCreatorService:
         signature = BackupValidationService()._sign_data(payload_bytes(data))
         return json.dumps({'signature': signature, 'data': data}, ensure_ascii=False, allow_nan=False)
 
+    @gated(exclusive=True)
     @transaction.atomic
     def create_json_backup(self):
         return self._json_backup()
 
+    @gated(exclusive=True)
     @transaction.atomic
     def create_full_backup(self):
         buffer = io.BytesIO()
@@ -89,6 +88,9 @@ class BackupCreatorService:
             if (content is None or len(content) != fields['file_size']
                     or hashlib.sha256(content).hexdigest() != fields['checksum']):
                 raise ValueError('Clinical file is missing or inconsistent; reconcile media before backup')
+        maximum = getattr(settings, 'MAX_BULK_IMPORT_SIZE', 200 * 1024 * 1024)
+        if sum(map(len, members.values())) > maximum * 5 or len(members) + 2 > 100_000:
+            raise ValueError('Complete backup exceeds restore expansion limits')
         manifest = {'format_version': 2, 'members': {
             name: {'sha256': hashlib.sha256(value).hexdigest(), 'size': len(value)}
             for name, value in members.items()}}
@@ -98,5 +100,7 @@ class BackupCreatorService:
                 archive.writestr(name, value)
             archive.writestr('manifest.json', raw_manifest)
             archive.writestr('signature.txt', BackupValidationService()._sign_data(raw_manifest))
+        if buffer.tell() > maximum:
+            raise ValueError('Complete backup exceeds restore upload limit')
         buffer.seek(0)
         return buffer

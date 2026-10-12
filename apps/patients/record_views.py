@@ -58,7 +58,7 @@ class PatientRecordsMixin:
         rows = PatientCorrection.objects.filter(patient_id__in=history_ids).select_related('actor', 'patient').order_by('-created_at', '-pk')
         merges = PatientMerge.objects.filter(Q(source_id__in=history_ids) | Q(survivor_id__in=history_ids)).select_related('actor', 'source', 'survivor').order_by('-created_at', '-pk')
         if not request.user.has_perm('view_visits'):
-            rows = rows.exclude(record_type__in=CLINICAL_KINDS)
+            rows = rows.exclude(record_type__in=CLINICAL_KINDS | {'clinical-profile'})
         try:
             offset = max(0, int(request.query_params.get('offset', 0)))
         except (TypeError, ValueError):

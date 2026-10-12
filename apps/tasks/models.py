@@ -1,3 +1,4 @@
+import uuid
 from django.db import models
 from core.constraints import check_constraint
 from django.conf import settings
@@ -35,6 +36,7 @@ class UserTask(TimeStampedModel):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     status_reason = models.CharField(max_length=500, blank=True, default='')
     due_date = models.DateField(null=True, blank=True)
+    reminder_generation = models.UUIDField(default=uuid.uuid4, editable=False)
     reminder_sent = models.BooleanField(default=False)
     completed_at = models.DateTimeField(null=True, blank=True)
     completed_by = models.ForeignKey(

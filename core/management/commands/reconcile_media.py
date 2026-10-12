@@ -1,3 +1,4 @@
+from core.operation_gate import gated
 from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.core.files.storage import default_storage
@@ -11,6 +12,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--delete', action='store_true')
         parser.add_argument('--older-than-hours', type=int, default=24)
+    @gated()
     def handle(self, *args, **options):
         age = max(24, options['older_than_hours'])
         cutoff = timezone.now() - timedelta(hours=age)

@@ -3,6 +3,7 @@
 Scope never replaces the endpoint's action permission.
 """
 from django.db.models import Q
+from django.utils import timezone
 
 
 def patient_scope(user):
@@ -10,7 +11,7 @@ def patient_scope(user):
         return Q(pk__in=[])
     if user.role == 'admin':
         return Q()
-    membership = Q(care_team__user=user, care_team__ended_at__isnull=True)
+    membership = Q(care_team__user=user, care_team__ended_at__isnull=True, care_team__started_at__lte=timezone.now())
     if user.role == 'doctor':
         return Q(visits__author=user) | membership
     if user.role == 'receptionist':

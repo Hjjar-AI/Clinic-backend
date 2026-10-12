@@ -18,39 +18,30 @@ class AuthService:
 
     def login(self, request, username, password, remember=False):
         username = User.normalize_username(username).strip()
-        user = User.objects.filter(username=username).first()
-        if user is None:
-            User().set_password(password)
-        if not user or not user.check_password(password):
-            if user:
+        failure = None
+        with transaction.atomic():
+            user = User.objects.select_for_update().filter(username=username).first()
+            if user is None:
+                User().set_password(password)
+                failure = 'بيانات الاعتماد غير صحيحة'
+            elif not user.check_password(password):
                 user.increment_failed_attempts()
-            # 401, not 400 — DRF's AuthenticationFailed carries the right
-            # WWW-Authenticate semantics and is handled by the default
-            # exception handler, which our custom handler then re-envelopes.
-            raise AuthenticationFailed('بيانات الاعتماد غير صحيحة')
-
-        if user.is_locked():
-            raise AuthenticationFailed('الحساب مقفل')
-
-        if not user.is_active:
-            raise AuthenticationFailed('الحساب معطل')
-
-        # Reset failed attempts and set last_login in one save
-        user.failed_login_attempts = 0
-        user.locked_until = None
-        user.last_login = timezone.now()
-        user.save(update_fields=['failed_login_attempts', 'locked_until', 'last_login'])
-
-        login(request, user)
-
-        # Store login time for session invalidation checks
-        request.session['login_time'] = timezone.now().isoformat()
-
-        if not remember:
-            request.session.set_expiry(0)
-        else:
-            request.session.set_expiry(86400 * 30)
-
+                failure = 'بيانات الاعتماد غير صحيحة'
+            elif user.is_locked():
+                failure = 'الحساب مقفل'
+            elif not user.is_active:
+                failure = 'الحساب معطل'
+            else:
+                user.failed_login_attempts = 0
+                user.locked_until = None
+                user.last_login = timezone.now()
+                user.save(update_fields=['failed_login_attempts', 'locked_until', 'last_login'])
+                login(request, user)
+                request.session['login_time'] = timezone.now().isoformat()
+                request.session.set_expiry(86400 * 30 if remember else 0)
+        # Failed-attempt bookkeeping must commit before raising the API error.
+        if failure:
+            raise AuthenticationFailed(failure)
         return user
 
     def logout(self, request):

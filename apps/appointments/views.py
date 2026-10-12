@@ -1,3 +1,4 @@
+from django.conf import settings
 from core.mutation import request_version
 # backend/apps/appointments/views.py
 from rest_framework import viewsets, permissions, status
@@ -192,7 +193,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     def availability(self, request):
         doctor_id = request.query_params.get('doctor_id')
         date_str = request.query_params.get('date')
-        duration_raw = request.query_params.get('duration', 30)
+        duration_raw = request.query_params.get('duration', settings.DEFAULT_APPOINTMENT_DURATION)
         if not doctor_id or not date_str:
             return error_response(400, 'doctor_id and date required', {})
         # Item #5: guard parsing of doctor_id, duration, and date.
@@ -284,11 +285,13 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         if not patient_obj:
             return error_response(404, 'المريض غير موجود أو غير مصرح', {})
 
-        next_apt = Appointment.objects.filter(
+        from django.db.models import Q
+        now = timezone.localtime()
+        next_apt = self.service.get_accessible_appointments(request.user).filter(
             patient_id=patient_id_int,
             status__in=['scheduled', 'confirmed'],
-            appointment_date__gte=timezone.localdate(),
-        ).order_by('appointment_date', 'appointment_time').first()
+        ).filter(Q(appointment_date__gt=now.date()) |
+            Q(appointment_date=now.date(), appointment_time__gte=now.time().replace(tzinfo=None))).order_by('appointment_date', 'appointment_time', 'pk').first()
         if next_apt:
             return Response({'data': {'date': next_apt.appointment_date, 'time': next_apt.appointment_time}})
         return Response({'data': {'date': None}})

@@ -25,7 +25,7 @@
 | `WORK_START_HOUR/MINUTE`, `WORK_END_HOUR/MINUTE` | `8/0`, `23/30`; scheduling bounds. |
 | `DEFAULT_APPOINTMENT_DURATION`, `MAX_APPOINTMENTS_PER_VIEW` | `30` minutes, `500` rows. |
 | `MAX_BULK_IMPORT_SIZE`, `MAX_ATTACHMENT_SIZE`, `MAX_CONTENT_LENGTH` | `200`, `10`, `210` MB; last bounds both file/data memory limits. Proxy upload limit must accommodate it. |
-| `SCHEDULER_INTERVAL_HOURS`, `BACKUP_CHECK_INTERVAL_HOURS` | `2`, `6`; scheduler/settings declarations. `auto_backup` itself creates a backup on every invocation. |
+| `SCHEDULER_INTERVAL_HOURS`, `BACKUP_CHECK_INTERVAL_HOURS` | `2`, `6`; scheduler caps reminder polling at half its shortest hour window and independently limits automatic backup cadence to the latter setting. Direct `auto_backup` creates a backup on every invocation. |
 | `BACKUP_SAFETY_DAYS`, `BACKUP_WEEKLY_DAYS`, `BACKUP_MONTHLY_DAYS` | `30`, `90`, `365`; [retention](../operations/guide.md). `BACKUP_WEEKDAY_MIN_DAYS` removed/unused. |
 | `NOTIFICATION_READ_RETENTION_DAYS`, `NOTIFICATION_UNREAD_RETENTION_DAYS` | `90`, `365` |
 | `ADMIN_PASSWORD`, `DOCTOR_PASSWORD`, `RECEPTIONIST_PASSWORD` | Optional seed inputs; blank generates random password printed once. |

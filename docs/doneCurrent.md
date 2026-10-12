@@ -1,5 +1,7 @@
 # Completed backend work and verification
 
+2026-10-12: completed and expanded the [consolidated models/logic review](reviews/models-and-logic-2026-10-12.md): model inventory, coverage by area, R1–R29 behavior/policy/failure findings, proposed corrections and design suggestions. Six entries require concurrency/injected-failure verification. AST parsing passed for 173 production Python files; standalone scale-step arithmetic confirmed the relative-tolerance edge case. Review only; no production fixes, test-suite/migration work, builds or clinic-data access. Spreadsheet probe unavailable; earlier runtime outcomes below were not repeated.
+
 Recorded verification: 2026-10-11; documentation organization checked separately, without rerunning application tests.
 
 | Completed area | Outcome / record |

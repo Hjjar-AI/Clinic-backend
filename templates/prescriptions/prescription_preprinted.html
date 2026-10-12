@@ -42,7 +42,7 @@ h2 { font-size: 9pt; margin: 0 0 2mm; }
       <div class="instructions">{{ medication.instructions }}</div>
     </div>{% empty %}<p>لا توجد أدوية مسجلة</p>{% endfor %}
   </div>
-  <div class="page-identification">ملف <bdi dir="ltr">{{ prescription.patient_number|default:prescription.patient_id }}</bdi> · زيارة {{ prescription.visit_id }} · صفحة {{ forloop.counter }} من {{ sheets|length }}</div>
+  <div class="page-identification">ملف <bdi dir="ltr">{{ prescription.patient_number|default:prescription.patient_id }}</bdi> · زيارة <bdi dir="ltr">{{ prescription.visit_id }}</bdi> · صفحة <bdi dir="ltr">{{ forloop.counter }} / {{ sheets|length }}</bdi></div>
   <div class="signatures"><img src="{{ prescription.signature_data }}" alt="">{% if prescription.stamp_data %}<img src="{{ prescription.stamp_data }}" alt="">{% endif %}</div>
   <div class="date numeric">{{ prescription.issue_date|default:prescription.visit_date }}</div>
 </section>{% endfor %}

@@ -188,7 +188,7 @@ class PrintAppearanceTests(SimpleTestCase):
                 self.assertEqual(len(page.get_images()), 1, 'Only the signature image belongs in the PDF')
                 self.assertIn('12/10/2026', page.get_text())
                 self.assertIn('FILE-SYNTH-123', page.get_text())
-                self.assertIn(f'صفحة {page.number + 1} من {len(document)}', page.get_text())
+                self.assertTrue(page.search_for(f'{page.number + 1} / {len(document)}'))
                 for word in page.get_text('words'):
                     if word[4].startswith('RX'):
                         self.assertLess(word[3], page.rect.height * .75)

@@ -50,6 +50,8 @@ Visit owns working encounter narrative, diagnoses/medications/labs/scales and at
 
 `IssuedDocument` retains exact PDF/checksum/revision/actor/snapshot/signature/stamp; prescription/referral require final/locked signed revision and block unsigned amendment issuance. Final persistence locks parent/visit, checks scope, visit/revision and preview patient version. History GET `/visits/{id}/revisions/` and `issued-documents/` is read-only. General patient/visit exports read current facts; working copies are labelled unapproved and suppress old signing metadata. Clinical unknowns remain distinct from false/zero: care setting and unknown/voluntary/involuntary `care_basis` are separate.
 
+Optional prescription POST `print_options` selects `mode: blank/preprinted`, `width_mm` (80–216), `height_mm` (120–350), and `offset_x_mm`/`offset_y_mm` (−5…5, positive right/down); finite values have at most two decimals. A6 (105×148) is the UI/default-options size; omitted options retain the legacy A4 API renderer. Blank offsets normalize to zero. The issued snapshot retains normalized options and issue date alongside exact PDF bytes. Preprinted output excludes the reference artwork, repeats patient fields/signature/date on additional sheets, and rejects fields/instructions too large to fit; it never silently truncates them. Current address is bound by the preview patient version.
+
 | Area / source | Current policy |
 | --- | --- |
 | Appointments | Active doctor/admin under locked eligibility; overlapping intervals/working hours validated, configured default duration, completed booking cannot move. Reopen/reschedule rechecks occupancy/eligibility; next shortcut uses authorized schedule and future local time. Historical inactive-clinician appointments retained. |

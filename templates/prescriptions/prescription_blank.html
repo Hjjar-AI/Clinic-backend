@@ -11,18 +11,18 @@ h2 { font-size: 10pt; margin: 4mm 0 2mm; break-after: avoid; }
 .meta { margin: 3mm 0; }
 .muted { color: #475569; font-size: 7pt; }
 .medication { border-top: 1px solid #cbd5e1; padding-top: 2mm; margin-bottom: 3mm; }
-.medication strong { break-after: avoid; }
-.instructions { white-space: pre-wrap; }
+.medication-heading, .dosage { break-after: avoid; }
+.instructions { white-space: pre-wrap; orphans: 2; widows: 2; }
 .numeric { direction: ltr; unicode-bidi: isolate; }
 .signatures { margin-top: 5mm; break-inside: avoid; display: flex; gap: 4mm; }
 .signature-box { width: 32mm; text-align: center; }
 .signature-box img { max-width: 30mm; max-height: 18mm; display: block; margin: 1mm auto; }
 </style></head><body>
-<div class="running-header">وصفة طبية · {{ prescription.patient_name }} · زيارة #{{ prescription.visit_id }}</div>
+<div class="running-header">{{ prescription.patient_name }} · ملف <bdi dir="ltr">{{ prescription.patient_number|default:prescription.patient_id }}</bdi> · زيارة #{{ prescription.visit_id }}</div>
 <header><h1>{{ clinic.name }}</h1><div class="muted">{{ clinic.address }} · <bdi dir="ltr">{{ clinic.phone }}</bdi></div></header>
 <section class="meta">
 <div><strong>المريض:</strong> {{ prescription.patient_name }}</div>
-<div><strong>رقم المريض:</strong> {{ prescription.patient_id }} · <strong>العمر:</strong> {{ prescription.patient_age }} · {{ prescription.patient_gender }}</div>
+<div><strong>رقم الملف:</strong> <bdi dir="ltr">{{ prescription.patient_number|default:prescription.patient_id }}</bdi> · <strong>العمر:</strong> {{ prescription.patient_age }} · {{ prescription.patient_gender }}</div>
 <div><strong>الهوية:</strong> <bdi dir="ltr">{{ prescription.patient_national_id }}</bdi></div>
 <div><strong>تاريخ الزيارة:</strong> <bdi dir="ltr">{{ prescription.visit_date }}</bdi></div>
 <div><strong>الطبيب:</strong> {{ prescription.doctor_name }}</div>
@@ -30,8 +30,8 @@ h2 { font-size: 10pt; margin: 4mm 0 2mm; break-after: avoid; }
 {% if prescription.diagnoses %}<h2>التشخيصات</h2>{% for diagnosis in prescription.diagnoses %}<div>{{ diagnosis.arabic_name|default:diagnosis.name }}{% if diagnosis.code %} · {{ diagnosis.code }}{% endif %}</div>{% endfor %}{% endif %}
 <h2>الأدوية والتعليمات</h2>
 {% for medication in prescription.medications %}<article class="medication">
-<strong>{{ medication.name }}</strong>{% if medication.brand %} · {{ medication.brand }}{% endif %}
-<div>الجرعة: <bdi dir="ltr">{{ medication.dosage }}</bdi></div>
+<div class="medication-heading"><strong>{{ medication.name }}</strong>{% if medication.brand %} · {{ medication.brand }}{% endif %}</div>
+<div class="dosage">الجرعة: <bdi dir="ltr">{{ medication.dosage }}</bdi></div>
 <div class="instructions">{{ medication.instructions }}</div>
 </article>{% empty %}<p>لا توجد أدوية مسجلة</p>{% endfor %}
 <section class="signatures"><div class="signature-box">توقيع الطبيب<img src="{{ prescription.signature_data }}" alt="توقيع الطبيب"></div>{% if prescription.stamp_data %}<div class="signature-box">الختم<img src="{{ prescription.stamp_data }}" alt="الختم"></div>{% endif %}</section>

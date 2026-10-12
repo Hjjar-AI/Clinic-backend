@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+@page { size: {{ paper.width }}mm {{ paper.height }}mm; margin: 0; }
+body { margin: 0; font-family: "Clinic Arabic", "Clinic Latin", sans-serif; color: #000; }
+.title { position: absolute; top: 6mm; left: 8mm; width: {{ paper.content_width }}mm; font-size: 9pt; }
+.details { font-size: 6pt; }
+.marker { position: absolute; font-size: 6pt; line-height: 1; }
+.marker svg { position: absolute; left: -1.5mm; top: -1.5mm; width: 3mm; height: 3mm; }
+.marker span { display: block; margin-top: 1mm; margin-left: 2mm; }
+.ruler { position: absolute; left: 10mm; top: 88%; direction: ltr; }
+.ruler svg { width: 50mm; height: 6mm; overflow: visible; }
+.ruler p { font-size: 6pt; margin: 1mm 0; }
+</style></head><body>
+<div class="title">ورقة معايرة — ليست وصفة طبية
+<div class="details"><bdi dir="ltr">{{ paper.width }} × {{ paper.height }} mm · X={{ options.offset_x_mm }} mm · Y={{ options.offset_y_mm }} mm</bdi></div>
+<div class="details">اطبع بالحجم الفعلي 100%. الموجب: إلى اليمين / الأسفل.</div></div>
+{% for marker in markers %}<div class="marker" style="left: {{ marker.x }}mm; top: {{ marker.y }}mm;">
+<svg viewBox="0 0 3 3" xmlns="http://www.w3.org/2000/svg"><path d="M0 1.5H3 M1.5 0V3" fill="none" stroke="black" stroke-width=".15" /></svg><span>{{ marker.label }}</span></div>{% endfor %}
+<div class="ruler"><svg viewBox="0 0 50 6" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 1H50" stroke="black" stroke-width=".15" />
+{% for tick in ticks %}<path d="M{{ tick }} 0V3" stroke="black" stroke-width=".15" />{% endfor %}
+</svg><p>يجب أن يقيس الخط 50 مم. اضبط نسبة الطباعة أولاً، ثم الإزاحة.</p></div>
+</body></html>

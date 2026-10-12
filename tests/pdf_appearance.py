@@ -19,6 +19,9 @@ django.setup()
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 from core.pdf_utils import render_pdf_from_html
+from apps.prescriptions.services import PrescriptionService
+from apps.prescriptions.printing import normalize_print_options
+from django.core.exceptions import ValidationError
 import pymupdf
 from fontTools.ttLib import TTFont
 
@@ -26,6 +29,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, default=Path('/tmp/clinic-pdf-review'))
 parser.add_argument('--downloads', type=Path)
 parser.add_argument('--projects', default='desktop,tablet,mobile')
+parser.add_argument('--kinds', default='prescription,referral,patient,visit,invoice,print-referral')
 options, unittest_args = parser.parse_known_args()
 options.output.mkdir(parents=True, exist_ok=True)
 
@@ -70,7 +74,7 @@ def contexts():
 
 
 class PrintAppearanceTests(SimpleTestCase):
-    def inspect(self, name, pdf, multipage=True):
+    def inspect(self, name, pdf, multipage=True, size_mm=(210, 297)):
         target = options.output / f'{name}.pdf'
         target.write_bytes(pdf)
         pages = []
@@ -78,8 +82,8 @@ class PrintAppearanceTests(SimpleTestCase):
             if multipage:
                 self.assertGreater(len(document), 1, name)
             for index, page in enumerate(document):
-                self.assertAlmostEqual(page.rect.width, 595.28, delta=1)
-                self.assertAlmostEqual(page.rect.height, 841.89, delta=1)
+                self.assertAlmostEqual(page.rect.width, size_mm[0] * 72 / 25.4, delta=1)
+                self.assertAlmostEqual(page.rect.height, size_mm[1] * 72 / 25.4, delta=1)
                 words = page.get_text('words')
                 self.assertFalse(any(ord(char) < 32 and char not in '\t\r\n' for char in page.get_text()), f'{name}: corrupt text mapping')
                 self.assertTrue(words, f'{name} page {index + 1} is blank')
@@ -150,17 +154,74 @@ class PrintAppearanceTests(SimpleTestCase):
     def test_patient_report_long_visits(self):
         self.render('patient')
 
+    def paper_snapshot(self):
+        prescription = contexts()['prescription'][1]['prescription']
+        return {**prescription, 'patient_name': 'مريض اصطناعي', 'patient_address': 'عنوان اصطناعي',
+                'patient_national_id': 'SYNTH-123', 'issue_date': '12/10/2026',
+                'clinic': {'clinic_name': clinic['name'], 'clinic_address': clinic['address'], 'clinic_phone': clinic['phone']}}
+
+    def paper_pdf(self, snapshot, **paper):
+        return PrescriptionService().generate_prescription_pdf(
+            {**snapshot, 'print_options': normalize_print_options(paper)}, snapshot['signature_data'])
+
+    def test_a6_blank_preserves_all_medications_and_long_instruction_tail(self):
+        snapshot = self.paper_snapshot()
+        snapshot['medications'] = [*snapshot['medications'], {'name': 'Long instruction', 'dosage': '10 mg', 'instructions': MIXED * 100 + 'END-OF-INSTRUCTION'}]
+        pages = self.inspect('blank-a6', self.paper_pdf(snapshot), size_mm=(105, 148))
+        for index in range(45):
+            self.assertEqual(sum(f'RX{index:03d}' in text for text in pages), 1)
+        self.assertEqual(sum('END-OF-INSTRUCTION' in text for text in pages), 1)
+        for text in pages:
+            if 'RX' in text:
+                self.assertIn('10 mg', text, 'Medication headings must not be orphaned')
+
+    def test_preprinted_paginated_summaries_match_body_without_stationery_images(self):
+        snapshot = self.paper_snapshot()
+        snapshot['medications'] = [{'name': f'RX{i:03d}', 'dosage': '10 mg', 'instructions': ARABIC} for i in range(10)]
+        pdf = self.paper_pdf(snapshot, mode='preprinted')
+        pages = self.inspect('preprinted-a6', pdf, size_mm=(105, 148))
+        for index in range(10):
+            self.assertEqual(sum(text.count(f'RX{index:03d}') for text in pages), 2)
+            self.assertEqual(sum(f'RX{index:03d}' in text for text in pages), 1)
+        with pymupdf.open(stream=pdf, filetype='pdf') as document:
+            for page in document:
+                self.assertEqual(len(page.get_images()), 1, 'Only the signature image belongs in the PDF')
+                self.assertIn('12/10/2026', page.get_text())
+                for word in page.get_text('words'):
+                    if word[4].startswith('RX'):
+                        self.assertLess(word[3], page.rect.height * .75)
+
+    def test_custom_paper_offsets_move_identity_by_exact_millimetres(self):
+        snapshot = {**self.paper_snapshot(), 'medications': []}
+        base = self.paper_pdf(snapshot, mode='preprinted', height_mm=198)
+        shifted = self.paper_pdf(snapshot, mode='preprinted', height_mm=198, offset_x_mm=2, offset_y_mm=1)
+        self.inspect('preprinted-custom', shifted, multipage=False, size_mm=(105, 198))
+        with pymupdf.open(stream=base, filetype='pdf') as original, pymupdf.open(stream=shifted, filetype='pdf') as aligned:
+            first = original[0].search_for('SYNTH-123')[0]
+            second = aligned[0].search_for('SYNTH-123')[0]
+            self.assertAlmostEqual(second.x0 - first.x0, 2 * 72 / 25.4, delta=.01)
+            self.assertAlmostEqual(second.y0 - first.y0, 72 / 25.4, delta=.01)
+
+    def test_preprinted_rejects_oversize_instructions_and_patient_fields(self):
+        snapshot = self.paper_snapshot()
+        snapshot['medications'] = [{'name': 'RX', 'dosage': '10 mg', 'instructions': MIXED * 100}]
+        with self.assertRaises(ValidationError):
+            self.paper_pdf(snapshot, mode='preprinted')
+        with self.assertRaises(ValidationError):
+            self.paper_pdf({**snapshot, 'medications': [], 'patient_name': ARABIC * 10}, mode='preprinted')
+
     def test_actual_browser_downloads(self):
         if options.downloads is None:
             self.skipTest('Pass --downloads after the browser run to inspect actual issued/exported documents.')
         pdfs = sorted(options.downloads.glob('*.pdf'))
         self.assertTrue(pdfs, 'No browser PDFs found')
         for project in options.projects.split(','):
-            for kind in ('prescription', 'referral', 'patient', 'visit', 'invoice', 'print-referral'):
+            for kind in options.kinds.split(','):
                 self.assertTrue((options.downloads / f'{project}-{kind}.pdf').is_file(), f'Missing {project} {kind} browser PDF')
         for pdf in pdfs:
             with self.subTest(pdf=pdf.name):
-                self.inspect('download-' + pdf.stem, pdf.read_bytes(), multipage=False)
+                self.inspect('download-' + pdf.stem, pdf.read_bytes(), multipage=False,
+                             size_mm=(105, 148) if pdf.stem.endswith('-prescription') else (105, 198) if pdf.stem.endswith('-preprinted') else (210, 297))
 
 
 if __name__ == '__main__':

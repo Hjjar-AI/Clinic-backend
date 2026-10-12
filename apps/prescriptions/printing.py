@@ -33,7 +33,7 @@ def preprinted_geometry(options):
     return {
         'width': width, 'height': height, 'left': width * .07 + x,
         'content_width': width * .84, 'body_top': height * .385 + y,
-        'body_height': height * .36, 'name_left': width * .475 + x,
+        'body_height': height * .335, 'page_top': height * .733 + y, 'name_left': width * .475 + x,
         'value_width': width * .28, 'row_one': height * .202 + y,
         'row_two': height * .226 + y, 'field_height': height * .024,
         'summary_top': height * .269 + y, 'summary_width': width * .52,
@@ -80,9 +80,11 @@ def render_preprinted(prescription, options):
                 kind = element.get('data-kind')
                 if index is not None and kind in {'summary', 'body'}:
                     target = summaries if kind == 'summary' else bodies
-                    target[int(index)] = box.height + box.margin_top + box.margin_bottom
+                    target[int(index)] = target.get(int(index), 0) + box.height + box.margin_top + box.margin_bottom
         return fields, summaries, bodies
     fields, summaries, bodies = sizes(measured)
+    if set(fields) != {'name', 'age', 'identity', 'address'}:
+        raise ValidationError({'print_options': ['تعذر قياس خانات المريض بأمان؛ اختر الورق الفارغ']})
     px_per_mm = 96 / 25.4
     field_font = 6.5
     if any(height > geometry['field_height'] * px_per_mm + .5 for height in fields.values()):
@@ -109,3 +111,22 @@ def render_preprinted(prescription, options):
     if len(document.pages) != len(sheets):
         raise ValidationError({'print_options': ['تعذر توزيع المحتوى بأمان على الورق']})
     return document.write_pdf()
+
+
+def render_calibration(options):
+    from core.pdf_utils import render_pdf_from_html
+    geometry = preprinted_geometry(options)
+    markers = [
+        {'label': 'اسم المريض', 'x': geometry['name_left'], 'y': geometry['row_one']},
+        {'label': 'العمر', 'x': geometry['left'], 'y': geometry['row_one']},
+        {'label': 'الهوية', 'x': geometry['name_left'], 'y': geometry['row_two']},
+        {'label': 'العنوان', 'x': geometry['left'], 'y': geometry['row_two']},
+        {'label': 'الأدوية', 'x': geometry['left'], 'y': geometry['summary_top']},
+        {'label': 'التعليمات', 'x': geometry['left'], 'y': geometry['body_top']},
+        {'label': 'التوقيع', 'x': geometry['left'], 'y': geometry['signature_top']},
+        {'label': 'التاريخ', 'x': geometry['date_left'], 'y': geometry['date_top']},
+    ]
+    return render_pdf_from_html(render_to_string('prescriptions/calibration.html', {
+        'paper': geometry, 'options': options, 'markers': markers,
+        'ticks': list(range(0, 51, 10)),
+    }))

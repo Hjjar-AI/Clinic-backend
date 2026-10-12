@@ -20,7 +20,14 @@ h2 { font-size: 9pt; margin: 0 0 2mm; }
 .signatures { position: absolute; top: {{ paper.signature_top }}mm; left: {{ paper.left }}mm; display: flex; gap: 2mm; }
 .signatures img { max-width: {{ paper.signature_width }}mm; max-height: {{ paper.signature_height }}mm; object-fit: contain; }
 .date { position: absolute; top: {{ paper.date_top }}mm; left: {{ paper.date_left }}mm; width: {{ paper.date_width }}mm; font-size: 6.5pt; }
+.page-identification { position: absolute; top: {{ paper.page_top }}mm; left: {{ paper.left }}mm; width: {{ paper.content_width }}mm; font-size: 6pt; line-height: 1; }
 .numeric { direction: ltr; unicode-bidi: isolate; }
+{% if measurement %}
+/* Measure instructions in normal flow so oversized absolute content cannot
+   silently lose its continuation at the physical sheet boundary. */
+.sheet { height: auto; }
+.content { position: static; }
+{% endif %}
 </style></head><body>
 {% for medications in sheets %}<section class="sheet">
   <div class="field name" data-field="name">{{ prescription.patient_name }}</div>
@@ -35,6 +42,7 @@ h2 { font-size: 9pt; margin: 0 0 2mm; }
       <div class="instructions">{{ medication.instructions }}</div>
     </div>{% empty %}<p>لا توجد أدوية مسجلة</p>{% endfor %}
   </div>
+  <div class="page-identification">ملف <bdi dir="ltr">{{ prescription.patient_number|default:prescription.patient_id }}</bdi> · زيارة {{ prescription.visit_id }} · صفحة {{ forloop.counter }} من {{ sheets|length }}</div>
   <div class="signatures"><img src="{{ prescription.signature_data }}" alt="">{% if prescription.stamp_data %}<img src="{{ prescription.stamp_data }}" alt="">{% endif %}</div>
   <div class="date numeric">{{ prescription.issue_date|default:prescription.visit_date }}</div>
 </section>{% endfor %}

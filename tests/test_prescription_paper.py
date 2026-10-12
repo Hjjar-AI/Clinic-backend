@@ -46,16 +46,16 @@ class PrescriptionPaperIssuanceTests(ClinicTestCase):
         self.assertEqual(bytes(document.pdf_data), response.content)
         self.assertEqual(document.checksum, sha256(response.content).hexdigest())
         self.assertEqual(render.call_args.args[0]['issue_date'], document.snapshot['issue_date'])
-        self.assertEqual(document.visit_id, visit.pk)
+        self.assertEqual(document.revision.visit_id, visit.pk)
 
     def test_invalid_options_and_overflow_preserve_preview_and_do_not_issue(self):
         visit, payload = self.prepare()
         for options in [None, {'width_mm': 0}]:
             response = self.write('post', '/api/v1/prescription/generate/', {**payload, 'print_options': options})
-            self.assertEqual(response.status_code, 422, response.content)
+            self.assertEqual(response.status_code, 400, response.content)
         with patch('apps.prescriptions.printing.render_preprinted', side_effect=ValidationError('Synthetic overflow')):
             response = self.write('post', '/api/v1/prescription/generate/', {**payload, 'print_options': {'mode': 'preprinted'}})
-        self.assertEqual(response.status_code, 422, response.content)
+        self.assertEqual(response.status_code, 400, response.content)
         self.assertFalse(IssuedDocument.objects.exists())
         self.assertNotIn('print_options', PrescriptionService().get_preview(payload['preview_token'], self.admin.pk, visit))
 

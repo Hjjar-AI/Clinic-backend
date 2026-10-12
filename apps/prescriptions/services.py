@@ -44,6 +44,7 @@ class PrescriptionService:
             'visit_version': visit.version,
             'template_version': self.TEMPLATE_VERSION,
             'patient_id': patient.id,
+            'patient_number': revision.snapshot['patient'].get('patient_number') or patient.patient_number,
             'patient_name': revision.snapshot['patient']['name'],
             'patient_age': visit.visit_date.year - revision.snapshot['patient']['dob_year'] if revision.snapshot['patient']['dob_year'] else 'غير محدد',
             'patient_gender': revision.snapshot['patient']['gender'] or 'غير محدد',

@@ -63,3 +63,18 @@ class PrescriptionGenerateView(APIView):
             response['Content-Disposition'] = f'attachment; filename="prescription_{visit_id}.pdf"'
             return response
         return error_response(503, 'تعذر إنشاء ملف PDF؛ تحقق من إعدادات مولد المستندات وحاول مجدداً', {})
+
+
+class PrescriptionCalibrationView(APIView):
+    permission_classes = [IsAuthenticated, HasExportPdf]
+
+    def post(self, request):
+        from .printing import normalize_print_options, render_calibration
+        options = normalize_print_options(request.data.get('print_options', {}))
+        result = render_calibration(options)
+        if not isinstance(result, bytes):
+            return error_response(503, 'تعذر إنشاء ورقة المعايرة؛ حاول مجدداً', {})
+        response = HttpResponse(result, content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="prescription-calibration.pdf"'
+        response['Cache-Control'] = 'no-store'
+        return response

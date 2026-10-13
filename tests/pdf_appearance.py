@@ -20,6 +20,7 @@ from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 from core.pdf_utils import render_pdf_from_html
 from apps.prescriptions.services import PrescriptionService
+from apps.prescriptions.history import render_patient_instructions
 from apps.prescriptions.printing import normalize_print_options, render_calibration
 from django.core.exceptions import ValidationError
 import pymupdf
@@ -222,6 +223,30 @@ class PrintAppearanceTests(SimpleTestCase):
                     self.assertIn('ليست وصفة طبية', document[0].get_text())
                     self.assertNotIn('SYNTH', document[0].get_text())
                     self.assertTrue(any(abs(drawing['rect'].width - 50 * 72 / 25.4) < .1 for drawing in document[0].get_drawings()))
+
+    def test_patient_instructions_preserve_medication_text_and_long_tail(self):
+        snapshot = self.paper_snapshot()
+        snapshot['medications'] = [*snapshot['medications'], {'name': 'Long instructions', 'dosage': 'SYNTH-DOSE', 'instructions': MIXED * 100 + 'HANDOUT-END'}]
+        document = SimpleNamespace(snapshot=snapshot, pk=41, issued_at=django.utils.timezone.now(), revision=SimpleNamespace(number=2))
+        pdf = render_patient_instructions(document)
+        pages = self.inspect('patient-instructions', pdf)
+        for index in range(45):
+            self.assertEqual(sum(f'RX{index:03d}' in text for text in pages), 1)
+        self.assertEqual(sum('HANDOUT-END' in text for text in pages), 1)
+        self.assertTrue(any('SYNTH-DOSE' in text for text in pages))
+        for text in pages:
+            self.assertIn('FILE-SYNTH-123', text)
+        with pymupdf.open(stream=pdf, filetype='pdf') as rendered:
+            words = rendered[0].get_text('words')
+            unit = next(word for word in words if word[4] == 'mg')
+            self.assertTrue(any(word[4] == '10' and abs(word[1] - unit[1]) < 1 and word[0] < unit[0] for word in words), 'Dose number must precede its Latin unit visually')
+
+    def test_empty_handout_does_not_invent_medications(self):
+        document = SimpleNamespace(snapshot={**self.paper_snapshot(), 'medications': []}, pk=42, issued_at=django.utils.timezone.now(), revision=SimpleNamespace(number=1))
+        pages = self.inspect('empty-instructions', render_patient_instructions(document), multipage=False)
+        self.assertEqual(len(pages), 1)
+        self.assertNotIn('RX', pages[0])
+        self.assertIn('توجد أدوية', pages[0])
 
     def test_actual_browser_downloads(self):
         if options.downloads is None:

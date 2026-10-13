@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+@page { size: A4; margin: 17mm 14mm;
+ @top-center { content: element(running-header); }
+ @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 8pt; }
+}
+body { font-family: "Clinic Arabic", "Clinic Latin", sans-serif; font-size: 11pt; line-height: 1.6; color: #172033; overflow-wrap: anywhere; }
+.running-header { position: running(running-header); font-size: 8pt; }
+h1 { font-size: 18pt; margin: 0 0 3mm; }
+.clinic, .note { font-size: 9pt; }
+.meta { margin-block: 4mm; }
+.medication { border-top: 1px solid #b6c2d2; padding-top: 3mm; margin-top: 5mm; }
+h2 { font-size: 14pt; margin: 0 0 2mm; break-after: avoid; }
+.dose { break-after: avoid; }
+.instructions { white-space: pre-wrap; orphans: 2; widows: 2; }
+.note { margin-top: 5mm; }
+.numeric, bdi[dir="ltr"] { direction: ltr; unicode-bidi: isolate; }
+</style></head><body>
+<div class="running-header">{{ prescription.patient_name }} · ملف <bdi dir="ltr">{{ prescription.patient_number|default:prescription.patient_id }}</bdi> · وصفة محفوظة <bdi dir="ltr">#{{ document_id }}</bdi></div>
+<div class="clinic">{{ prescription.clinic.clinic_name }}</div>
+<h1>تعليمات الأدوية للمريض</h1>
+<div class="meta">
+<div><strong>الاسم:</strong> {{ prescription.patient_name }}</div>
+<div><strong>رقم الملف:</strong> <bdi dir="ltr">{{ prescription.patient_number|default:prescription.patient_id }}</bdi></div>
+<div><strong>تاريخ إصدار الوصفة:</strong> <bdi dir="ltr">{{ issued_at|date:"d/m/Y" }}</bdi></div>
+<div><strong>الطبيب:</strong> {{ prescription.doctor_name }}</div>
+<div><strong>الوصفة المحفوظة:</strong> <bdi dir="ltr">#{{ document_id }}</bdi> · نسخة الزيارة {{ revision_number }}</div>
+</div>
+<p class="note">تُنقل الجرعات والتعليمات كما سجلها الطبيب. إذا لم تُذكر أوقات الاستخدام أو مدته، اسأل الطبيب عن التفاصيل.</p>
+{% for medication in prescription.medications %}<section class="medication">
+<h2>{{ forloop.counter }}. {{ medication.name|default:"اسم الدواء غير مسجل" }}{% if medication.brand %} · {{ medication.brand }}{% endif %}</h2>
+<div class="dose"><strong>الجرعة المسجلة:</strong> <bdi dir="ltr" class="numeric">{{ medication.dosage|default:"غير مسجلة" }}</bdi></div>
+<div class="instructions"><strong>طريقة الاستخدام والمدة — النص المسجل:</strong>
+{{ medication.instructions|default:"لم تسجل تعليمات؛ اسأل الطبيب" }}</div>
+</section>{% empty %}<p>لا توجد أدوية في هذه الوصفة المحفوظة.</p>{% endfor %}
+<p class="note">هذه ورقة تعليمات مرافقة للوصفة المحفوظة، وليست وصفة طبية جديدة. لا تعرض تعديلات لاحقة على العلاج.</p>
+</body></html>

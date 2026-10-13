@@ -122,6 +122,9 @@ class VisitService:
         if status not in {'draft', 'final'}:
             raise ValidationError({'status': ['يجب إنشاء الزيارة كمسودة أو نهائية']})
         nested = self._nested(data)
+        if 'clinical_data' in data:
+            from .instruction_acknowledgement import stamp_instruction_acknowledgement
+            data['clinical_data'] = stamp_instruction_acknowledgement(data['clinical_data'], current_user)
         self._validate(data)
         visit = Visit(patient=patient, author=current_user, status=status,
                       **{key: value for key, value in data.items() if key in self.EDITABLE})
@@ -146,6 +149,9 @@ class VisitService:
         status = data.pop('status', visit.status)
         enforce_transition('visit', visit.status, status)
         nested = self._nested(data, visit)
+        if 'clinical_data' in data:
+            from .instruction_acknowledgement import stamp_instruction_acknowledgement
+            data['clinical_data'] = stamp_instruction_acknowledgement(data['clinical_data'], current_user, visit.clinical_data)
         old_follow_up = visit.follow_up_date
         for key, value in data.items():
             if key in self.EDITABLE:

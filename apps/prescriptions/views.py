@@ -6,7 +6,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from .services import PrescriptionService
 from apps.visits.models import Visit
-from core.permissions import CanAccessVisit, HasExportPdf
+from core.permissions import CanAccessVisit, HasExportPdf, HasViewVisits
 from core.exceptions import error_response
 from core.signals import log_action
 
@@ -77,4 +77,50 @@ class PrescriptionCalibrationView(APIView):
         response = HttpResponse(result, content_type='application/pdf')
         response['Content-Disposition'] = 'attachment; filename="prescription-calibration.pdf"'
         response['Cache-Control'] = 'no-store'
+        return response
+
+
+class PrescriptionHistoryView(APIView):
+    permission_classes = [IsAuthenticated, HasViewVisits, HasExportPdf]
+
+    def get(self, request, patient_id):
+        from .history import prescription_history
+        response = Response({'data': prescription_history(request.user, patient_id, request.query_params)})
+        response['Cache-Control'] = 'no-store'
+        return response
+
+
+class ClinicalHandoverView(APIView):
+    permission_classes = [IsAuthenticated, HasViewVisits, HasExportPdf]
+
+    def get(self, request, visit_id=None, pdf=False, patient_id=None):
+        from .handover import approved_handover, handover_pdf, latest_approved_handover
+        data = latest_approved_handover(request.user, patient_id, request.query_params.get('exclude_visit')) if patient_id else approved_handover(request.user, visit_id)
+        if pdf:
+            result = handover_pdf(data)
+            if not isinstance(result, bytes):
+                return error_response(503, 'تعذر إنشاء ملخص التسليم', {})
+            response = HttpResponse(result, content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="handover_{visit_id}_revision_{data["revision_number"]}.pdf"'
+        else:
+            response = Response({'data': data})
+        response['Cache-Control'] = 'no-store'
+        return response
+
+
+class PrescriptionDocumentView(APIView):
+    permission_classes = [IsAuthenticated, HasViewVisits, HasExportPdf]
+
+    def get(self, request, document_id, instructions=False):
+        from .history import prescription_document, render_patient_instructions
+        document = prescription_document(request.user, document_id)
+        pdf = render_patient_instructions(document) if instructions else bytes(document.pdf_data)
+        if not isinstance(pdf, bytes):
+            return error_response(503, 'تعذر إنشاء تعليمات المريض؛ حاول مجدداً', {})
+        response = HttpResponse(pdf, content_type='application/pdf')
+        suffix = 'instructions' if instructions else 'prescription'
+        response['Content-Disposition'] = f'attachment; filename="{suffix}_{document.pk}.pdf"'
+        response['Cache-Control'] = 'no-store'
+        if not instructions:
+            response['X-Document-Checksum'] = document.checksum
         return response

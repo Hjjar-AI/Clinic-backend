@@ -21,6 +21,7 @@ from django.test import SimpleTestCase
 from core.pdf_utils import render_pdf_from_html
 from apps.prescriptions.services import PrescriptionService
 from apps.prescriptions.history import render_patient_instructions
+from apps.prescriptions.handover import handover_pdf
 from apps.prescriptions.printing import normalize_print_options, render_calibration
 from django.core.exceptions import ValidationError
 import pymupdf
@@ -247,6 +248,22 @@ class PrintAppearanceTests(SimpleTestCase):
         self.assertEqual(len(pages), 1)
         self.assertNotIn('RX', pages[0])
         self.assertIn('توجد أدوية', pages[0])
+
+    def test_approved_handover_keeps_identity_and_clinical_text_across_pages(self):
+        snapshot = self.paper_snapshot()
+        data = {'visit_id': 4, 'revision_number': 2, 'signed_at': django.utils.timezone.now(),
+            'patient': {'id': 1, 'name': snapshot['patient_name'], 'patient_number': 'FILE-HANDOVER'},
+            'clinician': {'name': 'طبيب اصطناعي'}, 'longitudinal': {'allergy_status': 'unknown'},
+            'diagnoses': [], 'medications': [{**row, 'schedule': row['instructions']} for row in snapshot['medications']],
+            'fields': {'main_complaints': ARABIC, 'treatment_text': MIXED * 100 + 'HANDOVER-TAIL',
+                'firearm_access': False, 'clinical_data': {'mse': ARABIC, 'instruction_acknowledgement': {
+                    'explained_at': django.utils.timezone.now().isoformat(), 'recipient': 'patient', 'clarification_needed': False, 'notes': 'شرح اصطناعي'}}}}
+        pages = self.inspect('clinical-handover', handover_pdf(data))
+        self.assertTrue(any('HANDOVER-TAIL' in page for page in pages))
+        for page in pages:
+            self.assertIn('FILE-HANDOVER', page)
+        for index in range(45):
+            self.assertEqual(sum(f'RX{index:03d}' in page for page in pages), 1)
 
     def test_actual_browser_downloads(self):
         if options.downloads is None:

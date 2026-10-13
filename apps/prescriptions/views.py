@@ -91,7 +91,11 @@ class PrescriptionHistoryView(APIView):
 
 
 class ClinicalHandoverView(APIView):
-    permission_classes = [IsAuthenticated, HasViewVisits, HasExportPdf]
+    permission_classes = [IsAuthenticated, HasViewVisits]
+
+    def get_permissions(self):
+        permissions = super().get_permissions()
+        return [*permissions, HasExportPdf()] if self.kwargs.get('pdf') else permissions
 
     def get(self, request, visit_id=None, pdf=False, patient_id=None):
         from .handover import approved_handover, handover_pdf, latest_approved_handover

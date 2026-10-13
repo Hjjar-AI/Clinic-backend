@@ -1,15 +1,17 @@
 <!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
-@page { size: A4; margin: 16mm; @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 8pt; } }
+@page { size: A4; margin: 16mm; @top-center { content: element(running-header); } @bottom-center { content: "صفحة " counter(page) " من " counter(pages); font-size: 8pt; } }
 body { font-family: "Clinic Arabic", "Clinic Latin", sans-serif; font-size: 11pt; line-height: 1.6; color: #172033; overflow-wrap: anywhere; }
 h1 { font-size: 18pt; } h2 { font-size: 13pt; margin: 5mm 0 2mm; break-after: avoid; }
 .text { white-space: pre-wrap; } .medicine { margin-block: 3mm; } bdi[dir=ltr] { direction:ltr; unicode-bidi:isolate; }
+.running-header { position: running(running-header); font-size: 8pt; }
 </style></head><body>
+<div class="running-header">{{ data.patient.name }} · ملف <bdi dir="ltr">{{ data.patient.patient_number|default:data.patient.id }}</bdi> · نسخة معتمدة {{ data.revision_number }}</div>
 <h1>ملخص تسليم سريري</h1><p>المصدر: نسخة معتمدة {{ data.revision_number }} · زيارة {{ data.visit_id }} · توقيع <bdi dir="ltr">{{ data.signed_at|date:"d/m/Y H:i" }}</bdi></p>
 <p>يعرض السجل المعتمد في هذا التاريخ؛ لا يشمل مسودة التعديل أو التغييرات اللاحقة.</p>
 <p><strong>المريض:</strong> {{ data.patient.name }} · ملف <bdi dir="ltr">{{ data.patient.patient_number|default:data.patient.id }}</bdi></p>
 <p><strong>الطبيب المعتمد:</strong> {{ data.clinician.name }}</p>
 <h2>الشكوى والقصة</h2><div class="text">{{ data.fields.main_complaints }}</div><div class="text">{{ data.fields.history_presenting_complaint }}</div>
-<h2>الحساسيات المسجلة</h2><p>حالة التوثيق: {{ data.longitudinal.allergy_status|default:"غير معروف" }}</p>
+<h2>الحساسيات المسجلة</h2><p>حالة التوثيق: {{ allergy_label }}</p>
 {% for allergy in data.longitudinal.allergies %}<p>{{ allergy.substance }} · {{ allergy.reaction }}</p>{% endfor %}
 <h2>الفحص والمخاطر</h2><div class="text">{{ data.fields.clinical_data.mse|default:"غير مسجل" }}</div>
 <p>خطر الانتحار: {{ suicide_label }} · خطر العنف: {{ violence_label }} · الوصول إلى سلاح: {% if data.fields.firearm_access == None %}غير مقيم{% elif data.fields.firearm_access %}نعم{% else %}لا{% endif %}</p><div class="text">{{ data.fields.clinical_data.risk_notes }}</div>
@@ -17,5 +19,5 @@ h1 { font-size: 18pt; } h2 { font-size: 13pt; margin: 5mm 0 2mm; break-after: av
 <h2>الأدوية والتعليمات</h2>{% for medication in data.medications %}<div class="medicine"><strong>{{ medication.name }}</strong> · <bdi dir="ltr">{{ medication.dosage }}</bdi><div class="text">{{ medication.schedule }}</div></div>{% empty %}<p>لا توجد أدوية في النسخة المعتمدة</p>{% endfor %}
 <h2>الخطة والمتابعة</h2><div class="text">{{ data.fields.treatment_text|default:"غير مسجلة" }}</div><p>المتابعة: <bdi dir="ltr">{{ data.fields.follow_up_date|default:"غير مسجلة" }}</bdi></p>
 {% if data.lab_values %}<h2>التحاليل المسجلة</h2>{% for lab in data.lab_values %}<p>{{ lab.name }}: <bdi dir="ltr">{{ lab.value }} {{ lab.unit }} · {{ lab.date }}</bdi> · {{ lab.reference_range }} · {{ lab.status }}</p>{% endfor %}{% endif %}
-{% if data.fields.clinical_data.instruction_acknowledgement %}<h2>شرح التعليمات</h2><p>وقت الشرح: <bdi dir="ltr">{{ ack_at|date:"d/m/Y H:i" }}</bdi> · المتلقي: {{ recipient_label }} {{ data.fields.clinical_data.instruction_acknowledgement.recipient_name }}</p><p>الحاجة إلى توضيح إضافي: {% if data.fields.clinical_data.instruction_acknowledgement.clarification_needed == None %}غير مسجلة{% elif data.fields.clinical_data.instruction_acknowledgement.clarification_needed %}نعم{% else %}لا{% endif %}</p><div class="text">{{ data.fields.clinical_data.instruction_acknowledgement.notes }}</div>{% endif %}
+{% if ack_at %}<h2>شرح التعليمات</h2><p>وقت الشرح: <bdi dir="ltr">{{ ack_at|date:"d/m/Y H:i" }}</bdi> · المتلقي: {{ recipient_label }} {{ data.fields.clinical_data.instruction_acknowledgement.recipient_name }}</p><p>الحاجة إلى توضيح إضافي: {% if data.fields.clinical_data.instruction_acknowledgement.clarification_needed == None %}غير مسجلة{% elif data.fields.clinical_data.instruction_acknowledgement.clarification_needed %}نعم{% else %}لا{% endif %}</p><div class="text">{{ data.fields.clinical_data.instruction_acknowledgement.notes }}</div>{% endif %}
 </body></html>

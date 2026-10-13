@@ -64,7 +64,8 @@ class ClinicalWorkspaceTests(ClinicTestCase):
         self.api.force_login(self.other_doctor)
         self.assertEqual(self.api.get(path).status_code, 404)
         self.api.force_login(self.receptionist)
-        self.assertEqual(self.api.get(path).status_code, 403)
+        self.assertEqual(self.api.get(path).status_code, 404)
+        self.assertEqual(self.api.get(f'/api/v1/prescription/visit/{visit.pk}/handover/pdf/').status_code, 403)
         self.api.force_login(self.admin)
         with patch('apps.prescriptions.handover.render_pdf_from_html', return_value=None):
             self.assertEqual(self.api.get(f'/api/v1/prescription/visit/{visit.pk}/handover/pdf/').status_code, 503)

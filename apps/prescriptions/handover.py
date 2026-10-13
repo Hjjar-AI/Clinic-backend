@@ -28,7 +28,7 @@ def latest_approved_handover(actor, patient_id, exclude_visit=None):
     patient = get_object_or_404(accessible_patients(actor, True), pk=patient_id)
     revisions = VisitRevision.objects.filter(visit__in=accessible_visits(actor), visit__patient=patient)
     if exclude_visit:
-        if not str(exclude_visit).isdecimal():
+        if not str(exclude_visit).isdecimal() or len(str(exclude_visit)) > 9 or int(exclude_visit) < 1:
             raise ValidationError({'exclude_visit': ['معرف غير صالح']})
         revisions = revisions.exclude(visit_id=exclude_visit)
     revision = revisions.order_by('-visit__visit_date', '-signed_at', '-pk').first()
@@ -39,9 +39,17 @@ def handover_pdf(data):
     from django.utils.dateparse import parse_datetime
     labels = {'High': 'مرتفع', 'Moderate': 'متوسط', 'Low': 'منخفض'}
     ack = (data['fields'].get('clinical_data') or {}).get('instruction_acknowledgement') or {}
+    if not isinstance(ack, dict):
+        ack = {}
+    try:
+        ack_at = parse_datetime(ack['explained_at']) if isinstance(ack.get('explained_at'), str) else None
+    except ValueError:
+        ack_at = None
     return render_pdf_from_html(render_to_string('prescriptions/handover.html', {
         'data': data, 'suicide_label': labels.get(data['fields'].get('suicide_risk_level'), 'غير مقيم'),
         'violence_label': labels.get(data['fields'].get('violence_risk_level'), 'غير مقيم'),
         'recipient_label': {'patient': 'المريض', 'representative': 'المرافق / الممثل', 'both': 'كلاهما'}.get(ack.get('recipient'), 'غير مسجل'),
-        'ack_at': parse_datetime(ack['explained_at']) if ack.get('explained_at') else None,
+        'ack_at': ack_at,
+        'allergy_label': {'unknown': 'غير معروف', 'none_known': 'لا توجد حساسية معروفة',
+            'recorded': 'حساسيات مسجلة'}.get(data.get('longitudinal', {}).get('allergy_status'), 'غير معروف'),
     }))

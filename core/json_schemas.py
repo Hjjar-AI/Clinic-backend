@@ -103,7 +103,8 @@ def validate_preferences(value):
     object_schema(value, {'schema_version', 'density', 'splitView', 'progressive'}, 'preferences', maximum=4096)
     if type(value.get('schema_version', 1)) is not int or value.get('schema_version', 1) != 1:
         raise ValidationError({'preferences': ['إصدار غير مدعوم']})
-    if 'density' in value and value['density'] not in {'comfortable', 'compact'}:
+    if 'density' in value and (not isinstance(value['density'], str)
+                               or value['density'] not in {'comfortable', 'compact'}):
         raise ValidationError({'preferences': ['كثافة عرض غير صالحة']})
     for name in ('splitView', 'progressive'):
         if name in value and type(value[name]) is not bool:

@@ -103,6 +103,20 @@ class AuthenticationAPITests(ClinicTransactionTestCase):
 
 
 class VersionScopeAPITests(ClinicTestCase):
+    def test_preferences_density_type_errors_return_400_without_mutation(self):
+        url = f'/api/v1/auth/users/{self.doctor.pk}/'
+        for density in ([], {}, 1, False, None):
+            with self.subTest(density=density):
+                response = self.write('patch', url, {'preferences': {'density': density}, 'version': self.doctor.version})
+                self.assertEqual(response.status_code, 400, response.content)
+        self.doctor.refresh_from_db()
+        self.assertEqual(self.doctor.preferences, {})
+        self.assertEqual(self.doctor.version, 1)
+        response = self.write('patch', url, {'preferences': {'density': 'compact'}, 'version': self.doctor.version})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.doctor.refresh_from_db()
+        self.assertEqual(self.doctor.preferences, {'density': 'compact'})
+
     def test_patient_create_and_stale_patch_envelopes(self):
         response = self.write('post', '/api/v1/patients/', {'first_name': 'Synthetic', 'surname': 'Suite'})
         self.assertEqual(response.status_code, 201)

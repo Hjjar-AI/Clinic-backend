@@ -31,8 +31,8 @@ def render_pdf_from_html(html: str, base_url: str = None) -> bytes:
     Returns PDF bytes, or None on failure.
     """
     try:
-        from weasyprint import HTML, CSS
-        from weasyprint.text.fonts import FontConfiguration
+        from core.native_dependencies import pdf_libraries
+        HTML, CSS, FontConfiguration = pdf_libraries()
         # Set a default base_url to resolve static files (fonts, CSS).
         # The frontend is a sibling of the backend project root.
         if base_url is None:

@@ -13,7 +13,7 @@ from core.mutation import request_version
 def record_serializer(kind):
     model, fields = RECORDS[kind]
     metadata = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'is_active', 'retired_at', 'retirement_reason']
-    metadata += [name for name in ['verified_at', 'verified_by', 'completed_at', 'completed_by', 'legacy_visit_follow_up']
+    metadata += [name for name in ['verified_at', 'verified_by', 'completed_at', 'completed_by']
                  if any(field.name == name for field in model._meta.fields)]
     meta = type('Meta', (), {'model': model, 'fields': metadata + fields, 'read_only_fields': metadata})
     return type('PatientRecordSerializer', (serializers.ModelSerializer,), {'Meta': meta})

@@ -9,10 +9,7 @@ def normalize_optional_text(instance):
             setattr(instance, field.name, '')
 
 
-class TimeStampedModel(models.Model):
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
+class OptionalTextModel(models.Model):
     def save(self, *args, **kwargs):
         normalize_optional_text(self)
         return super().save(*args, **kwargs)
@@ -24,11 +21,33 @@ class TimeStampedModel(models.Model):
     class Meta:
         abstract = True
 
+
+class TimeStampedModel(OptionalTextModel):
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+
+class StoredFileMetadata(models.Model):
+    """Shared columns only; parents and upload permissions remain domain-owned."""
+    filename = models.CharField(max_length=255)
+    original_filename = models.CharField(max_length=255)
+    filepath = models.CharField(max_length=500)
+    file_size = models.PositiveBigIntegerField(null=True, blank=True)
+    checksum = models.CharField(max_length=64, blank=True, editable=False)
+    mime_type = models.CharField(max_length=100, blank=True, default='')
+
+    class Meta:
+        abstract = True
+
+
 class SoftDeleteManager(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(deleted_at__isnull=True, is_active=True)
 
-class SoftDeleteModel(models.Model):
+class SoftDeleteModel(OptionalTextModel):
     version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     deleted_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
@@ -41,14 +60,6 @@ class SoftDeleteModel(models.Model):
 
     class Meta:
         abstract = True
-
-    def save(self, *args, **kwargs):
-        normalize_optional_text(self)
-        return super().save(*args, **kwargs)
-
-    def clean_fields(self, exclude=None):
-        normalize_optional_text(self)
-        return super().clean_fields(exclude=exclude)
 
     def soft_delete(self, actor=None, reason=''):
         from .request_context import get_current_request
@@ -122,6 +133,14 @@ class IdempotencyOperation(models.Model):
 
 
 class ImmutableQuerySet(models.QuerySet):
+    def bulk_create(self, objs, *args, **kwargs):
+        from django.core.exceptions import ValidationError
+        # Positional arguments include batch_size, ignore_conflicts,
+        # update_conflicts. Plain bulk appends remain permitted.
+        if kwargs.get('update_conflicts') or (len(args) > 2 and args[2]):
+            raise ValidationError('Historical records are immutable')
+        return super().bulk_create(objs, *args, **kwargs)
+
     def update(self, **kwargs):
         from django.core.exceptions import ValidationError
         raise ValidationError('Historical records are immutable')

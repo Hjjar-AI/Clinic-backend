@@ -1,4 +1,5 @@
 from core.operation_gate import gated
+from core.file_inventory import CLINICAL_FILE_LABELS
 import io
 import json
 import hashlib
@@ -12,8 +13,7 @@ from django.core.files.base import ContentFile
 from django.core.management.color import no_style
 from django.core.exceptions import ValidationError
 from django.db import connection, transaction
-from django.db.models import Value
-from django.db.models.functions import Lower, Trim
+from apps.clinical.identity import MEDICATION_IDENTITY_FIELDS, catalog_identity_lookup
 from django.contrib.sessions.models import Session
 from django.utils import timezone
 from .backup_validation import BackupValidationService
@@ -118,7 +118,7 @@ class BackupRestoreService:
             raise ValueError('Backup record counts do not match inventory')
         for obj in objects:
             for field in obj.object._meta.fields:
-                if field.is_relation and field.many_to_one:
+                if field.is_relation and (field.many_to_one or field.one_to_one):
                     value = getattr(obj.object, field.attname)
                     if value is not None and (field.remote_field.model._meta.label_lower, value) not in identifiers:
                         raise ValueError('Backup contains a dangling reference')
@@ -126,8 +126,20 @@ class BackupRestoreService:
                 related = obj.object._meta.get_field(name).remote_field.model._meta.label_lower
                 if any((related, value) not in identifiers for value in values):
                     raise ValueError('Backup contains a dangling membership')
+        inventory = {(obj.object._meta.label_lower, obj.object.pk): obj.object for obj in objects}
+        selected_follow_ups = set()
         for obj in objects:
-            if obj.object._meta.label_lower in {'patients.patientdocument', 'visits.visitattachment'}:
+            visit = obj.object
+            if visit._meta.label_lower != 'visits.visit' or visit.follow_up_id is None:
+                continue
+            follow_up = inventory[('patients.patientfollowup', visit.follow_up_id)]
+            if (visit.follow_up_id in selected_follow_ups or not follow_up.is_active
+                    or follow_up.patient_id != visit.patient_id or follow_up.source_visit_id != visit.pk
+                    or follow_up.due_date < visit.visit_date):
+                raise ValueError('Backup contains an invalid visit follow-up plan')
+            selected_follow_ups.add(visit.follow_up_id)
+        for obj in objects:
+            if obj.object._meta.label_lower in CLINICAL_FILE_LABELS:
                 path = obj.object.filepath
                 if not path or PurePosixPath(path).is_absolute() or '..' in PurePosixPath(path).parts or '\\' in path:
                     raise ValueError('Invalid attachment path')
@@ -196,18 +208,11 @@ class BackupRestoreService:
                     if model._meta.model_name == 'diagnosisoption':
                         lookup = {'code': values.pop('code')}
                     else:
-                        lookup = {key: values.pop(key) for key in ('generic_english', 'dosage', 'brand_english')}
+                        lookup = {key: values.pop(key) for key in MEDICATION_IDENTITY_FIELDS}
                     values.pop('version', None)
                     values['archived_by'] = None
                     queryset = model._base_manager.select_for_update()
-                    if model._meta.model_name == 'medicationoption':
-                        # Match the same database Lower/Trim identity as the unique constraint.
-                        for index, (key, value) in enumerate(lookup.items()):
-                            alias = f'identity_{index}'
-                            queryset = queryset.alias(**{alias: Lower(Trim(key))}).filter(
-                                **{alias: Lower(Trim(Value(value)))})
-                    else:
-                        queryset = queryset.filter(**lookup)
+                    queryset = catalog_identity_lookup(queryset, lookup)
                     existing = queryset.first()
                     if existing:
                         for key, value in values.items(): setattr(existing, key, value)

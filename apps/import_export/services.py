@@ -4,10 +4,12 @@ import io
 from django.utils import timezone
 from datetime import datetime
 from django.db import transaction
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, PermissionDenied
 from apps.patients.models import Patient
 from apps.clinical.models import DiagnosisOption, MedicationOption
 from apps.accounts.models import User
+from apps.clinical.identity import medication_identity, catalog_identity_lookup
+from apps.clinical.services import validate_catalog
 from core.normalization import normalize_digits, normalize_identifier, normalize_name, normalize_phone
 
 class TableRow(dict):
@@ -124,21 +126,20 @@ class BulkImportService:
             try:
                 kwargs = self._patient_kwargs(row, doctor_id, created_by_id)
                 from apps.patients.services import PatientService
-                PatientService()._validate(kwargs)
-                patient = Patient(**kwargs)
-                patient.full_clean()
+                actor = User.objects.get(pk=created_by_id)
+                data = {key: value for key, value in kwargs.items() if key not in {'doctor_id', 'created_by_id'}}
+                data['care_team_ids'] = [doctor_id]
+                service = PatientService()
                 if execute:
                     with transaction.atomic():
-                        actor = User.objects.get(pk=created_by_id)
-                        target = User.objects.get(pk=doctor_id)
-                        data = {key: value for key, value in kwargs.items() if key not in {'doctor_id', 'created_by_id'}}
-                        data['care_team_ids'] = [target.pk]
-                        patient = PatientService().create_patient(data, actor)
+                        patient = service.create_patient(data, actor)
+                else:
+                    service.prepare_create(data, actor)
                 results['added'] += 1
                 if national_id: seen_ids.add(national_id)
                 if phone: seen_phones.add(phone)
                 results['rows'].append({'row': idx+2, 'outcome': 'created' if execute else 'ready', 'reason': ''})
-            except (ValidationError, ValueError, TypeError) as exc:
+            except (ValidationError, PermissionDenied, ValueError, TypeError) as exc:
                 results['failed'] += 1
                 results['errors'].append(f'الصف {idx+2}: {exc}')
                 results['rows'].append({'row': idx+2, 'outcome': 'failed', 'reason': str(exc)})
@@ -179,22 +180,21 @@ class OptionsImportService(BulkImportService):
                 required = keys if kind == 'diagnosis' else ('generic_english',)
                 if any(not data[key] for key in required):
                     raise ValidationError('الأعمدة المطلوبة مفقودة')
-                identity = (data['code'],) if kind == 'diagnosis' else tuple(data[k].casefold() for k in ('generic_english','dosage','brand_english'))
+                identity = (data['code'],) if kind == 'diagnosis' else medication_identity(data)
                 if identity in seen:
                     result.append({'row': idx+2, 'outcome': 'duplicate', 'reason': 'صف مكرر'})
                     continue
-                lookup = {'code': data['code']} if kind == 'diagnosis' else {k+'__iexact': data[k] for k in ('generic_english','dosage','brand_english')}
-                existing = model.all_objects.filter(**lookup).first()
+                existing = catalog_identity_lookup(model.all_objects.all(), data).first()
                 was_inactive = existing and (existing.deleted_at is not None or not existing.is_active)
                 instance = existing or model()
                 for key, value in data.items(): setattr(instance,key,value)
                 instance.is_active=True
                 instance.deleted_at=None
-                instance.full_clean()
+                validate_catalog(instance)
                 seen.add(identity)
                 result.append({'row':idx+2, 'outcome': 'reactivate' if was_inactive else 'update' if existing else 'create',
                     'reason':'', '_data':data, '_pk':existing.pk if existing else None})
-            except (ValidationError, ValueError, TypeError) as exc:
+            except (ValidationError, PermissionDenied, ValueError, TypeError) as exc:
                 result.append({'row':idx+2, 'outcome':'failed', 'reason':str(exc)})
         return result
 
@@ -249,7 +249,7 @@ class OptionsImportService(BulkImportService):
                 instance.is_active=True
                 instance.deleted_at=None
                 instance.version += int(instance.pk is not None)
-                instance.full_clean()
+                validate_catalog(instance)
                 instance.save()
                 outcome = 'reactivated' if row['outcome'] == 'reactivate' else 'updated' if row['_pk'] else 'added'
                 result[outcome] += 1

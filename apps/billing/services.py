@@ -1,23 +1,42 @@
 from core.mutation import check_mutation
 # backend/apps/billing/services.py
 import uuid
-from django.db import transaction, connection
-from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation
 from .models import Invoice, InvoiceLine
+from .money import CENT, MAX_AMOUNT, MAX_QUANTITY, bounded_decimal, round_money
 from apps.patients.models import Patient
 from apps.visits.models import Visit
+from core.access import require_actor_permission, accessible_patients, accessible_invoices
 from core.exceptions import ConflictError
 from core.lifecycle import enforce_transition, transition_reason
 
 class BillingService:
     INVOICE_PREFIX = 'INV'
 
+    @staticmethod
+    def _lock_invoice(invoice, actor):
+        actor = require_actor_permission(actor, 'manage_billing')
+        patient_id = Invoice.all_objects.values_list('patient_id', flat=True).get(pk=invoice.pk)
+        Patient.all_objects.select_for_update().get(pk=patient_id)
+        invoice = Invoice.all_objects.select_for_update().get(pk=invoice.pk)
+        if invoice.patient_id != patient_id:
+            raise ConflictError('تغير ملف المريض؛ أعد تحميل الفاتورة')
+        if not accessible_invoices(actor).filter(pk=invoice.pk).exists():
+            raise PermissionDenied('غير مصرح بالوصول إلى الفاتورة')
+        return invoice, actor
+
     def _lines(self, data, current=None):
         rows = data.get('lines')
         if rows is None:
-            if 'total_amount' not in data and current is not None:
+            if current is not None:
+                try:
+                    if 'total_amount' in data and bounded_decimal(data['total_amount']) != current.total_amount:
+                        raise ValueError()
+                except (ValueError, TypeError):
+                    raise ValidationError({'lines': ['عدّل البنود صراحة لتغيير المبلغ الإجمالي']})
                 return None, current.total_amount
             rows = [{'description': 'خدمات العيادة', 'quantity': 1, 'unit_price': data.get('total_amount', 0)}]
         if not isinstance(rows, list) or not 1 <= len(rows) <= 200:
@@ -31,14 +50,11 @@ class BillingService:
             if not isinstance(description, str) or not description.strip() or len(description) > 300:
                 raise ValidationError({'lines': ['وصف البند مطلوب وبحد أقصى 300 حرف']})
             try:
-                quantity, price = (Decimal(str(row.get(k))) for k in ('quantity', 'unit_price'))
-                if not all(v.is_finite() for v in (quantity, price)) or quantity <= 0 or price < 0:
-                    raise ValueError()
-                if any(v != v.quantize(Decimal('.01')) or v > Decimal('99999999.99') for v in (quantity, price)):
-                    raise ValueError()
-                amount = (quantity * price).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+                quantity = bounded_decimal(row.get('quantity'), minimum=CENT, maximum=MAX_QUANTITY)
+                price = bounded_decimal(row.get('unit_price'))
+                amount = round_money(quantity * price)
                 total += amount
-                if total > Decimal('99999999.99'):
+                if total > MAX_AMOUNT:
                     raise ValueError()
             except (ValueError, TypeError, InvalidOperation):
                 raise ValidationError({'lines': ['كمية أو سعر غير صالح؛ يلزم استخدام منزلتين عشريتين']})
@@ -57,7 +73,7 @@ class BillingService:
         return value.upper()
 
     def _generate_invoice_number(self):
-        unique_part = uuid.uuid4().hex[:8].upper()
+        unique_part = uuid.uuid4().hex.upper()
         return f"{self.INVOICE_PREFIX}-{unique_part}"
 
     def _validate_amounts(self, data):
@@ -66,23 +82,18 @@ class BillingService:
         if not any(field in data for field in amount_fields):
             return
         try:
-            total = Decimal(str(data.get('total_amount', 0)))
-            tax = Decimal(str(data.get('tax', 0)))
-            discount = Decimal(str(data.get('discount', 0)))
+            total = bounded_decimal(data.get('total_amount', 0))
+            tax = bounded_decimal(data.get('tax', 0))
+            discount = bounded_decimal(data.get('discount', 0))
         except (InvalidOperation, TypeError, ValueError):
             raise ValidationError({'amounts': ['قيمة مالية غير صالحة']})
-        maximum = Decimal('99999999.99')
         try:
-            for amount in (total, tax, discount):
-                if (not amount.is_finite() or amount < 0 or amount > maximum
-                        or amount != amount.quantize(Decimal('.01'))):
-                    raise ValueError()
             final = total + tax - discount
             if final < 0:
                 raise ValidationError({'discount': ['الخصم أكبر من المبلغ المستحق']})
-            if final > maximum:
+            if final > MAX_AMOUNT:
                 raise ValueError()
-            return final.quantize(Decimal('.01'))
+            return round_money(final)
         except (InvalidOperation, ValueError):
             raise ValidationError({'amounts': ['قيمة مالية غير صالحة؛ يلزم استخدام منزلتين عشريتين ضمن الحد المسموح']})
 
@@ -98,7 +109,8 @@ class BillingService:
                 })
 
     @transaction.atomic
-    def create_invoice(self, data):
+    def create_invoice(self, data, actor):
+        actor = require_actor_permission(actor, 'manage_billing')
         data = data.copy()
         rows, total = self._lines(data)
         amounts = {
@@ -118,6 +130,8 @@ class BillingService:
             patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
         if not patient or patient.deleted_at is not None or not patient.is_active:
             raise ValidationError(['المريض غير موجود'])
+        if not accessible_patients(actor).filter(pk=patient.pk).exists():
+            raise PermissionDenied('غير مصرح بالوصول إلى الملف')
         if data.get('visit') is not None and not visit:
             raise ValidationError(['الزيارة غير صالحة'])
         if visit:
@@ -148,13 +162,9 @@ class BillingService:
         return invoice
 
     @transaction.atomic
-    def update_invoice(self, invoice, data, expected_version=None):
-        invoice = Invoice.all_objects.select_for_update().get(pk=invoice.pk)
+    def update_invoice(self, invoice, data, expected_version=None, *, actor):
+        invoice, actor = self._lock_invoice(invoice, actor)
         check_mutation(invoice, expected_version)
-        if expected_version is None:
-            raise ValidationError(['يجب توفير رقم الإصدار'])
-        if invoice.version != expected_version:
-            raise ConflictError('تم تعديل الفاتورة بواسطة مستخدم آخر')
 
         data = data.copy()
         rows, total = self._lines(data, invoice)
@@ -196,22 +206,18 @@ class BillingService:
         return invoice
 
     @transaction.atomic
-    def delete_invoice(self, invoice, expected_version=None):
-        invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
+    def delete_invoice(self, invoice, expected_version=None, *, actor):
+        invoice, actor = self._lock_invoice(invoice, actor)
         check_mutation(invoice, expected_version)
         if invoice.status != 'draft':
             raise ValidationError({'status': ['لا يمكن حذف فاتورة صادرة؛ استخدم الإلغاء']})
-        invoice.soft_delete()
+        invoice.soft_delete(actor)
         return True
 
     @transaction.atomic
     def transition(self, invoice, target_status, actor, expected_version=None, reason='', payment_method=None):
-        invoice = Invoice.all_objects.select_for_update().get(pk=invoice.pk)
+        invoice, actor = self._lock_invoice(invoice, actor)
         check_mutation(invoice, expected_version)
-        if expected_version is None:
-            raise ValidationError({'version': ['يجب توفير رقم الإصدار']})
-        if invoice.version != expected_version:
-            raise ConflictError('تم تعديل الفاتورة بواسطة مستخدم آخر')
         changed = enforce_transition('invoice', invoice.status, target_status)
         if not changed:
             return invoice

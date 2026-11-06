@@ -1,5 +1,4 @@
-import math
-from django.core.exceptions import ValidationError
+from .choices import ScaleFieldType
 from django.db import models
 from core.constraints import check_constraint
 from django.db.models.functions import Lower, Trim
@@ -67,10 +66,7 @@ class ClinicalScale(SoftDeleteModel, TimeStampedModel):
 
 
 class ScaleField(SoftDeleteModel, TimeStampedModel):
-    FIELD_TYPE_CHOICES = [
-        ('slider', 'Slider'),
-        ('text', 'Text'),
-    ]
+    FIELD_TYPE_CHOICES = ScaleFieldType.choices
     scale = models.ForeignKey(
         ClinicalScale,
         on_delete=models.CASCADE,
@@ -91,18 +87,8 @@ class ScaleField(SoftDeleteModel, TimeStampedModel):
 
     def clean(self):
         super().clean()
-        values = (self.min_val, self.max_val, self.step, self.default)
-        if (any(type(value) not in (int, float) or not math.isfinite(value) for value in values)
-                or not math.isfinite(self.max_val - self.min_val)):
-            raise ValidationError({'min_val': ['تعريف المقياس يتطلب أرقاماً ونطاقاً محدودين']})
-        if self.max_val <= self.min_val or not 0 < self.step <= self.max_val - self.min_val:
-            raise ValidationError({'step': ['نطاق أو خطوة المقياس غير صالحة']})
-        if not self.min_val <= self.default <= self.max_val:
-            raise ValidationError({'default': ['القيمة الافتراضية خارج النطاق']})
-        if self.field_type == 'slider':
-            increments = (self.default - self.min_val) / self.step
-            if not math.isfinite(increments) or not math.isclose(increments, round(increments), rel_tol=0, abs_tol=1e-7):
-                raise ValidationError({'default': ['القيمة الافتراضية لا تطابق الخطوة']})
+        from .validation import validate_scale_definition
+        validate_scale_definition(self.min_val, self.max_val, self.step, self.default, self.field_type)
 
     class Meta:
         ordering = ['order', 'id']
@@ -135,6 +121,11 @@ class ClinicalNoteTemplate(SoftDeleteModel, TimeStampedModel):
     description = models.TextField(blank=True, default='')
     category = models.CharField(max_length=50)
     content = models.JSONField(default=dict)
+
+    def clean(self):
+        super().clean()
+        from .validation import validate_template_content
+        validate_template_content(self.content)
 
     def __str__(self):
         return self.name

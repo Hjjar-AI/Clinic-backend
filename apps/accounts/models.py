@@ -1,3 +1,4 @@
+from .choices import UserRole
 # backend/apps/accounts/models.py
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models, transaction
@@ -16,6 +17,7 @@ class UserManager(BaseUserManager):
             raise ValueError('The Username field must be set')
         user = self.model(username=username, **extra_fields)
         user.set_password(password)
+        user.full_clean()
         user.save(using=self._db)
         return user
 
@@ -32,11 +34,7 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
-    ROLE_CHOICES = [
-        ('admin', 'Admin'),
-        ('doctor', 'Doctor'),
-        ('receptionist', 'Receptionist'),
-    ]
+    ROLE_CHOICES = UserRole.choices
     username = models.CharField(max_length=80, unique=True)
     full_name = models.CharField(max_length=100, blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='doctor')
@@ -64,6 +62,16 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.username
+
+    def clean(self):
+        super().clean()
+        self.username = self.normalize_username(self.username).strip()
+        from core.json_schemas import validate_preferences
+        validate_preferences(self.preferences)
+
+    def save(self, *args, **kwargs):
+        self.username = self.normalize_username(self.username).strip()
+        return super().save(*args, **kwargs)
 
     # F2: Use a distinct attribute name. Django's PermissionsMixin / ModelBackend
     # also caches on `_perm_cache`, but stores dotted strings ('app.codename').

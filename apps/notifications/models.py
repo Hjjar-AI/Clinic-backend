@@ -1,14 +1,10 @@
+from .choices import NotificationType
 from django.db import models
 from django.conf import settings
 from core.models import TimeStampedModel
 
 class Notification(TimeStampedModel):
-    TYPE_CHOICES = [
-        ('info', 'Info'),
-        ('success', 'Success'),
-        ('warning', 'Warning'),
-        ('danger', 'Danger'),
-    ]
+    TYPE_CHOICES = NotificationType.choices
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

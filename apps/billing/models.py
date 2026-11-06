@@ -1,3 +1,4 @@
+from .choices import InvoiceStatus, PaymentMethod
 from decimal import Decimal
 
 from django.db import models
@@ -7,12 +8,7 @@ from django.core.validators import MinValueValidator
 from core.models import TimeStampedModel, SoftDeleteModel
 
 class Invoice(SoftDeleteModel, TimeStampedModel):
-    STATUS_CHOICES = [
-        ('draft', 'Draft'),
-        ('issued', 'Issued'),
-        ('paid', 'Paid'),
-        ('cancelled', 'Cancelled'),
-    ]
+    STATUS_CHOICES = InvoiceStatus.choices
     invoice_number = models.CharField(max_length=50, unique=True)
     patient = models.ForeignKey(
         'patients.Patient',
@@ -44,10 +40,7 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     status_reason = models.CharField(max_length=500, blank=True, default='')
-    payment_method = models.CharField(max_length=30, blank=True, default='', choices=[
-        ('cash', 'Cash'), ('card', 'Card'), ('bank_transfer', 'Bank transfer'),
-        ('insurance', 'Insurance'), ('other', 'Other'),
-    ])
+    payment_method = models.CharField(max_length=30, blank=True, default='', choices=PaymentMethod.choices)
     issued_date = models.DateField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True, default='')
@@ -55,7 +48,6 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
     issue_snapshot = models.JSONField(default=dict, blank=True, editable=False)
     paid_at = models.DateTimeField(null=True, blank=True, editable=False)
     paid_by = models.ForeignKey('accounts.User', on_delete=models.PROTECT, null=True, blank=True, related_name='paid_invoices')
-    version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
 
     class Meta:
         indexes = [

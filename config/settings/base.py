@@ -224,12 +224,8 @@ REST_FRAMEWORK = {
 # override via CACHE_BACKEND (see config/settings/production.py, which
 # refuses to boot on LocMemCache).
 #
-# Why this matters beyond "use a real cache in prod": the invalidate_group()
-# version-counter scheme in core/cache_utils.py relies on a single shared
-# store. With LocMemCache and multiple worker processes, each worker keeps
-# its own counter and its own cached values, so a write that invalidates
-# a group in worker A leaves workers B/C/D serving stale dashboard/report/
-# settings data until their process restarts.
+# DB-backed invalidation generations do not make cached previews/state shared.
+# Production processes and jobs must use a common cache service on either OS.
 CACHE_BACKEND = os.environ.get('CACHE_BACKEND', '').strip() or 'django.core.cache.backends.locmem.LocMemCache'
 if 'locmem' in CACHE_BACKEND.lower():
     CACHE_DEFAULT_LOCATION = 'unique-snowflake'
@@ -253,3 +249,7 @@ LOGGING = {
         'level': 'INFO',
     },
 }
+
+# Native library paths are prepared lazily before MIME/PDF imports.
+PDF_FONT_DIR = os.environ.get('PDF_FONT_DIR', '').strip() or None
+OPERATION_LOCK_DIR = os.environ.get('OPERATION_LOCK_DIR', '').strip() or BACKUP_DIR

@@ -1,3 +1,4 @@
+from apps.patients.follow_up_services import follow_up_data
 # backend/apps/exports/base.py
 from django.template.loader import render_to_string
 from core.pdf_utils import render_pdf_from_html
@@ -11,6 +12,7 @@ from django.utils import timezone
 
 from core.query_utils import apply_ordering
 from core.lifecycle import STATUS_PRESENTATION
+from core.age import display_year_only_age
 
 class BaseExportService:
     def __init__(self):
@@ -66,51 +68,14 @@ class BaseExportService:
 
     def build_patient_report_data(self, patient):
         visits_data = []
-        visits = patient.visits.filter(deleted_at__isnull=True).prefetch_related(
+        visits = patient.visits.filter(deleted_at__isnull=True).select_related('follow_up').prefetch_related(
             'visit_diagnoses__diagnosis', 'visit_medications__medication', 'scale_responses'
         ).order_by('-visit_date')
         for visit in visits:
             visit_data = {
                 'date': visit.visit_date.strftime('%d/%m/%Y') if visit.visit_date else '',
                 'age': self._calculate_age(patient, visit.visit_date),
-                'main_complaints': visit.main_complaints or '',
-                'history_presenting_complaint': visit.history_presenting_complaint or '',
-                'diagnoses': [diag.get('arabic_name') or diag.get('name', '') for diag in visit.get_diagnoses()],
-                'status': (STATUS_PRESENTATION['visit'].get(visit.status, {}).get('label', visit.status or 'غير محدد') +
-                       (' — نسخة عمل غير معتمدة' if visit.status in {'draft', 'amended'} else '')),
-                'clinical_status': visit.clinical_status or 'غير محدد',
-                'accompanied_by': visit.accompanied_by or '',
-                'companion_relation': visit.companion_relation or '',
-                'lab_values': visit.get_lab_values(),
-                'medications': visit.get_medications(),
-                'treatment_text': visit.treatment_text or '',
-                'doctor_notes': visit.doctor_notes or '',
-                'scale_responses': self._scale_response_data(visit),
-                'risk_assessment': {
-                    'suicide_level': visit.suicide_risk_level,
-                    'violence_level': visit.violence_risk_level,
-                    'firearm_access': 'غير مقيم' if visit.firearm_access is None else 'نعم' if visit.firearm_access else 'لا',
-                    'detailed': visit.clinical_data.get('risk_notes', '') if visit.clinical_data else '',
-                },
-                'treatment_plan': {
-                    'level_of_care': visit.level_of_care or 'غير محدد', 'care_basis': visit.care_basis,
-                    'follow_up_type': visit.follow_up_type or 'غير محدد',
-                    'detailed': visit.clinical_data.get('plan_details', '') if visit.clinical_data else '',
-                },
-                'administrative': {
-                    'date_signed': visit.date_signed.strftime('%d/%m/%Y') if visit.date_signed and visit.status in {'final', 'locked'} else '',
-                    'signed_by': visit.signed_by.full_name if visit.signed_by and visit.status in {'final', 'locked'} else '',
-                    'supervisor': visit.supervisor.full_name if visit.supervisor else '',
-                    'diagnosis_discussed': 'غير مسجل' if visit.diagnosis_discussed is None else 'نعم' if visit.diagnosis_discussed else 'لا',
-                    'plan_discussed': 'غير مسجل' if visit.plan_discussed is None else 'نعم' if visit.plan_discussed else 'لا',
-                },
-                'formulation': {
-                    'predisposing': visit.clinical_data.get('formulation', {}).get('predisposing', ''),
-                    'precipitating': visit.clinical_data.get('formulation', {}).get('precipitating', ''),
-                    'perpetuating': visit.clinical_data.get('formulation', {}).get('perpetuating', ''),
-                    'protective': visit.clinical_data.get('formulation', {}).get('protective', ''),
-                },
-                'mse': visit.clinical_data.get('mse', ''),
+                **self._working_visit_sections(visit, patient_report=True),
             }
             visits_data.append(visit_data)
 
@@ -146,6 +111,13 @@ class BaseExportService:
             'generated_at': timezone.localtime().strftime('%d/%m/%Y %H:%M'),
             'timezone': timezone.get_current_timezone_name(),
             'patient_name': visit.patient.get_full_name(),
+            **self._working_visit_sections(visit),
+        }
+        return data
+
+    def _working_visit_sections(self, visit, *, patient_report=False):
+        data = {
+            'follow_up': follow_up_data(visit.follow_up),
             'main_complaints': visit.main_complaints or '',
             'history_presenting_complaint': visit.history_presenting_complaint or '',
             'diagnoses': [diag.get('arabic_name') or diag.get('name', '') for diag in visit.get_diagnoses()],
@@ -166,7 +138,6 @@ class BaseExportService:
             },
             'treatment_plan': {
                 'level_of_care': visit.level_of_care or 'غير محدد', 'care_basis': visit.care_basis,
-                'follow_up_type': visit.follow_up_type or 'غير محدد',
             },
             'administrative': {
                 'date_signed': visit.date_signed.strftime('%d/%m/%Y') if visit.date_signed and visit.status in {'final', 'locked'} else '',
@@ -174,7 +145,6 @@ class BaseExportService:
                 'supervisor': visit.supervisor.full_name if visit.supervisor else '',
                 'diagnosis_discussed': 'غير مسجل' if visit.diagnosis_discussed is None else 'نعم' if visit.diagnosis_discussed else 'لا',
                 'plan_discussed': 'غير مسجل' if visit.plan_discussed is None else 'نعم' if visit.plan_discussed else 'لا',
-                'author': visit.author.full_name if visit.author else '',
             },
             'formulation': {
                 'predisposing': visit.clinical_data.get('formulation', {}).get('predisposing', ''),
@@ -184,6 +154,11 @@ class BaseExportService:
             },
             'mse': visit.clinical_data.get('mse', ''),
         }
+        if not patient_report:
+            data['administrative']['author'] = visit.author.full_name if visit.author else ''
+        if patient_report:
+            data['risk_assessment']['detailed'] = visit.clinical_data.get('risk_notes', '') if visit.clinical_data else ''
+            data['treatment_plan']['detailed'] = visit.clinical_data.get('plan_details', '') if visit.clinical_data else ''
         return data
 
     @staticmethod
@@ -206,10 +181,7 @@ class BaseExportService:
         return scales
 
     def _calculate_age(self, patient, visit_date=None):
-        if not patient.dob_year:
-            return 'غير محدد'
-        year = visit_date.year if visit_date else datetime.now().year
-        return year - patient.dob_year
+        return display_year_only_age(patient.dob_year, visit_date)
 
     def export_patient_to_word(self, patient, clinic_info):
         return export_patient_to_word(patient, clinic_info)

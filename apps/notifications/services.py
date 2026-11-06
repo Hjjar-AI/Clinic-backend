@@ -4,12 +4,22 @@ from django.utils import timezone
 from django.db import IntegrityError, transaction
 from .models import Notification
 
+def notification_payload(title, message, link=None, type='info'):
+    return dict(title=title[:200], message=message, link=link, type=type)
+
+
+def notification_dedupe_key(key, user_id=None):
+    if not key:
+        return None
+    return (f'{key}:{user_id}' if user_id is not None else str(key))[:200]
+
+
 class NotificationService:
     def get_for_user(self, user_id, unread_only=False):
         qs = Notification.objects.filter(user_id=user_id)
         if unread_only:
             qs = qs.filter(is_read=False)
-        return qs.order_by('-created_at')
+        return qs.order_by('-created_at', '-id')
 
     def mark_read(self, notification_id, user_id):
         Notification.objects.filter(id=notification_id, user_id=user_id).update(
@@ -49,35 +59,27 @@ class NotificationService:
         ).delete()[0]
 
     def create(self, user_id, title, message, link=None, type='info', dedupe_key=None):
-        payload = {
-            'title': title[:200],
-            'message': message,
-            'link': link,
-            'type': type,
-        }
+        payload = notification_payload(title, message, link, type)
         if not dedupe_key:
             return Notification.objects.create(user_id=user_id, **payload)
         try:
             with transaction.atomic():
                 notification, _ = Notification.objects.get_or_create(
                     user_id=user_id,
-                    dedupe_key=str(dedupe_key)[:200],
+                    dedupe_key=notification_dedupe_key(dedupe_key),
                     defaults=payload,
                 )
                 return notification
         except IntegrityError:
-            return Notification.objects.get(user_id=user_id, dedupe_key=str(dedupe_key)[:200])
+            return Notification.objects.get(user_id=user_id, dedupe_key=notification_dedupe_key(dedupe_key))
 
     def create_for_users(self, user_ids, title, message, link=None, type='info', dedupe_key=None):
         now = timezone.now()
         notifications = [
             Notification(
                 user_id=uid,
-                title=title[:200],
-                message=message,
-                link=link,
-                type=type,
-                dedupe_key=f'{dedupe_key}:{uid}'[:200] if dedupe_key else None,
+                **notification_payload(title, message, link, type),
+                dedupe_key=notification_dedupe_key(dedupe_key, uid),
                 created_at=now,
                 updated_at=now,
             )

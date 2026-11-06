@@ -6,6 +6,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction, models
 from core.mutation import parse_version, check_mutation
 from core.exceptions import ConflictError
+from core.access import require_actor_permission
 from .models import (Patient, PatientCareTeam, PatientDuplicateReview, PatientMerge,
                      PatientIdentifier, PatientContact, PatientDocument)
 from .record_services import RECORDS, json_value, require_access
@@ -30,7 +31,8 @@ def content_digest(source):
 
 class PatientMergeService:
     def preview(self, source, target_id, actor):
-        if actor.role != 'admin' or not actor.has_perm('edit_patient') or not actor.has_perm('delete_patient'):
+        actor = require_actor_permission(actor, 'edit_patient')
+        if actor.role != 'admin' or not actor.has_perm('delete_patient'):
             raise PermissionDenied('الدمج مخصص للمدير المخول')
         target_id = parse_version(target_id)
         target = Patient.objects.filter(pk=target_id).first()
@@ -42,7 +44,7 @@ class PatientMergeService:
         require_access(target, actor)
         data = {'source': source.pk, 'target': target.pk, 'source_version': source.version,
                 'target_version': target.version, 'actor': actor.pk, 'records': manifest(source), 'digest': content_digest(source),
-                'team': list(source.care_team.order_by('pk').values_list('pk', 'user_id', 'ended_at'))}
+                'team': list(source.care_team.order_by('pk').values_list('pk', 'user_id', 'role', 'started_at', 'ended_at'))}
         token = signing.dumps(json_value(data), salt='patient-merge-preview', compress=True)
         return {'token': token, 'source': source.patient_number, 'survivor': target.patient_number,
                 'version': source.version, 'target_version': target.version,
@@ -51,7 +53,8 @@ class PatientMergeService:
 
     @transaction.atomic
     def merge(self, source, token, reason, actor, expected_version, target_version):
-        if actor.role != 'admin' or not actor.has_perm('edit_patient') or not actor.has_perm('delete_patient'):
+        actor = require_actor_permission(actor, 'edit_patient')
+        if actor.role != 'admin' or not actor.has_perm('delete_patient'):
             raise PermissionDenied('الدمج مخصص للمدير المخول')
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
             raise ValidationError({'reason': ['سبب الدمج مطلوب']})
@@ -76,7 +79,7 @@ class PatientMergeService:
         for model in merge_models():
             list(model._base_manager.select_for_update().filter(patient=source).order_by('pk'))
         current = manifest(source)
-        team = json_value(list(source.care_team.order_by('pk').values_list('pk', 'user_id', 'ended_at')))
+        team = json_value(list(source.care_team.order_by('pk').values_list('pk', 'user_id', 'role', 'started_at', 'ended_at')))
         if current != preview['records'] or team != preview['team'] or content_digest(source) != preview['digest']:
             raise ConflictError('تغير محتوى الملف؛ أعد المعاينة')
         before = {'source': json_value({f.name: f.value_from_object(source) for f in source._meta.concrete_fields}),
@@ -100,12 +103,12 @@ class PatientMergeService:
                     row.version += 1
                 row.save()
         from django.utils import timezone
-        for member in source.care_team.select_for_update().filter(ended_at__isnull=True).order_by('pk'):
+        for member in source.care_team.unended().select_for_update().order_by('pk'):
             if member.user.is_active:
                 PatientCareTeam.objects.get_or_create(patient=target, user=member.user, ended_at__isnull=True,
-                    defaults={'role': member.role, 'assigned_by': actor})
-            member.ended_at, member.ended_by, member.removal_reason = timezone.now(), actor, 'Patient merged: ' + reason.strip()[:470]
-            member.save()
+                    defaults={'role': member.role, 'assigned_by': actor, 'started_at': max(timezone.now(), member.started_at)})
+            from .services import end_care_team_membership
+            end_care_team_membership(member, actor, 'Patient merged: ' + reason.strip()[:470])
         # Do not copy mutable demographics over the survivor or fabricate negative summaries.
         if target.patientallergy_records.filter(is_active=True, status__in=['suspected', 'confirmed']).exists():
             target.allergy_status = 'recorded'

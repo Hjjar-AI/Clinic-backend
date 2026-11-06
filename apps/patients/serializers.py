@@ -1,15 +1,8 @@
 # backend/apps/patients/serializers.py
 from rest_framework import serializers
 from .models import Patient, PatientDocument, PatientCareTeam
-from apps.accounts.serializers import UserSerializer
-from core.normalization import (
-    NATIONAL_ID_MAX_LENGTH,
-    NATIONAL_ID_MIN_LENGTH,
-    normalize_identifier,
-    normalize_name,
-    normalize_phone,
-)
-from django.utils import timezone
+from core.serializers import domain_validation
+from .validation import normalize_profile_data, validate_profile_data
 
 class PatientSerializer(serializers.ModelSerializer):
     completeness = serializers.SerializerMethodField()
@@ -19,7 +12,8 @@ class PatientSerializer(serializers.ModelSerializer):
     care_team_names = serializers.SerializerMethodField()
 
     def get_care_team_names(self, obj):
-        return [member.user.full_name or member.user.username for member in obj.care_team.filter(ended_at__isnull=True).select_related('user')]
+        from .querysets import care_team_names
+        return care_team_names(obj)
 
     doctor = serializers.PrimaryKeyRelatedField(read_only=True)  # explicit read-only doctor
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
@@ -57,31 +51,12 @@ class PatientSerializer(serializers.ModelSerializer):
             'version': {'required': False},
         }
 
-    def validate_national_id(self, value):
-        value = normalize_identifier(value)
-        if value:
-            if not (NATIONAL_ID_MIN_LENGTH <= len(value) <= NATIONAL_ID_MAX_LENGTH):
-                raise serializers.ValidationError('الرقم الوطني غير صالح')
-        return value
-
     def validate(self, attrs):
         if self.instance and ('care_team_ids' in attrs or 'doctor' in attrs):
             raise serializers.ValidationError('تُعدل عضويات الفريق من إجراءات فريق الرعاية')
-        for field in ('first_name', 'father_name', 'surname', 'mother_name'):
-            if field in attrs and attrs[field] is not None:
-                attrs[field] = normalize_name(attrs[field])
-        for field in ('phone', 'emergency_contact_phone'):
-            if field in attrs:
-                attrs[field] = normalize_phone(attrs[field])
+        attrs = normalize_profile_data(attrs)
+        domain_validation(validate_profile_data, attrs, is_edit=self.instance is not None, existing=self.instance)
         return attrs
-
-    def validate_dob_year(self, value):
-        if value is None:
-            return value
-        current_year = timezone.localdate().year
-        if value < 1900 or value > current_year:
-            raise serializers.ValidationError(f'سنة الميلاد يجب أن تكون بين 1900 و{current_year}')
-        return value
 
     def get_completeness(self, obj):
         return obj.get_completeness()

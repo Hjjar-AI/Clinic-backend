@@ -83,7 +83,7 @@
     <div class="field"><span class="label">خطر الانتحار:</span> {{ data.risk_assessment.suicide_level|default:"-" }}</div>
     <div class="field"><span class="label">خطر العنف:</span> {{ data.risk_assessment.violence_level|default:"-" }}</div>
     <div class="field"><span class="label">مستوى الرعاية:</span> {{ data.treatment_plan.level_of_care }}</div>
-    <div class="field"><span class="label">نوع المتابعة:</span> {{ data.treatment_plan.follow_up_type }}</div>
+    <div class="field"><span class="label">نوع المتابعة:</span> {{ data.follow_up.method|default:"غير محدد" }} · {{ data.follow_up.due_date|default:"غير مسجل" }}</div>
   </div>
 
   <div class="signature">

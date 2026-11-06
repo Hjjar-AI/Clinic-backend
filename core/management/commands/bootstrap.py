@@ -21,6 +21,7 @@ both cases explicitly rather than assuming a single apps/ root.
 
 import shutil
 import subprocess
+import shutil
 from pathlib import Path
 
 from django.conf import settings
@@ -319,15 +320,16 @@ class Command(BaseCommand):
             ))
             return
 
+        pnpm = shutil.which('pnpm')
+        if pnpm is None:
+            raise CommandError('pnpm not found on PATH; install it before requesting --with-frontend.')
         self.stdout.write('[frontend] running pnpm install...')
         try:
-            subprocess.run(['pnpm', 'install'], cwd=str(frontend_dir), check=True)
+            subprocess.run([pnpm, 'install', '--frozen-lockfile'], cwd=str(frontend_dir), check=True)
             self.stdout.write('[frontend] running pnpm build...')
-            subprocess.run(['pnpm', 'build'], cwd=str(frontend_dir), check=True)
+            subprocess.run([pnpm, 'build'], cwd=str(frontend_dir), check=True)
             self.stdout.write(self.style.SUCCESS('[frontend] build complete.'))
-        except FileNotFoundError:
-            self.stdout.write(self.style.WARNING(
-                '[frontend] pnpm not found on PATH, skipping.'
-            ))
+        except FileNotFoundError as exc:
+            raise CommandError('pnpm launcher is unavailable; check PATH and Node installation.') from exc
         except subprocess.CalledProcessError as e:
             raise CommandError(f'Frontend build failed: {e}')

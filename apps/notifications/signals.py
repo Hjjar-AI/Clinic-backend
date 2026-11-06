@@ -5,6 +5,8 @@ from django.utils import timezone
 from datetime import timedelta
 from apps.appointments.models import Appointment
 from apps.tasks.models import UserTask
+from apps.tasks.reminders import task_recipient, task_reminder_prefix, notify_task_due
+from apps.appointments.reminders import appointment_reminder_prefix
 from .services import NotificationService
 from apps.settings.services import SettingsService
 
@@ -22,13 +24,13 @@ def appointment_reminders(sender, instance, created, **kwargs):
         return
     service = NotificationService()
     if instance.status not in {'scheduled', 'confirmed'}:
-        service.retire_related(f'appointment-day:{instance.pk}:')
-        service.retire_related(f'appointment-hour:{instance.pk}:')
+        service.retire_related(appointment_reminder_prefix(instance, 'day'))
+        service.retire_related(appointment_reminder_prefix(instance, 'hour'))
     elif not created:
         if not instance.reminder_sent:
-            service.retire_related(f'appointment-day:{instance.pk}:')
+            service.retire_related(appointment_reminder_prefix(instance, 'day'))
         if not instance.reminder_sent_hour:
-            service.retire_related(f'appointment-hour:{instance.pk}:')
+            service.retire_related(appointment_reminder_prefix(instance, 'hour'))
     if created and instance.status == 'scheduled':
         service.create(
             instance.doctor_id,
@@ -44,8 +46,8 @@ def task_reminders(sender, instance, created, **kwargs):
     if kwargs.get('raw'):
         return
     service = NotificationService()
-    reminder_prefix = f'task-due:{instance.pk}:'
-    target_user_id = instance.assigned_to_id or instance.user_id
+    reminder_prefix = task_reminder_prefix(instance)
+    target_user_id = task_recipient(instance)
     if instance.status not in {'open', 'in_progress'}:
         service.retire_related(reminder_prefix)
     elif target_user_id:
@@ -56,11 +58,4 @@ def task_reminders(sender, instance, created, **kwargs):
         reminder_days = SettingsService().get_clinic_info()['task_reminder_days']
         reminder_date = timezone.localdate() + timedelta(days=reminder_days)
         if instance.due_date == reminder_date and not instance.completed_at and not instance.cancelled_at:
-            service.create(
-                target_user_id,
-                'موعد تسليم المهمة',
-                f'المهمة "{instance.title}" مستحقة بعد {reminder_days} يوم/أيام',
-                link=_safe_url('/tasks'),
-                type='warning',
-                dedupe_key=f'task-due:{instance.pk}:{instance.reminder_generation}:{instance.due_date.isoformat()}',
-            )
+            notify_task_due(instance, days=reminder_days)

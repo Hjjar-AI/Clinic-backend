@@ -3,36 +3,40 @@ from django.shortcuts import get_object_or_404
 from django.template.loader import render_to_string
 from core.access import accessible_visits
 from core.pdf_utils import render_pdf_from_html
+from apps.visits.revisions import latest_signed_revision, latest_approved_revisions, order_by_approved_date
 
 
 def approved_handover(actor, visit_id):
     visit = get_object_or_404(accessible_visits(actor), pk=visit_id)
-    revision = visit.revisions.order_by('-number').first()
+    revision = latest_signed_revision(visit)
     if not revision:
         raise ValidationError({'visit': ['لا توجد نسخة معتمدة لهذه الزيارة']})
+    return handover_from_revision(revision)
+
+
+def handover_from_revision(revision):
     source = revision.snapshot
     fields = source['fields']
-    return {'visit_id': visit.pk, 'revision_id': revision.pk, 'revision_number': revision.number,
+    return {'visit_id': revision.visit_id, 'revision_id': revision.pk, 'revision_number': revision.number,
         'signed_at': revision.signed_at, 'patient': source['patient'],
         'clinician': source.get('clinician', {}), 'longitudinal': source.get('longitudinal', {}),
         'medications': source.get('medications', []), 'diagnoses': source.get('diagnoses', []),
-        'lab_values': source.get('lab_values', []),
+        'lab_values': source.get('lab_values', []), 'follow_up': source['follow_up'],
         'fields': {key: fields.get(key) for key in ('visit_date', 'main_complaints', 'history_presenting_complaint',
-            'treatment_text', 'follow_up_date', 'suicide_risk_level', 'violence_risk_level', 'firearm_access',
+            'treatment_text', 'suicide_risk_level', 'violence_risk_level', 'firearm_access',
             'level_of_care', 'care_basis', 'clinical_data')}}
 
 
 def latest_approved_handover(actor, patient_id, exclude_visit=None):
     from core.access import accessible_patients
-    from apps.visits.models import VisitRevision
     patient = get_object_or_404(accessible_patients(actor, True), pk=patient_id)
-    revisions = VisitRevision.objects.filter(visit__in=accessible_visits(actor), visit__patient=patient)
+    revisions = latest_approved_revisions(accessible_visits(actor)).filter(visit__patient=patient)
     if exclude_visit:
         if not str(exclude_visit).isdecimal() or len(str(exclude_visit)) > 9 or int(exclude_visit) < 1:
             raise ValidationError({'exclude_visit': ['معرف غير صالح']})
         revisions = revisions.exclude(visit_id=exclude_visit)
-    revision = revisions.order_by('-visit__visit_date', '-signed_at', '-pk').first()
-    return approved_handover(actor, revision.visit_id) if revision else None
+    revision = order_by_approved_date(revisions, tie_breakers=('-signed_at', '-pk')).first()
+    return handover_from_revision(revision) if revision else None
 
 
 def handover_pdf(data):

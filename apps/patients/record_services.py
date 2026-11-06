@@ -6,7 +6,10 @@ from django.db import models, transaction
 from django.utils import timezone
 from core.access import accessible_patients
 from core.mutation import check_mutation, parse_version
-from core.normalization import normalize_identifier, normalize_phone
+from core.normalization import normalize_identifier, normalize_phone, NATIONAL_ID_MIN_LENGTH, NATIONAL_ID_MAX_LENGTH
+from core.verification import stamp_verification
+from .follow_up_services import FOLLOW_UP_FIELDS
+from .projections import project_identifier, project_emergency_contact
 from .models import (Patient, PatientIdentifier, PatientContact, PatientRepresentative, PatientAllergy,
                      PatientMedication, PatientFollowUp, PatientCorrection)
 
@@ -16,7 +19,7 @@ RECORDS = {
     'representatives': (PatientRepresentative, ['name', 'relationship', 'phone', 'authority_scope', 'verification', 'evidence', 'valid_from', 'valid_until']),
     'allergies': (PatientAllergy, ['substance', 'reaction', 'severity', 'status', 'source', 'source_details', 'source_visit', 'recorded_on', 'notes']),
     'medications': (PatientMedication, ['name', 'dosage', 'schedule', 'status', 'started_on', 'ended_on', 'source', 'source_details', 'source_visit', 'recorded_on', 'notes']),
-    'follow-ups': (PatientFollowUp, ['title', 'owner', 'due_date', 'status', 'source_visit', 'appointment', 'completed_visit', 'notes', 'outcome_reason']),
+    'follow-ups': (PatientFollowUp, FOLLOW_UP_FIELDS),
 }
 CLINICAL_KINDS = {'allergies', 'medications', 'follow-ups'}
 
@@ -34,29 +37,16 @@ def history_patient_ids(patient):
     return ids
 
 
-def require_access(patient, actor, clinical=False, write=False):
+def require_access(patient, actor, clinical=False, write=False, permission=None):
     if not accessible_patients(actor, True).filter(pk=patient.pk).exists():
         raise PermissionDenied('غير مصرح بالوصول إلى الملف')
-    permissions = ['view_patients', 'edit_visit' if clinical and write else 'view_visits' if clinical else 'edit_patient' if write else 'view_patients']
+    permissions = [permission] if permission else ['view_patients', 'edit_visit' if clinical and write else 'view_visits' if clinical else 'edit_patient' if write else 'view_patients']
     if any(not actor.has_perm(permission) for permission in permissions):
         raise PermissionDenied('غير مصرح بهذا الإجراء')
 
 
 def record_values(row, fields):
     return json_value({name: getattr(row, row._meta.get_field(name).attname) for name in fields})
-
-
-def stamp_verification(row, actor, previous=None):
-    if hasattr(row, 'verification'):
-        if row.verification == 'verified' and previous != 'verified':
-            if actor is None:
-                raise ValidationError('المستخدم المنفذ مطلوب للتحقق')
-            if actor.role not in {'admin', 'doctor'}:
-                raise PermissionDenied('تأكيد المستندات مخصص للطبيب أو المدير')
-            if previous != 'verified':
-                row.verified_at, row.verified_by = timezone.now(), actor
-        elif row.verification != 'verified':
-            row.verified_at, row.verified_by = None, None
 
 
 class PatientRecordService:
@@ -67,13 +57,24 @@ class PatientRecordService:
         return RECORDS[kind][0].objects.filter(patient=patient).order_by('-created_at', '-pk')
 
     @transaction.atomic
-    def save(self, patient, kind, data, actor, expected_version, record_id=None, retire=False, reason=''):
+    def save(self, patient, kind, data, actor, expected_version, record_id=None, retire=False, reason='', _visit_action=None):
         if kind not in RECORDS or not isinstance(data, dict):
             raise ValidationError('سجل غير صالح')
         patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
-        require_access(patient, actor, kind in CLINICAL_KINDS, True)
+        if _visit_action is not None:
+            allowed = {'delete_visit', 'edit_visit'} if retire else {'add_visit', 'edit_visit'}
+            if kind != 'follow-ups' or _visit_action not in allowed:
+                raise ValidationError('إجراء زيارة غير صالح')
+        require_access(patient, actor, kind in CLINICAL_KINDS, True, permission=_visit_action)
         check_mutation(patient, expected_version)
+        if not isinstance(reason, str) or len(reason.strip()) > 500:
+            raise ValidationError({'reason': ['يلزم سبب نصي لا يتجاوز 500 محرف']})
         model, fields = RECORDS[kind]
+        linked_visits = []
+        if kind == 'follow-ups' and record_id:
+            from apps.visits.models import Visit
+            linked_visits = list(Visit.all_objects.select_for_update().filter(
+                patient=patient, follow_up_id=parse_version(record_id)).order_by('pk'))
         row = model.objects.select_for_update().filter(patient=patient, pk=parse_version(record_id)).first() if record_id else model(patient=patient, created_by=actor)
         if row is None:
             raise ValidationError('السجل غير موجود في هذا الملف')
@@ -100,8 +101,10 @@ class PatientRecordService:
                 related = field.remote_field.model._base_manager.filter(pk=identifier).first()
                 if not related or (hasattr(related, 'patient_id') and related.patient_id != patient.pk):
                     raise ValidationError({name: ['المرجع لا يخص هذا المريض']})
-                if name == 'owner' and old.get('owner') != related.pk and (not related.is_active or not patient.care_team.filter(user=related, ended_at__isnull=True, started_at__lte=timezone.now()).exists()):
+                if name == 'owner' and old.get('owner') != related.pk and (not related.is_active or not patient.care_team.effective_at().filter(user=related).exists()):
                     raise ValidationError({name: ['المسؤول يجب أن يكون عضواً حالياً في فريق الرعاية']})
+                if name == 'source_visit' and old.get(name) != related.pk and (not related.is_active or related.deleted_at):
+                    raise ValidationError({name: ['اختر زيارة مصدر نشطة']})
                 if name == 'completed_visit' and old.get(name) != related.pk:
                     if not related.is_active or related.deleted_at or related.status not in {'final', 'locked'} or not related.revisions.exists():
                         raise ValidationError({name: ['اختر زيارة نشطة معتمدة وموقعة']})
@@ -114,27 +117,13 @@ class PatientRecordService:
         if kind == 'identifiers':
             row.value = normalize_identifier(row.value) or ''
             row.issuing_country = row.issuing_country.upper()
-            if row.identifier_type == 'national_id' and row.value and not (10 <= len(row.value) <= 12):
+            if row.identifier_type == 'national_id' and row.value and not (NATIONAL_ID_MIN_LENGTH <= len(row.value) <= NATIONAL_ID_MAX_LENGTH):
                 raise ValidationError({'value': ['رقم وطني غير صالح']})
         if kind == 'follow-ups':
-            if not row.due_date:
-                raise ValidationError({'due_date': ['تاريخ الاستحقاق مطلوب']})
-            previous_status = old.get('status', 'pending')
-            from core.follow_up import follow_up_transition
-            follow_up_transition(previous_status, row.status)
-            if previous_status != 'pending' and any(old.get(name) != record_values(row, fields).get(name) for name in ('outcome_reason', 'completed_visit')):
-                raise ValidationError({'status': ['نتيجة المتابعة محفوظة؛ أضف متابعة جديدة']})
-            if row.status != 'pending' and not row.outcome_reason.strip():
-                raise ValidationError({'outcome_reason': ['سبب نتيجة المتابعة مطلوب']})
-            if row.status != 'pending' and (not row.pk or previous_status == 'pending'):
-                row.completed_at, row.completed_by = timezone.now(), actor
-            # A legacy scheduled follow-up is edited through VisitService only.
-            if row.legacy_visit_follow_up and (retire or any(name in data for name in ('due_date', 'source_visit', 'status', 'completed_visit', 'outcome_reason'))):
-                raise ValidationError('عدّل متابعة الزيارة من شاشة الزيارة')
-            if row.completed_visit_id and row.status != 'completed':
-                raise ValidationError({'completed_visit': ['تربط الزيارة المنجزة بمتابعة مكتملة فقط']})
-            if row.source_visit_id and row.due_date < row.source_visit.visit_date:
-                raise ValidationError({'due_date': ['المتابعة لا تسبق الزيارة']})
+            from .follow_up_services import validate_follow_up
+            validate_follow_up(row, old, actor, linked_visits)
+            if row.pk and not retire and old == record_values(row, fields):
+                return row, patient.version
         if retire:
             if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
                 raise ValidationError({'reason': ['سبب التقاعد مطلوب (حتى 500 محرف)']})
@@ -153,17 +142,15 @@ class PatientRecordService:
         row.updated_by = actor
         row.full_clean()
         row.save()
-        was_primary_identifier = kind == 'identifiers' and old.get('identifier_type') == 'national_id' and old.get('value') == patient.national_id and old.get('issuer') == '' and old.get('issuing_country') == ''
-        new_primary_identifier = kind == 'identifiers' and not patient.national_id and row.identifier_type == 'national_id' and row.issuer == '' and row.issuing_country == '' and not retire
-        if was_primary_identifier or new_primary_identifier:
-            patient.national_id = row.value if row.identifier_type == 'national_id' and row.issuer == '' and row.issuing_country == '' and not retire else ''
-            patient.identity_verification = 'reported'
-            patient.identity_verified_at = None
-            patient.identity_verified_by = None
+        for visit in linked_visits:
+            if retire:
+                visit.follow_up = None
+            visit.version += 1
+            visit.save(update_fields=['follow_up', 'version', 'updated_at'])
+        if kind == 'identifiers':
+            project_identifier(patient, row, old, retire)
         if kind == 'contacts' and (row.is_primary or old.get('is_primary')):
-            primary = PatientContact.objects.filter(patient=patient, is_active=True, is_primary=True, is_emergency=True).first()
-            for profile, field in [('emergency_contact_name', 'name'), ('emergency_contact_relation', 'relationship'), ('emergency_contact_phone', 'phone')]:
-                setattr(patient, profile, getattr(primary, field) if primary else '')
+            project_emergency_contact(patient)
         new = record_values(row, fields)
         changes = {name: {'before': old.get(name), 'after': value} for name, value in new.items() if old.get(name) != value}
         if retire:

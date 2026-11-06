@@ -1,3 +1,4 @@
+from .choices import TaskStatus, TaskPriority
 import uuid
 from django.db import models
 from core.constraints import check_constraint
@@ -5,19 +6,13 @@ from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.utils import timezone
 from core.models import TimeStampedModel
+from .querysets import TaskQuerySet
 
 class UserTask(TimeStampedModel):
-    STATUS_CHOICES = [
-        ('open', 'Open'),
-        ('in_progress', 'In progress'),
-        ('completed', 'Completed'),
-        ('cancelled', 'Cancelled'),
-    ]
-    PRIORITY_CHOICES = [
-        ('low', 'Low'),
-        ('medium', 'Medium'),
-        ('high', 'High'),
-    ]
+    objects = TaskQuerySet.as_manager()
+
+    STATUS_CHOICES = TaskStatus.choices
+    PRIORITY_CHOICES = TaskPriority.choices
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

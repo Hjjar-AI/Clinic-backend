@@ -1,4 +1,5 @@
 from core.operation_gate import gated
+from core.file_inventory import CLINICAL_FILE_LABELS
 import io
 import json
 import zipfile
@@ -81,7 +82,7 @@ class BackupCreatorService:
         # merely authenticate whichever files happened to exist in storage.
         records = json.loads(members['backup.json'])['data']['records']
         for record in records:
-            if record['model'] not in {'patients.patientdocument', 'visits.visitattachment'}:
+            if record['model'] not in CLINICAL_FILE_LABELS:
                 continue
             fields = record['fields']
             content = members.get('media/' + fields['filepath'])

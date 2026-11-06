@@ -4,8 +4,7 @@ from django.core.management.base import BaseCommand
 from django.core.files.storage import default_storage
 from django.utils import timezone
 from apps.backup.backup_creator import media_paths
-from apps.patients.models import PatientDocument
-from apps.visits.models import VisitAttachment
+from core.file_inventory import referenced_file_paths
 
 class Command(BaseCommand):
     help = 'Report missing media and old unreferenced uploads; use --delete to remove only orphaned uploads'
@@ -16,7 +15,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         age = max(24, options['older_than_hours'])
         cutoff = timezone.now() - timedelta(hours=age)
-        referenced = set(PatientDocument.all_objects.values_list('filepath', flat=True)) | set(VisitAttachment.all_objects.values_list('filepath', flat=True))
+        referenced = referenced_file_paths()
         for path in sorted(referenced):
             if not default_storage.exists(path): self.stdout.write(f'MISSING {path}')
         for prefix in ('patient_docs', 'visit_attachments'):

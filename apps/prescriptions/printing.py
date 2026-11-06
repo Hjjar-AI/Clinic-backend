@@ -45,8 +45,8 @@ def preprinted_geometry(options):
 
 
 def render_preprinted(prescription, options):
-    from weasyprint import HTML, CSS
-    from weasyprint.text.fonts import FontConfiguration
+    from core.native_dependencies import pdf_libraries
+    HTML, CSS, FontConfiguration = pdf_libraries()
     fonts = FontConfiguration()
     stylesheet = CSS(string=document_font_css(), font_config=fonts)
     geometry = preprinted_geometry(options)

@@ -41,7 +41,7 @@ class VisitViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == 'create':
             permission_classes = [permissions.IsAuthenticated, HasAddVisit]
-        elif self.action in ['update', 'partial_update', 'transition', 'complete_follow_up']:
+        elif self.action in ['update', 'partial_update', 'transition']:
             permission_classes = [permissions.IsAuthenticated, HasEditVisit, CanAccessVisit]
         elif self.action == 'destroy':
             permission_classes = [permissions.IsAuthenticated, HasDeleteVisit, CanAccessVisit]
@@ -60,7 +60,7 @@ class VisitViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = Visit.objects.select_related(
-            'patient', 'author', 'signed_by', 'supervisor',
+            'patient', 'author', 'signed_by', 'supervisor', 'follow_up',
         ).prefetch_related(
             'visit_diagnoses__diagnosis',
             'visit_medications__medication',
@@ -177,12 +177,6 @@ class VisitViewSet(viewsets.ModelViewSet):
     def _required_version(request):
         from core.mutation import request_version
         return request_version(request)
-
-    @action(detail=True, methods=['put'])
-    def complete_follow_up(self, request, pk=None):
-        visit = self.get_object()
-        updated = self.service.complete_follow_up(visit, request.user, self._required_version(request), request.data.get('outcome', 'completed'))
-        return Response({'data': self.get_serializer(updated).data, 'message': 'تم إكمال المتابعة'})
 
     @action(detail=False, methods=['post'], url_path='mark-all-overdue')
     def mark_all_overdue(self, request):

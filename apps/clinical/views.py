@@ -1,3 +1,4 @@
+from apps.patients.models import PatientFollowUp
 from core.mutation import request_version
 from .services import update_catalog, restore_catalog, create_catalog
 # backend/apps/clinical/views.py
@@ -142,7 +143,7 @@ class ClinicalConstantsView(APIView):
                     'Outpatient', 'IOP', 'PHP', 'Inpatient', 'Residential'
                 ],
                 'care_basis': ['unknown', 'voluntary', 'involuntary'],
-                'follow_up_type': ['In-person', 'Telehealth', 'Phone'],
+                'follow_up_methods': [value for value, _ in PatientFollowUp.METHOD_CHOICES],
                 'marital_status_male': ['أعزب', 'متزوج', 'مطلق', 'أرمل'],
                 'marital_status_female': ['عزباء', 'متزوجة', 'مطلقة', 'أرملة'],
             }

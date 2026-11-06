@@ -1,84 +1,36 @@
 from core.mutation import check_mutation
 # backend/apps/patients/services.py
-import os
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
-from django.db.models import Q, CharField, TextField
-from datetime import date
+from django.db.models import Q
 from .models import Patient, PatientDocument, PatientCareTeam
 from apps.accounts.models import User
-from django.db import connection
-from core.arabic_utils import normalise_arabic
 from core.exceptions import ConflictError
-from core.file_utils import save_uploaded_file
-from core.normalization import (
-    NATIONAL_ID_MAX_LENGTH,
-    NATIONAL_ID_MIN_LENGTH,
-    normalize_identifier,
-    normalize_name,
-    normalize_phone,
-    normalized_search_text,
-)
+from core.file_utils import save_uploaded_file, uploaded_file_metadata
+from core.normalization import normalized_search_text
 from core.query_utils import apply_ordering
+from core.verification import stamp_verification
+from .validation import EDITABLE_FIELDS, IDENTITY_FIELDS, CORRECTION_FIELDS, CLINICAL_PROFILE_FIELDS, normalize_profile_data, validate_profile_data
+from .projections import CONTACT_FIELDS, sync_profile_identifier, profile_contact_values
+
+def end_care_team_membership(member, actor, reason):
+    # Cancelling a planned membership must not produce an end before its start.
+    member.ended_at = max(timezone.now(), member.started_at)
+    member.ended_by, member.removal_reason = actor, reason
+    member.save()
+
 
 class PatientService:
-    EDITABLE_FIELDS = {
-        'first_name', 'father_name', 'surname', 'mother_name', 'dob_year', 'gender',
-        'national_id', 'marital_status', 'occupation', 'permanent_address', 'phone',
-        'emergency_contact_name', 'emergency_contact_relation', 'emergency_contact_phone',
-        'family_history', 'important_notes', 'registration_date', 'identity_verification',
-        'preferred_language', 'preferred_contact_channel', 'communication_restrictions', 'allergy_status', 'medication_status',
-    }
-    IDENTITY_FIELDS = ('first_name', 'father_name', 'surname', 'mother_name')
-    CORRECTION_FIELDS = set(IDENTITY_FIELDS) | {'dob_year', 'gender', 'national_id', 'phone', 'permanent_address', 'marital_status', 'emergency_contact_name', 'emergency_contact_relation', 'emergency_contact_phone', 'family_history', 'important_notes'}
+    EDITABLE_FIELDS = EDITABLE_FIELDS
+    IDENTITY_FIELDS = IDENTITY_FIELDS
+    CORRECTION_FIELDS = CORRECTION_FIELDS
 
     def _normalize(self, data):
-        data = data.copy()
-        if 'admission_date' in data:
-            data.setdefault('registration_date', data.pop('admission_date'))
-        for field in self.EDITABLE_FIELDS:
-            model_field = Patient._meta.get_field(field)
-            if isinstance(model_field, (CharField, TextField)) and field in data:
-                data[field] = '' if data[field] is None else data[field].strip() if isinstance(data[field], str) else data[field]
-        for field in self.IDENTITY_FIELDS:
-            if field in data and data[field] is not None:
-                data[field] = normalize_name(data[field])
-        for field in ('phone', 'emergency_contact_phone'):
-            if field in data:
-                data[field] = normalize_phone(data[field]) or ''
-        if 'national_id' in data:
-            data['national_id'] = normalize_identifier(data['national_id']) or ''
-        return data
+        return normalize_profile_data(data)
 
     def _validate(self, data, is_edit=False, existing=None):
-        errors = []
-        if not is_edit:
-            if not data.get('first_name'):
-                errors.append('الاسم الأول مطلوب')
-            if not data.get('surname'):
-                errors.append('اسم العائلة مطلوب')
-        else:
-            if 'first_name' in data and not data.get('first_name'):
-                errors.append('الاسم الأول مطلوب')
-            if 'surname' in data and not data.get('surname'):
-                errors.append('اسم العائلة مطلوب')
-
-        if data.get('national_id'):
-            if not (NATIONAL_ID_MIN_LENGTH <= len(data['national_id']) <= NATIONAL_ID_MAX_LENGTH):
-                errors.append('الرقم الوطني غير صالح')
-        if data.get('phone'):
-            phone = data['phone'].strip()
-            if not (phone.startswith('0') or phone.startswith('+963')):
-                errors.append('رقم الهاتف غير صالح')
-        dob_year = data.get('dob_year')
-        if dob_year is not None and (type(dob_year) is not int or not (1900 <= dob_year <= timezone.localdate().year)):
-            errors.append('سنة الميلاد غير صالحة')
-        emergency_name = data.get('emergency_contact_name', getattr(existing, 'emergency_contact_name', ''))
-        if not emergency_name and any(data.get(key, getattr(existing, key, '')) for key in ('emergency_contact_relation', 'emergency_contact_phone')):
-            errors.append('اسم جهة اتصال الطوارئ مطلوب عند تسجيل بيانات الاتصال')
-        if errors:
-            raise ValidationError(errors)
+        return validate_profile_data(data, is_edit, existing)
 
     def _resolve_doctor(self, data, current_user):
         doctor = data.get('doctor')
@@ -96,22 +48,12 @@ class PatientService:
         return None
 
     def _sync_identifier(self, patient, actor, previous=''):
-        from .models import PatientIdentifier
-        if previous and previous != patient.national_id:
-            PatientIdentifier.objects.filter(patient=patient, identifier_type='national_id', value=previous, issuer='', issuing_country='', is_active=True).update(is_active=False, retired_at=timezone.now(), retired_by=actor, retirement_reason='Primary identity corrected')
-        if patient.national_id:
-            PatientIdentifier.objects.get_or_create(patient=patient, identifier_type='national_id',
-                value=patient.national_id, issuer='', issuing_country='', is_active=True,
-                defaults={'created_by': actor, 'updated_by': actor, 'verification': 'reported'})
+        sync_profile_identifier(patient, actor, previous)
 
     def _verify_profile(self, patient, data, actor, identity_changed=False, previous_verification=None, previous_summaries=None):
         from .models import PatientAllergy, PatientMedication
-        if patient.identity_verification == 'verified' and (previous_verification != 'verified' or identity_changed):
-            if actor.role not in {'admin', 'doctor'}:
-                raise PermissionDenied('تأكيد الهوية مخصص للطبيب أو المدير')
-            patient.identity_verified_at, patient.identity_verified_by = timezone.now(), actor
-        elif patient.identity_verification != 'verified':
-            patient.identity_verified_at, patient.identity_verified_by = None, None
+        stamp_verification(patient, actor, None if identity_changed else previous_verification,
+                           prefix='identity_', denial='تأكيد الهوية مخصص للطبيب أو المدير')
         for field in ('family_history', 'important_notes'):
             if field in data and data[field] != (previous_summaries or {}).get(field, '') and not actor.has_perm('edit_visit'):
                 raise PermissionDenied('تعديل المعلومات السريرية يتطلب صلاحية تعديل الزيارات')
@@ -123,8 +65,8 @@ class PatientService:
             if getattr(patient, field) in {'none_known', 'unknown'} and patient.pk and model.objects.filter(patient=patient, is_active=True, status__in=statuses).exists():
                 raise ValidationError({field: ['توجد سجلات حالية؛ راجعها قبل تسجيل عدم وجود معلومات']})
 
-    @transaction.atomic
-    def create_patient(self, data, current_user):
+    def prepare_create(self, data, current_user):
+        """Validate the same proposed aggregate for preview and creation, without writes."""
         data = self._normalize(data)
         self._validate(data, is_edit=False)
         doctor = self._resolve_doctor(data, current_user)
@@ -134,11 +76,6 @@ class PatientService:
         patient.doctor = doctor  # Compatibility display only; access/assignment is care-team based.
         self._verify_profile(patient, data, current_user)
         patient.full_clean()
-        patient.save()
-        self._sync_identifier(patient, current_user)
-        if patient.emergency_contact_name:
-            from .models import PatientContact
-            PatientContact.objects.create(patient=patient, name=patient.emergency_contact_name, relationship=patient.emergency_contact_relation, phone=patient.emergency_contact_phone, is_emergency=True, is_primary=True, created_by=current_user, updated_by=current_user)
         members = data.get('care_team_ids', [])
         if not isinstance(members, list) or len(members) > 100:
             raise ValidationError({'care_team_ids': ['قائمة فريق غير صالحة']})
@@ -150,6 +87,22 @@ class PatientService:
         users = list(User.objects.filter(pk__in=ids, is_active=True))
         if len(users) != len(ids):
             raise ValidationError({'care_team_ids': ['يوجد عضو غير متاح']})
+        if patient.emergency_contact_name:
+            from .models import PatientContact
+            contact = PatientContact(patient=patient, is_emergency=True, is_primary=True,
+                                     created_by=current_user, updated_by=current_user, **profile_contact_values(patient))
+            contact.full_clean(exclude=['patient'])
+        return patient, users
+
+    @transaction.atomic
+    def create_patient(self, data, current_user):
+        patient, users = self.prepare_create(data, current_user)
+        patient.save()
+        self._sync_identifier(patient, current_user)
+        if patient.emergency_contact_name:
+            from .models import PatientContact
+            PatientContact.objects.create(patient=patient, is_emergency=True, is_primary=True,
+                created_by=current_user, updated_by=current_user, **profile_contact_values(patient))
         for member in users:
             PatientCareTeam.objects.create(patient=patient, user=member, assigned_by=current_user,
                 role='doctor' if member.role == 'doctor' else 'coordinator')
@@ -183,14 +136,14 @@ class PatientService:
         patient.full_clean()
         patient.save()
         self._sync_identifier(patient, current_user, previous_identifier)
-        contact_fields = {'emergency_contact_name': 'name', 'emergency_contact_relation': 'relationship', 'emergency_contact_phone': 'phone'}
+        contact_fields = CONTACT_FIELDS
         if any(key in changes for key in contact_fields):
             from .models import PatientContact
             from .record_services import PatientRecordService
             primary = PatientContact.objects.filter(patient=patient, is_active=True, is_primary=True).first()
             if primary and not primary.is_emergency:
                 raise ValidationError({'emergency_contact_name': ['عدّل الاتصال الأساسي من سجل الاتصالات أولاً']})
-            fields = {value: getattr(patient, key) for key, value in contact_fields.items()}
+            fields = profile_contact_values(patient)
             fields.update(is_primary=True, is_emergency=True)
             retire = not fields['name']
             if retire and (fields['phone'] or fields['relationship']):
@@ -200,7 +153,7 @@ class PatientService:
                     current_user, patient.version, primary.pk if primary else None, retire=retire, reason=reason)
                 patient.refresh_from_db()
         if changes:
-            narrative = {key: value for key, value in changes.items() if key in {'family_history', 'important_notes'}}
+            narrative = {key: value for key, value in changes.items() if key in CLINICAL_PROFILE_FIELDS}
             demographic = {key: value for key, value in changes.items() if key not in narrative}
             if demographic:
                 PatientCorrection.objects.create(patient=patient, actor=current_user, reason=reason.strip(), changes=demographic)
@@ -346,7 +299,7 @@ class PatientService:
         user_id = self._member_id(user_id)
         if not isinstance(role, str) or not role.strip() or len(role.strip()) > 50:
             raise ValidationError({'role': ['دور عضو فريق الرعاية مطلوب وبحد أقصى 50 حرف']})
-        if PatientCareTeam.objects.filter(patient=patient, user_id=user_id, ended_at__isnull=True).exists():
+        if PatientCareTeam.objects.unended().filter(patient=patient, user_id=user_id).exists():
             raise ValidationError(['العضو موجود بالفعل'])
         user = User.objects.filter(id=user_id, is_active=True).first()
         if not user:
@@ -367,11 +320,10 @@ class PatientService:
         user_id = self._member_id(user_id)
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
             raise ValidationError({'reason': ['سبب إنهاء العضوية مطلوب']})
-        member = PatientCareTeam.objects.filter(patient=patient, user_id=user_id, ended_at__isnull=True).first()
+        member = PatientCareTeam.objects.unended().filter(patient=patient, user_id=user_id).first()
         if not member:
             raise ValidationError(['العضو غير موجود'])
-        member.ended_at, member.ended_by, member.removal_reason = timezone.now(), actor, reason.strip()
-        member.save()
+        end_care_team_membership(member, actor, reason.strip())
         patient.version += 1
         patient.save(update_fields=['version', 'updated_at'])
         return patient.version
@@ -386,9 +338,8 @@ class PatientDocumentService:
             raise ValidationError({'category': ['فئة غير صالحة']})
         path = save_uploaded_file(file, 'patient_docs', patient.id)
         try:
-            doc = PatientDocument(patient=patient, filename=os.path.basename(path), original_filename=file.name,
-                filepath=path, file_size=file.verified_size, mime_type=file.verified_mime,
-                checksum=file.verified_checksum, category=category, description=description, uploaded_by=uploaded_by,
+            doc = PatientDocument(patient=patient, **uploaded_file_metadata(file, path),
+                category=category, description=description, uploaded_by=uploaded_by,
                 **{key: value for key, value in (metadata or {}).items() if key in {'document_date', 'source', 'provider', 'verification'}})
             from .record_services import stamp_verification
             stamp_verification(doc, uploaded_by)

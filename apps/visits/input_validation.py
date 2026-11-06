@@ -15,23 +15,8 @@ def text(value, field, maximum):
 
 
 def clinical_object(value):
-    if not isinstance(value, dict):
-        raise ValidationError({'clinical_data': ['يجب أن تكون البيانات كائناً منظماً']})
-    if 'formulation' in value:
-        formulation = value['formulation']
-        if not isinstance(formulation, dict):
-            raise ValidationError({'clinical_data': ['الصياغة السريرية يجب أن تكون كائناً']})
-        for key in ('predisposing', 'precipitating', 'perpetuating', 'protective'):
-            if key in formulation: text(formulation[key], 'clinical_data', 20_000)
-    for key in ('mse', 'risk_notes', 'plan_details'):
-        if key in value: text(value[key], 'clinical_data', 50_000)
-    try:
-        encoded = json.dumps(value, cls=DjangoJSONEncoder, allow_nan=False)
-    except (ValueError, TypeError, RecursionError):
-        raise ValidationError({'clinical_data': ['بيانات غير صالحة']})
-    if len(encoded.encode()) > 200_000:
-        raise ValidationError({'clinical_data': ['البيانات كبيرة جداً']})
-    return value
+    from core.json_schemas import narrative_schema
+    return narrative_schema(value, 'clinical_data')
 
 
 def normalize_rows(values, kind, visit=None):

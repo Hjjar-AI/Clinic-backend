@@ -1,21 +1,10 @@
 # backend/apps/accounts/signals.py
-from django.db.models.signals import post_save, post_delete, m2m_changed
+from django.db.models.signals import m2m_changed
 from django.dispatch import receiver
-from django.core.cache import cache
 from .models import User
 from core.signals import log_action
 from django.contrib.auth.signals import user_logged_in, user_logged_out
-from core.cache_utils import invalidate_group
 from django.contrib.auth.models import Group
-
-@receiver(post_save, sender=User)
-@receiver(post_delete, sender=User)
-def clear_user_cache(sender, **kwargs):
-    if kwargs.get('raw'):
-        return
-    invalidate_group('context_doctors')
-    invalidate_group('context_users')
-    invalidate_group('dashboard')
 
 @receiver(user_logged_in)
 def log_user_login(sender, request, user, **kwargs):

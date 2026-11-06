@@ -1,4 +1,4 @@
-import uuid
+from core.reminders import renew_reminder
 # backend/apps/tasks/services.py
 from django.db import transaction, models
 from django.core.exceptions import ValidationError, PermissionDenied
@@ -11,16 +11,12 @@ from core.query_utils import apply_ordering
 
 class TaskService:
     def get_for_user(self, user, assigned_filter='', status_filter='', params=None):
+        qs = UserTask.objects.for_user(user)
         if user.role == 'admin':
-            qs = UserTask.objects.all()
             if assigned_filter == 'unassigned':
                 qs = qs.filter(assigned_to__isnull=True)
             elif assigned_filter and assigned_filter.isdigit():
                 qs = qs.filter(assigned_to_id=int(assigned_filter))
-        else:
-            qs = UserTask.objects.filter(
-                models.Q(assigned_to=user) | models.Q(assigned_to__isnull=True)
-            )
         if status_filter in {'pending', 'open'}:
             qs = qs.filter(status='open')
         elif status_filter == 'in_progress':
@@ -33,8 +29,11 @@ class TaskService:
         search = params.get('search', '').strip()
         if search:
             qs = qs.filter(models.Q(title__icontains=search) | models.Q(description__icontains=search))
+        qs = qs.annotate(priority_rank=models.Case(
+            models.When(priority='low', then=0), models.When(priority='medium', then=1),
+            models.When(priority='high', then=2), default=0, output_field=models.IntegerField()))
         qs = apply_ordering(qs, params, {
-            'due_date': 'due_date', 'priority': 'priority', 'status': 'status',
+            'due_date': 'due_date', 'priority': 'priority_rank', 'status': 'status',
             'created_at': 'created_at', 'order': 'order',
         }, default='order')
         return qs.select_related('assigned_to', 'completed_by')
@@ -85,8 +84,7 @@ class TaskService:
             if k in {'title', 'description', 'priority', 'due_date', 'assigned_to'}:
                 setattr(task, k, v)
         if reminder_changed:
-            task.reminder_generation = uuid.uuid4()
-            task.reminder_sent = False
+            renew_reminder(task, 'reminder_sent')
         task.version += 1
         task.full_clean()
         task.save()
@@ -104,8 +102,7 @@ class TaskService:
         task.status = target_status
         task.status_reason = reason
         if reopening:
-            task.reminder_generation = uuid.uuid4()
-            task.reminder_sent = False
+            renew_reminder(task, 'reminder_sent')
         if target_status == 'completed':
             task.completed_at = timezone.now()
             task.completed_by = actor

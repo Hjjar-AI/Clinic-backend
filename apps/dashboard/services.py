@@ -1,8 +1,10 @@
+from apps.patients.follow_up_services import follow_up_data
 # backend/apps/dashboard/services.py
 from django.db.models import Q
 from django.utils import timezone
 from datetime import timedelta
 from apps.patients.models import Patient
+from apps.patients.querysets import care_team_names
 from apps.visits.models import Visit, VisitDiagnosis, VisitMedication
 from apps.appointments.models import Appointment
 from apps.tasks.models import UserTask
@@ -65,14 +67,7 @@ class DashboardService:
         overdue_followups = actions.filter(due_date__lt=today, status='pending').order_by('due_date', 'pk')[:50]
         upcoming_followups = actions.filter(due_date__gte=today, due_date__lte=next_week, status='pending').order_by('due_date', 'pk')[:50]
 
-        pending_tasks = UserTask.objects.filter(
-            Q(assigned_to=user) | Q(assigned_to__isnull=True),
-            status__in=['open', 'in_progress']
-        ).order_by('due_date', 'created_at')[:5]
-        if user.role == 'admin':
-            pending_tasks = UserTask.objects.filter(
-                status__in=['open', 'in_progress']
-            ).order_by('due_date', 'created_at')[:5]
+        pending_tasks = UserTask.objects.for_user(user).pending().order_by('due_date', 'created_at')[:5]
 
         from core.access import accessible_appointments
         upcoming_appointments = accessible_appointments(user).filter(
@@ -161,7 +156,7 @@ class DashboardService:
             'phone': p.phone,
             'registration_date': p.registration_date.isoformat() if p.registration_date else None,
             'patient_number': p.patient_number,
-            'care_team_names': [member.user.full_name or member.user.username for member in p.care_team.filter(ended_at__isnull=True).select_related('user')],
+            'care_team_names': care_team_names(p),
             'created_at': p.created_at.isoformat() if p.created_at else None,
         } for p in qs]
 
@@ -174,9 +169,8 @@ class DashboardService:
             'visit_date': v.visit_date.isoformat() if v.visit_date else None,
             'main_complaints': v.main_complaints,
             'status': v.status,
-            'follow_up_date': v.follow_up_date.isoformat() if v.follow_up_date else None,
-            'follow_up_completed': v.follow_up_completed,
-        } for v in qs]
+            'follow_up': follow_up_data(v.follow_up),
+        } for v in qs.select_related('patient', 'follow_up')]
 
     def _serialize_tasks(self, qs):
         return [{

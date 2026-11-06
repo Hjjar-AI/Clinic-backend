@@ -1,3 +1,5 @@
+from datetime import date
+from django.db import transaction
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.template.loader import render_to_string
@@ -46,7 +48,7 @@ class ReferralService:
             'visit_version': visit.version,
             'template_version': self.TEMPLATE_VERSION,
             'patient_name': revision.snapshot['patient']['name'],
-            'visit_date': visit.visit_date.strftime('%d/%m/%Y'),
+            'visit_date': date.fromisoformat(revision.snapshot['fields']['visit_date']).strftime('%d/%m/%Y'),
             'main_complaints': revision.snapshot['fields']['main_complaints'] or '',
             'diagnoses': revision.snapshot['diagnoses'],
             'medications': revision.snapshot['medications'],
@@ -59,6 +61,15 @@ class ReferralService:
         }
 
     def generate_pdf(self, visit, requested_version, referral_reason, user_id):
+        from django.core.exceptions import PermissionDenied
+        from apps.accounts.models import User
+        from core.access import require_actor_permission, accessible_visits
+        actor = require_actor_permission(User(pk=user_id), 'view_referrals')
+        if actor.role not in {'admin', 'doctor'} or not actor.has_perm('edit_visit'):
+            raise PermissionDenied('إصدار المستندات مخصص للطبيب المخول')
+        visit = accessible_visits(actor).select_related('patient').filter(pk=visit.pk).first()
+        if visit is None:
+            raise PermissionDenied('غير مصرح بالوصول إلى الزيارة')
         snapshot = self.build_snapshot(visit, requested_version, referral_reason)
         clinic_info = snapshot['clinic']
         html = render_to_string('referral_letter.html', {
@@ -71,12 +82,12 @@ class ReferralService:
         })
         pdf = render_pdf_from_html(html)
         if pdf:
-            from apps.accounts.models import User
             from apps.prescriptions.issuance import record_document
-            record_document(visit, User.objects.get(pk=user_id), 'referral', snapshot, pdf)
-            log_action(user_id, 'generate_referral', 'Visit', visit.id, {
-                'summary': f'Generated referral from visit version {visit.version}',
-                'visit_version': visit.version,
-                'template_version': snapshot['template_version'],
-            })
+            with transaction.atomic():
+                record_document(visit, actor, 'referral', snapshot, pdf)
+                log_action(actor.pk, 'generate_referral', 'Visit', visit.pk, {
+                    'summary': f'Generated referral from visit version {visit.version}',
+                    'visit_version': visit.version,
+                    'template_version': snapshot['template_version'],
+                })
         return pdf

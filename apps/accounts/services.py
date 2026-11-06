@@ -1,17 +1,17 @@
-from core.mutation import parse_version
 # backend/apps/accounts/services.py
-from django.contrib.auth import authenticate, login, logout
-from django.core.exceptions import ValidationError
+from django.contrib.auth import login, logout
+from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils import timezone
 from django.contrib.auth.password_validation import validate_password
 from rest_framework.exceptions import AuthenticationFailed
 from .models import User
 from django.db import transaction
-from core.exceptions import ConflictError
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from core.permissions import ALL_PERMISSIONS, DEFAULT_PERMISSIONS
 from core.signals import log_action
+from core.image_data import validate_embedded_image
+from .security import check_user_version, revoke_sessions
 
 
 class AuthService:
@@ -61,7 +61,7 @@ class AuthService:
         user.set_password(new_password)
         user.version += 1
         user.force_password_change = False
-        user.session_revoked_at = timezone.now()
+        revoke_sessions(user)
         user.save()
 
         if request:
@@ -70,6 +70,12 @@ class AuthService:
 
 
 class UserService:
+
+    @staticmethod
+    def _lock_active_admins():
+        # Evaluating in primary-key order acquires locks; count() would not.
+        return list(User.objects.select_for_update().filter(role='admin', is_active=True)
+                    .order_by('pk').values_list('pk', flat=True))
 
     @staticmethod
     def _apply_role_group(user, role):
@@ -88,6 +94,8 @@ class UserService:
 
     @transaction.atomic
     def create_user(self, username, password, full_name, role, stamp_data=None):
+        username = User.normalize_username(username).strip()
+        validate_embedded_image(stamp_data, 'stamp_data')
         if User.objects.filter(username=username).exists():
             raise ValidationError(['اسم المستخدم موجود بالفعل'])
         try:
@@ -107,14 +115,12 @@ class UserService:
 
     @transaction.atomic
     def update_user(self, user, request, expected_version=None, **data):
+        if 'stamp_data' in data:
+            validate_embedded_image(data['stamp_data'], 'stamp_data')
         # Evaluate rows in a stable order; count() alone does not acquire row locks.
-        active_admin_ids = list(User.objects.select_for_update().filter(
-            role='admin', is_active=True
-        ).order_by('pk').values_list('pk', flat=True))
+        active_admin_ids = self._lock_active_admins()
         user = User.objects.select_for_update().get(pk=user.pk)
-        expected_version = parse_version(expected_version)
-        if user.version != expected_version:
-            raise ConflictError('تم تعديل المستخدم بواسطة مستخدم آخر')
+        check_user_version(user, expected_version)
         # Enforce privilege escalation prevention: only superusers can modify these fields.
         if not request.user.is_superuser:
             data.pop('is_staff', None)
@@ -134,20 +140,22 @@ class UserService:
                 raise ValidationError(e.messages)
             user.set_password(new_password)
             user.force_password_change = True
-            user.session_revoked_at = timezone.now()
+            revoke_sessions(user)
 
         data.pop('force_password_change', None)
         old_role = user.role
         for k, v in data.items():
             if k != 'version':  # Exclude version from direct assignment
                 setattr(user, k, v)
+        user.username = User.normalize_username(user.username).strip()
         user.version += 1
+        user.full_clean()
         user.save()
         if user.role != old_role:
             previous_direct = sorted(user.user_permissions.values_list('codename', flat=True))
             user.user_permissions.clear()
             self._apply_role_group(user, user.role)
-            user.session_revoked_at = timezone.now()
+            revoke_sessions(user)
             user.save(update_fields=['session_revoked_at'])
             log_action(request.user.id, 'role_change', 'User', user.id, {
                 'summary': f'Role changed from {old_role} to {user.role}; direct grants reset',
@@ -159,9 +167,7 @@ class UserService:
 
     @transaction.atomic
     def deactivate_user(self, user, actor, expected_version=None):
-        active_admin_ids = list(User.objects.select_for_update().filter(
-            role='admin', is_active=True
-        ).order_by('pk').values_list('pk', flat=True))
+        active_admin_ids = self._lock_active_admins()
         user = User.objects.select_for_update().get(pk=user.pk)
         from core.mutation import check_mutation
         check_mutation(user, expected_version)
@@ -171,7 +177,30 @@ class UserService:
             if user.is_active and len(active_admin_ids) <= 1:
                 raise ValidationError({'user': ['لا يمكن تعطيل آخر حساب مدير نشط']})
         user.is_active = False
-        user.session_revoked_at = timezone.now()
+        revoke_sessions(user)
         user.version += 1
         user.save(update_fields=['is_active', 'session_revoked_at', 'version'])
+        return user
+
+    @transaction.atomic
+    def set_permissions(self, user, actor, codenames, expected_version):
+        if not actor.has_perm('manage_users'):
+            raise PermissionDenied('غير مصرح بتعديل الصلاحيات')
+        if not isinstance(codenames, list) or any(not isinstance(item, str) for item in codenames):
+            raise ValidationError({'permissions': ['قائمة أسماء صلاحيات مطلوبة']})
+        unknown = sorted(set(codenames) - set(ALL_PERMISSIONS))
+        if unknown:
+            raise ValidationError({'permissions': unknown})
+        user = User.objects.select_for_update().get(pk=user.pk)
+        check_user_version(user, expected_version)
+        before = sorted(user.user_permissions.values_list('codename', flat=True))
+        user.user_permissions.set(Permission.objects.filter(codename__in=codenames))
+        revoke_sessions(user)
+        user.version += 1
+        user.save(update_fields=['session_revoked_at', 'version'])
+        log_action(actor.id, 'permissions_change', 'User', user.id, {
+            'summary': 'User permissions changed',
+            'before': before,
+            'after': sorted(set(codenames)),
+        })
         return user

@@ -1,15 +1,13 @@
-import uuid
+from core.reminders import renew_reminder
 from core.mutation import check_mutation
 # backend/apps/appointments/services.py
 from django.db import transaction
 from django.core.exceptions import ValidationError
-from django.utils import timezone
 from datetime import date, datetime, timedelta, time
 from django.conf import settings
 from .models import Appointment
 from apps.accounts.models import User
 from apps.patients.models import Patient
-from core.exceptions import ConflictError
 from core.lifecycle import enforce_transition, transition_reason
 
 
@@ -68,7 +66,7 @@ class AppointmentService:
         appointments = Appointment.objects.filter(
             doctor_id=doctor_id,
             appointment_date__range=(date_obj - timedelta(days=1), date_obj),
-            status__in=['scheduled', 'confirmed', 'arrived'],
+            status__in=self.OCCUPYING_STATUSES,
         )
 
         if exclude_id is not None:
@@ -122,6 +120,31 @@ class AppointmentService:
             current_dt += timedelta(minutes=duration)
         return slots
 
+    @staticmethod
+    def _lock_mutation(appointment, expected_version):
+        appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
+        check_mutation(appointment, expected_version)
+        return appointment
+
+    def _require_available(self, doctor_id, day, clock, duration, exclude_id=None):
+        self._lock_doctor_schedule(doctor_id)
+        if not self.is_time_available(doctor_id, day, clock, duration, exclude_id):
+            raise ValidationError(['هذا الوقت محجوز بالفعل'])
+
+    @staticmethod
+    def _apply_status(appointment, target_status, reason='', *, renew_scheduled=True):
+        if not enforce_transition('appointment', appointment.status, target_status):
+            return False
+        appointment.status_reason = transition_reason(reason, required=target_status in {'cancelled', 'no-show'})
+        appointment.status = target_status
+        if target_status == 'scheduled':
+            if renew_scheduled:
+                renew_reminder(appointment, 'reminder_sent', 'reminder_sent_hour')
+        else:
+            appointment.reminder_sent = target_status != 'confirmed'
+            appointment.reminder_sent_hour = target_status != 'confirmed'
+        return True
+
     @transaction.atomic
     def create_appointment(self, data):
         patient = data.get('patient')
@@ -153,13 +176,7 @@ class AppointmentService:
 
         date_obj, time_obj = self._schedule_values(date_str, time_obj)
 
-        # Acquire the per-doctor booking lock BEFORE the availability check.
-        # Without this, two concurrent requests for the same slot can both
-        # pass is_time_available() and both commit.
-        self._lock_doctor_schedule(doctor.id)
-
-        if not self.is_time_available(doctor.id, date_obj, time_obj, duration):
-            raise ValidationError(['هذا الوقت محجوز بالفعل'])
+        self._require_available(doctor.id, date_obj, time_obj, duration)
 
         requested_status = data.get('status', 'scheduled')
         if requested_status != 'scheduled':
@@ -180,79 +197,32 @@ class AppointmentService:
 
     @transaction.atomic
     def update_appointment(self, appointment, data, expected_version=None):
-        appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
-        check_mutation(appointment, expected_version)
-        if expected_version is None:
-            raise ValidationError(['يجب توفير رقم الإصدار'])
-        if appointment.version != expected_version:
-            raise ConflictError('تم تعديل هذا الموعد بواسطة مستخدم آخر')
-
-        # F4: The frontend echoes patient_id/doctor_id on every edit; the
-        # serializer maps them to `patient`/`doctor`. Reject only if the VALUE
-        # actually differs, not merely because the key is present.
-        new_patient = data.get('patient')
-        if new_patient is not None and new_patient != appointment.patient:
-            raise ValidationError(['لا يمكن تغيير المريض المرتبط بالموعد'])
-        new_doctor = data.get('doctor')
-        if new_doctor is not None and new_doctor != appointment.doctor:
-            raise ValidationError(['لا يمكن تغيير الطبيب المرتبط بالموعد'])
-
+        appointment = self._lock_mutation(appointment, expected_version)
+        # Clients echo these relations; only an actual reassignment is rejected.
+        for field in ('patient', 'doctor'):
+            if data.get(field) is not None and data[field] != getattr(appointment, field):
+                raise ValidationError({field: ['لا يمكن تغيير الارتباط المسجل للموعد']})
         data = data.copy()
-        # Strip these from data so the assignment loop below can't touch them.
-        data.pop('patient', None)
-        data.pop('doctor', None)
-        data.pop('patient_id', None)
-        data.pop('doctor_id', None)
-
-        new_date = data.get('appointment_date', appointment.appointment_date)
-        new_time = data.get('appointment_time', appointment.appointment_time)
-        new_date, new_time = self._schedule_values(new_date, new_time)
-        data['appointment_date'], data['appointment_time'] = new_date, new_time
-        # F5: canonical key.
-        new_duration = data.get('duration_minutes', data.get('duration', appointment.duration_minutes))
-
-        target_status = data.get('status', appointment.status)
-        schedule_changed = (
-            new_date != appointment.appointment_date
-            or new_time != appointment.appointment_time
-            or new_duration != appointment.duration_minutes
-        )
-        if schedule_changed and appointment.status == 'completed':
+        day, clock = self._schedule_values(data.get('appointment_date', appointment.appointment_date),
+                                          data.get('appointment_time', appointment.appointment_time))
+        duration = data.get('duration_minutes', data.get('duration', appointment.duration_minutes))
+        self._validate_duration(duration)
+        schedule_changed = (day, clock, duration) != (appointment.appointment_date, appointment.appointment_time, appointment.duration_minutes)
+        previous_status = appointment.status
+        if schedule_changed and previous_status == 'completed':
             raise ValidationError({'status': ['لا يمكن نقل موعد مكتمل']})
-        if target_status != appointment.status:
-            enforce_transition('appointment', appointment.status, target_status)
-            data['status_reason'] = transition_reason(
-                data.get('status_reason'), required=target_status in {'cancelled', 'no-show'})
-
-        self._validate_duration(new_duration)
-        data['duration_minutes'] = new_duration
-        if schedule_changed:
-            appointment.reminder_generation = uuid.uuid4()
-            appointment.reminder_sent = False
-            appointment.reminder_sent_hour = False
-        # Check availability if date/time/duration changed. Lock the doctor's
-        # schedule row before re-checking so this read is serialized against
-        # concurrent bookings for the same slot.
-        reactivating = (
-            target_status in self.OCCUPYING_STATUSES
-            and appointment.status not in self.OCCUPYING_STATUSES
-        )
+        target_status = data.get('status', previous_status)
+        self._apply_status(appointment, target_status, data.get('status_reason'), renew_scheduled=False)
+        reactivating = target_status in self.OCCUPYING_STATUSES and previous_status not in self.OCCUPYING_STATUSES
         if target_status in self.OCCUPYING_STATUSES and (schedule_changed or reactivating):
-            self._lock_doctor_schedule(appointment.doctor_id)
-            if not self.is_time_available(appointment.doctor_id, new_date, new_time, new_duration, exclude_id=appointment.id):
-                raise ValidationError(['هذا الوقت محجوز بالفعل'])
-            appointment.reminder_generation = uuid.uuid4()
-            appointment.reminder_sent = False
-            appointment.reminder_sent_hour = False
-
+            self._require_available(appointment.doctor_id, day, clock, duration, appointment.pk)
+        if schedule_changed or reactivating:
+            renew_reminder(appointment, 'reminder_sent', 'reminder_sent_hour')
         if 'status_reason' in data:
-            data['status_reason'] = transition_reason(
-                data['status_reason'], required=target_status in {'cancelled', 'no-show'})
-        # Reminder delivery state belongs to the scheduler, not API input.
-        for k, v in data.items():
-            if k in {'appointment_date', 'appointment_time', 'duration_minutes',
-                     'status', 'status_reason', 'notes'}:
-                setattr(appointment, k, v)
+            appointment.status_reason = transition_reason(data['status_reason'], required=target_status in {'cancelled', 'no-show'})
+        appointment.appointment_date, appointment.appointment_time, appointment.duration_minutes = day, clock, duration
+        if 'notes' in data:
+            appointment.notes = data['notes']
         appointment.version += 1
         appointment.full_clean()
         appointment.save()
@@ -260,43 +230,15 @@ class AppointmentService:
 
     @transaction.atomic
     def reschedule(self, appointment, new_date_str, new_time, expected_version=None):
-        appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
-        check_mutation(appointment, expected_version)
-        if expected_version is None:
-            raise ValidationError(['يجب توفير رقم الإصدار'])
-        if appointment.version != expected_version:
-            raise ConflictError('تم تعديل هذا الموعد بواسطة مستخدم آخر')
+        appointment = self._lock_mutation(appointment, expected_version)
         if appointment.status == 'completed':
             raise ValidationError({'status': ['لا يمكن نقل موعد مكتمل']})
-        # Item #5: guard strptime so a malformed date string returns a clean
-        # ValidationError instead of an unhandled 500.
-        try:
-            new_date = datetime.strptime(new_date_str, '%Y-%m-%d').date()
-        except (ValueError, TypeError):
-            raise ValidationError(['صيغة التاريخ غير صحيحة'])
-
-        if isinstance(new_time, str):
-            try:
-                new_time = time.fromisoformat(new_time)
-            except ValueError:
-                raise ValidationError({'appointment_time': ['صيغة الوقت غير صحيحة']})
-        if not isinstance(new_time, time) or new_time.tzinfo is not None:
-            raise ValidationError({'appointment_time': ['صيغة الوقت غير صحيحة']})
-
-        # Acquire the per-doctor booking lock before the availability check.
-        self._lock_doctor_schedule(appointment.doctor_id)
-
-        if not self.is_time_available(appointment.doctor_id, new_date, new_time, appointment.duration_minutes, exclude_id=appointment.id):
-            raise ValidationError(['الوقت غير متاح'])
-        appointment.appointment_date = new_date
-        appointment.appointment_time = new_time
+        day, clock = self._schedule_values(new_date_str, new_time)
+        self._require_available(appointment.doctor_id, day, clock, appointment.duration_minutes, appointment.pk)
+        appointment.appointment_date, appointment.appointment_time = day, clock
         if appointment.status in {'cancelled', 'no-show'}:
-            enforce_transition('appointment', appointment.status, 'scheduled')
-            appointment.status = 'scheduled'
-            appointment.status_reason = ''
-        appointment.reminder_generation = uuid.uuid4()
-        appointment.reminder_sent = False
-        appointment.reminder_sent_hour = False
+            self._apply_status(appointment, 'scheduled', renew_scheduled=False)
+        renew_reminder(appointment, 'reminder_sent', 'reminder_sent_hour')
         appointment.version += 1
         appointment.full_clean()
         appointment.save()
@@ -304,33 +246,13 @@ class AppointmentService:
 
     @transaction.atomic
     def transition(self, appointment, target_status, expected_version=None, reason=''):
-        appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
-        check_mutation(appointment, expected_version)
-        if expected_version is None:
-            raise ValidationError({'version': ['يجب توفير رقم الإصدار']})
-        if appointment.version != expected_version:
-            raise ConflictError('تم تعديل هذا الموعد بواسطة مستخدم آخر')
-        changed = enforce_transition('appointment', appointment.status, target_status)
-        if not changed:
+        appointment = self._lock_mutation(appointment, expected_version)
+        previous_status = appointment.status
+        if not self._apply_status(appointment, target_status, reason):
             return appointment
-        reason = transition_reason(reason, required=target_status in {'cancelled', 'no-show'})
-        if target_status in self.OCCUPYING_STATUSES and appointment.status not in self.OCCUPYING_STATUSES:
-            self._lock_doctor_schedule(appointment.doctor_id)
-            if not self.is_time_available(
-                appointment.doctor_id, appointment.appointment_date,
-                appointment.appointment_time, appointment.duration_minutes,
-                exclude_id=appointment.id,
-            ):
-                raise ValidationError(['هذا الوقت محجوز بالفعل'])
-        appointment.status = target_status
-        appointment.status_reason = reason
-        if target_status == 'scheduled':
-            appointment.reminder_generation = uuid.uuid4()
-            appointment.reminder_sent = False
-            appointment.reminder_sent_hour = False
-        else:
-            appointment.reminder_sent = target_status not in {'confirmed'}
-            appointment.reminder_sent_hour = target_status not in {'confirmed'}
+        if target_status in self.OCCUPYING_STATUSES and previous_status not in self.OCCUPYING_STATUSES:
+            self._require_available(appointment.doctor_id, appointment.appointment_date,
+                                    appointment.appointment_time, appointment.duration_minutes, appointment.pk)
         appointment.version += 1
         appointment.full_clean()
         appointment.save(update_fields=[
@@ -346,8 +268,7 @@ class AppointmentService:
 
     @transaction.atomic
     def archive(self, appointment, expected_version=None):
-        appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
-        check_mutation(appointment, expected_version)
+        appointment = self._lock_mutation(appointment, expected_version)
         if appointment.status != 'cancelled':
             raise ValidationError({
                 'status': ['لا يمكن أرشفة الموعد قبل إلغائه مع تسجيل السبب'],

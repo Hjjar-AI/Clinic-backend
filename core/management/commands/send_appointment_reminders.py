@@ -3,6 +3,7 @@ from core.operation_gate import gated
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from apps.appointments.models import Appointment
+from apps.appointments.reminders import appointment_reminder_key
 from apps.notifications.services import NotificationService
 from datetime import datetime, timedelta
 from django.utils import timezone
@@ -50,7 +51,7 @@ class Command(BaseCommand):
                     f'لديك موعد بتاريخ {apt.appointment_date} الساعة {apt.appointment_time}',
                     link=f'/appointments?date={apt.appointment_date}',
                     type='info',
-                    dedupe_key=f'appointment-day:{apt.pk}:{apt.reminder_generation}:{apt.appointment_date.isoformat()}:{apt.appointment_time}',
+                    dedupe_key=appointment_reminder_key(apt, 'day'),
                 )
                 apt.reminder_sent = True
                 apt.save(update_fields=['reminder_sent', 'updated_at'])
@@ -85,7 +86,7 @@ class Command(BaseCommand):
                         f'لديك موعد بتاريخ {apt.appointment_date} عند الساعة {apt.appointment_time}',
                         link=f'/appointments?date={apt.appointment_date}',
                         type='warning',
-                        dedupe_key=f'appointment-hour:{apt.pk}:{apt.reminder_generation}:{apt.appointment_date.isoformat()}:{apt.appointment_time}',
+                        dedupe_key=appointment_reminder_key(apt, 'hour'),
                     )
                     apt.reminder_sent_hour = True
                     apt.save(update_fields=['reminder_sent_hour', 'updated_at'])

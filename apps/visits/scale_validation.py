@@ -2,6 +2,7 @@ import math
 from django.core.exceptions import ValidationError
 
 from apps.clinical.models import ClinicalScale
+from core.numeric_validation import finite_number, valid_scale_range, step_aligned
 
 
 def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None):
@@ -40,14 +41,13 @@ def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None)
             raise ValidationError({'scale_responses': ['عنوان سؤال غير صالح']})
         field_type = field_value('field_type', 'slider')
         try:
-            minimum = float(field_value('min_val', 0))
-            maximum = float(field_value('max_val', 10))
-            step = float(field_value('step', 1))
+            minimum = finite_number(field_value('min_val', 0), coerce=True)
+            maximum = finite_number(field_value('max_val', 10), coerce=True)
+            step = finite_number(field_value('step', 1), coerce=True)
         except (TypeError, ValueError, OverflowError):
             raise ValidationError({'scale_responses': ['تعريف رقمي غير صالح']})
         if (not isinstance(field_type, str) or field_type not in {'slider', 'text'}
-                or not all(math.isfinite(v) for v in (minimum, maximum, step))
-                or step <= 0 or maximum <= minimum):
+                or not valid_scale_range(minimum, maximum, step, bound_step=False)):
             raise ValidationError({'scale_responses': [f'نطاق غير صالح للسؤال: {label}']})
         default = field_value('default', minimum)
         key = str(field_id)
@@ -56,14 +56,10 @@ def normalize_scale_response(item, definition_snapshot=None, name_snapshot=None)
             raise ValidationError({'scale_responses': [f'الإجابة مطلوبة: {label}']})
         if field_type == 'slider':
             try:
-                if isinstance(value, bool): raise ValueError()
-                value = float(value)
+                value = finite_number(value, coerce=True)
             except (TypeError, ValueError, OverflowError):
                 raise ValidationError({'scale_responses': [f'قيمة غير رقمية للسؤال: {label}']})
-            if not all(math.isfinite(v) for v in (value, minimum, maximum, step)) or step <= 0:
-                raise ValidationError({'scale_responses': ['قيمة رقمية غير صالحة']})
-            increments = (value - minimum) / step
-            if not math.isfinite(increments) or not math.isclose(increments, round(increments), rel_tol=0, abs_tol=1e-7):
+            if not step_aligned(value, minimum, step):
                 raise ValidationError({'scale_responses': [f'القيمة لا تطابق الخطوة: {label}']})
             if value < minimum or value > maximum:
                 raise ValidationError({'scale_responses': [f'قيمة السؤال خارج النطاق: {label}']})

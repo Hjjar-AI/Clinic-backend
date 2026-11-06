@@ -1,7 +1,5 @@
 import json
-import os
 from django.db import transaction
-from django.db.models import Q
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
@@ -10,7 +8,7 @@ from apps.patients.models import Patient
 from core.mutation import check_mutation
 from core.exceptions import ConflictError
 from core.lifecycle import enforce_transition
-from core.file_utils import save_uploaded_file
+from core.file_utils import save_uploaded_file, uploaded_file_metadata
 from .scale_validation import normalize_scale_response
 from .lab_validation import normalize_lab_values
 from .input_validation import normalize_rows, clinical_object, text
@@ -24,10 +22,9 @@ def lock_visit(visit_id, actor=None, permission=None):
     if visit.patient_id != patient_id:
         raise ConflictError('تغير ملف المريض؛ أعد تحميل الزيارة')
     if actor is not None:
-        from apps.accounts.models import User
-        actor = User.objects.get(pk=actor.pk)
-        from core.access import accessible_visits
-        if not actor.has_perm(permission or 'edit_visit') or not accessible_visits(actor).filter(pk=visit.pk).exists():
+        from core.access import accessible_visits, require_actor_permission
+        actor = require_actor_permission(actor, permission or 'edit_visit')
+        if not accessible_visits(actor).filter(pk=visit.pk).exists():
             raise PermissionDenied('غير مصرح بهذا الإجراء على الزيارة')
     return visit
 
@@ -36,18 +33,26 @@ class VisitService:
     EDITABLE = {
         'visit_date', 'main_complaints', 'history_presenting_complaint', 'treatment_text',
         'doctor_notes', 'clinical_status', 'accompanied_by', 'companion_relation',
-        'follow_up_date', 'pain_level', 'anxiety_level', 'suicide_risk_level',
-        'violence_risk_level', 'firearm_access', 'level_of_care', 'care_basis', 'follow_up_type',
+        'pain_level', 'anxiety_level', 'suicide_risk_level',
+        'violence_risk_level', 'firearm_access', 'level_of_care', 'care_basis',
         'supervisor', 'diagnosis_discussed', 'plan_discussed', 'clinical_data',
     }
 
     def _validate(self, data, require_complete=False):
         if not data.get('visit_date'):
             raise ValidationError({'visit_date': ['تاريخ الزيارة مطلوب']})
-        if data.get('follow_up_date') and data['follow_up_date'] < data['visit_date']:
-            raise ValidationError({'follow_up_date': ['تاريخ المتابعة لا يمكن أن يسبق الزيارة']})
         if require_complete and not text(data.get('main_complaints'), 'main_complaints', 100_000):
             raise ValidationError({'main_complaints': ['الشكوى الرئيسية مطلوبة']})
+
+    @staticmethod
+    def _follow_up_data(visit):
+        from apps.patients.follow_up_services import follow_up_data
+        return follow_up_data(visit.follow_up)
+
+    @staticmethod
+    def _validate_follow_up(visit):
+        if visit.follow_up and visit.follow_up.due_date < visit.visit_date:
+            raise ValidationError({'follow_up_input': ['المتابعة لا تسبق الزيارة']})
 
     def _validate_final_sections(self, medications, labs):
         for row in medications:
@@ -75,17 +80,20 @@ class VisitService:
         return result
 
     def _save_nested(self, visit, nested):
-        for key in ('diagnoses', 'medications', 'lab_values'):
+        from .nested import REPLACERS
+        for key, replace in REPLACERS.items():
             if key in nested:
-                getattr(visit, 'set_' + key)(nested[key])
+                replace(visit, nested[key])
         if 'scale_responses' in nested:
             self._save_scale_responses(visit, nested['scale_responses'])
 
     def _sign(self, visit, actor):
-        if actor.role not in {'admin', 'doctor'} or not actor.has_perm('edit_visit'):
+        from core.access import require_actor_permission
+        actor = require_actor_permission(actor, 'edit_visit')
+        if actor.role not in {'admin', 'doctor'}:
             raise PermissionDenied('التوقيع مخصص للطبيب المخول')
-        self._validate({'visit_date': visit.visit_date, 'main_complaints': visit.main_complaints,
-                        'follow_up_date': visit.follow_up_date}, True)
+        self._validate({'visit_date': visit.visit_date, 'main_complaints': visit.main_complaints}, True)
+        self._validate_follow_up(visit)
         self._validate_final_sections(visit.get_medications(), visit.get_lab_values())
         visit.signed_by = actor
         visit.signed_at = timezone.now()
@@ -93,7 +101,7 @@ class VisitService:
         visit.save(update_fields=['signed_by', 'signed_at', 'date_signed', 'updated_at'])
         scalar = {field.name: field.value_from_object(visit) for field in visit._meta.concrete_fields}
         snapshot = json.loads(json.dumps({
-            'schema_version': 2, 'fields': scalar, 'diagnoses': visit.get_diagnoses(),
+            'schema_version': 3, 'follow_up': self._follow_up_data(visit), 'fields': scalar, 'diagnoses': visit.get_diagnoses(),
             'medications': visit.get_medications(), 'lab_values': visit.get_lab_values(),
             'scales': list(visit.scale_responses.values('scale_id', 'scale_name_snapshot', 'responses_json')),
             'attachments': list(visit.attachments.values('id', 'original_filename', 'filepath', 'file_size')),
@@ -112,15 +120,17 @@ class VisitService:
 
     @transaction.atomic
     def create_visit(self, patient, data, current_user):
+        from core.access import require_actor_permission
+        current_user = require_actor_permission(current_user, 'add_visit')
         patient = Patient.objects.select_for_update().get(pk=patient.pk)
         from apps.patients.record_services import require_access
         require_access(patient, current_user)
-        if not current_user.has_perm('add_visit'):
-            raise PermissionDenied('غير مصرح بإضافة زيارة')
         data = data.copy()
         status = data.pop('status', 'draft')
         if status not in {'draft', 'final'}:
             raise ValidationError({'status': ['يجب إنشاء الزيارة كمسودة أو نهائية']})
+        has_plan = 'follow_up_input' in data
+        plan = data.pop('follow_up_input', None)
         nested = self._nested(data)
         if 'clinical_data' in data:
             from .instruction_acknowledgement import stamp_instruction_acknowledgement
@@ -131,10 +141,11 @@ class VisitService:
         visit.full_clean(exclude=['patient', 'author', 'signed_by', 'supervisor'])
         visit.save()
         self._save_nested(visit, nested)
+        if has_plan:
+            from apps.patients.follow_up_services import set_visit_follow_up
+            set_visit_follow_up(visit, plan, current_user, action='add_visit')
         if status == 'final':
             self._sign(visit, current_user)
-        from apps.patients.follow_up_services import sync_visit_follow_up
-        sync_visit_follow_up(visit, current_user)
         return visit
 
     @transaction.atomic
@@ -148,30 +159,30 @@ class VisitService:
             raise ValidationError({'patient_id': ['لا يمكن تغيير مريض الزيارة']})
         status = data.pop('status', visit.status)
         enforce_transition('visit', visit.status, status)
+        has_plan = 'follow_up_input' in data
+        plan = data.pop('follow_up_input', None)
+        opening_version = visit.version
         nested = self._nested(data, visit)
         if 'clinical_data' in data:
             from .instruction_acknowledgement import stamp_instruction_acknowledgement
             data['clinical_data'] = stamp_instruction_acknowledgement(data['clinical_data'], current_user, visit.clinical_data)
-        old_follow_up = visit.follow_up_date
         for key, value in data.items():
             if key in self.EDITABLE:
                 setattr(visit, key, value)
-        if visit.follow_up_date != old_follow_up:
-            visit.follow_up_completed = False
-            visit.follow_up_outcome = 'pending'
-            visit.follow_up_completed_at = None
-            visit.follow_up_completed_by = None
-        self._validate({'visit_date': visit.visit_date, 'main_complaints': visit.main_complaints,
-                        'follow_up_date': visit.follow_up_date})
+        self._validate({'visit_date': visit.visit_date, 'main_complaints': visit.main_complaints})
         visit.status = status
-        visit.version += 1
         visit.full_clean(exclude=['patient', 'author', 'signed_by', 'supervisor'])
         visit.save()
         self._save_nested(visit, nested)
+        if has_plan:
+            from apps.patients.follow_up_services import set_visit_follow_up
+            set_visit_follow_up(visit, plan, current_user)
+        self._validate_follow_up(visit)
+        if visit.version == opening_version:
+            visit.version += 1
+            visit.save(update_fields=['version', 'updated_at'])
         if status in {'final', 'locked'}:
             self._sign(visit, current_user)
-        from apps.patients.follow_up_services import sync_visit_follow_up
-        sync_visit_follow_up(visit, current_user)
         return visit
 
     @transaction.atomic
@@ -222,47 +233,19 @@ class VisitService:
         check_mutation(visit, expected_version)
         if visit.status != 'draft':
             raise ValidationError({'status': ['السجلات المعتمدة تحفظ تاريخياً']})
+        if visit.follow_up:
+            from apps.patients.follow_up_services import set_visit_follow_up
+            set_visit_follow_up(visit, {'due_date': None, 'reason': 'Draft visit archived'}, actor, action='delete_visit')
         visit.soft_delete()
-        from apps.patients.follow_up_services import sync_visit_follow_up
-        sync_visit_follow_up(visit, None)
         return True
 
     @transaction.atomic
-    def complete_follow_up(self, visit, actor, expected_version=None, outcome='completed'):
-        visit = lock_visit(visit.pk, actor)
-        check_mutation(visit, expected_version)
-        if not visit.follow_up_date or not isinstance(outcome, str) or outcome not in {'completed', 'missed', 'cancelled', 'waived'}:
-            raise ValidationError({'follow_up': ['تاريخ ونتيجة متابعة صالحان مطلوبان']})
-        from core.follow_up import follow_up_transition
-        if not follow_up_transition(visit.follow_up_outcome, outcome):
-            return visit
-        visit.follow_up_outcome = outcome
-        visit.follow_up_completed = outcome == 'completed'
-        visit.follow_up_completed_at = timezone.now()
-        visit.follow_up_completed_by = actor
-        visit.version += 1
-        visit.save()
-        from apps.patients.follow_up_services import sync_visit_follow_up
-        sync_visit_follow_up(visit, actor)
-        return visit
-
-    @transaction.atomic
     def mark_all_overdue(self, user):
-        from core.access import accessible_visits
         from apps.patients.follow_up_services import accessible_follow_ups
-        rows = accessible_follow_ups(user).filter(legacy_visit_follow_up=False,
-            due_date__lt=timezone.localdate(), status='pending')
-        from core.access import accessible_patients
-        visits = accessible_visits(user).filter(patient__in=accessible_patients(user),
-            follow_up_date__lt=timezone.localdate(), follow_up_outcome='pending')
-        patient_ids = set(rows.values_list('patient_id', flat=True)) | set(visits.values_list('patient_id', flat=True))
-        # Batch operations acquire all parent locks in the same order as merge.
+        rows = accessible_follow_ups(user).filter(due_date__lt=timezone.localdate(), status='pending')
+        patient_ids = set(rows.values_list('patient_id', flat=True))
         list(Patient.all_objects.select_for_update().filter(pk__in=patient_ids).order_by('pk'))
-        visits = visits.filter(patient_id__in=patient_ids).select_for_update().order_by('pk')
         count = 0
-        for visit in visits:
-            self.complete_follow_up(visit, user, visit.version, 'missed')
-            count += 1
         from apps.patients.record_services import PatientRecordService
         rows = rows.filter(patient_id__in=patient_ids).order_by('patient_id', 'pk')
         for action in rows:
@@ -284,9 +267,8 @@ class VisitAttachmentService:
         validate_upload(file)
         path = save_uploaded_file(file, 'visit_attachments', visit.id)
         try:
-            attachment = VisitAttachment.objects.create(visit=visit, filename=os.path.basename(path),
-                original_filename=file.name, filepath=path, file_size=file.verified_size, checksum=file.verified_checksum,
-                mime_type=file.verified_mime, uploaded_by=uploaded_by)
+            attachment = VisitAttachment.objects.create(visit=visit, uploaded_by=uploaded_by,
+                **uploaded_file_metadata(file, path))
             visit.version += 1
             visit.save(update_fields=['version', 'updated_at'])
             return attachment

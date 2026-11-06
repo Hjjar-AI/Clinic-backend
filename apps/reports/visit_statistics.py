@@ -85,13 +85,12 @@ class VisitStatisticsService(BaseStatisticsService):
 
     def get_high_risk_patients(self, user, limit=20):
         patients = self.get_accessible_patients(user)
-        from apps.visits.models import VisitRevision
+        from apps.visits.revisions import latest_approved_revisions, order_by_approved_date
         from django.db.models.fields.json import KeyTextTransform, KeyTransform
-        latest_number = VisitRevision.objects.filter(visit_id=OuterRef('visit_id')).order_by('-number').values('number')[:1]
-        latest = VisitRevision.objects.filter(visit__in=self.get_accessible_visits(user),
-            visit__patient_id=OuterRef('pk'), number=Subquery(latest_number)).annotate(
+        latest = order_by_approved_date(latest_approved_revisions(self.get_accessible_visits(user)).filter(
+            visit__patient_id=OuterRef('pk')).annotate(
                 approved_suicide=KeyTextTransform('suicide_risk_level', KeyTransform('fields', 'snapshot')),
-                approved_violence=KeyTextTransform('violence_risk_level', KeyTransform('fields', 'snapshot'))).order_by('-snapshot__fields__visit_date', '-visit_id')
+                approved_violence=KeyTextTransform('violence_risk_level', KeyTransform('fields', 'snapshot'))))
         return patients.annotate(latest_suicide=Subquery(latest.values('approved_suicide')[:1]),
             latest_violence=Subquery(latest.values('approved_violence')[:1])).filter(
             Q(latest_suicide='High') | Q(latest_violence='High')).order_by('pk')[:limit]

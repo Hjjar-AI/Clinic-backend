@@ -1,4 +1,5 @@
-import math
+from core.serializers import domain_validation
+from .validation import validate_scale_definition, validate_template_content
 from rest_framework import serializers
 from .models import (
     DiagnosisOption,
@@ -46,15 +47,9 @@ class ScaleFieldSerializer(serializers.ModelSerializer):
         maximum = attrs.get('max_val', getattr(self.instance, 'max_val', 10))
         step = attrs.get('step', getattr(self.instance, 'step', 1))
         default = attrs.get('default', getattr(self.instance, 'default', minimum))
-        if not all(math.isfinite(v) for v in (minimum, maximum, step, default)):
-            raise serializers.ValidationError('يجب إدخال أرقام محدودة')
+        domain_validation(validate_scale_definition, minimum, maximum, step, default,
+                          attrs.get('field_type', getattr(self.instance, 'field_type', 'slider')))
         attrs['default'] = default
-        if maximum <= minimum:
-            raise serializers.ValidationError({'max_val': 'يجب أن تكون النهاية أكبر من البداية'})
-        if step <= 0 or step > (maximum - minimum):
-            raise serializers.ValidationError({'step': 'قيمة الخطوة غير صالحة'})
-        if not minimum <= default <= maximum:
-            raise serializers.ValidationError({'default': 'القيمة الافتراضية خارج النطاق'})
         return attrs
 
 
@@ -94,11 +89,4 @@ class ClinicalNoteTemplateSerializer(serializers.ModelSerializer):
         ).count()
 
     def validate_content(self, value):
-        if not isinstance(value, dict):
-            raise serializers.ValidationError('محتوى القالب يجب أن يكون كائناً منظماً')
-        serialized = str(value).lower()
-        if '<script' in serialized or 'javascript:' in serialized or '__proto__' in serialized:
-            raise serializers.ValidationError('محتوى القالب يتضمن عناصر غير آمنة')
-        if len(serialized) > 100_000:
-            raise serializers.ValidationError('محتوى القالب كبير جداً')
-        return value
+        return domain_validation(validate_template_content, value, error_field='content')

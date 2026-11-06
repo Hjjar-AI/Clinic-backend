@@ -4,20 +4,20 @@ from django.db import transaction
 from core.mutation import check_mutation
 from core.exceptions import ConflictError
 from .models import DiagnosisOption, MedicationOption, ClinicalScale, ScaleField, ClinicalNoteTemplate
+from .identity import MEDICATION_TEXT_FIELDS, MEDICATION_IDENTITY_FIELDS, catalog_identity_lookup
 
 
-def _validate(instance):
+def validate_catalog(instance):
     if isinstance(instance, MedicationOption):
-        for key in ('generic_english','generic_arabic','dosage','brand_english','brand_arabic'):
+        for key in MEDICATION_TEXT_FIELDS:
             value = getattr(instance, key)
             if value is not None and not isinstance(value, str):
                 raise ValidationError({key: ['يلزم نص']})
             setattr(instance, key, (value or '').strip())
     instance.full_clean()
     if isinstance(instance, MedicationOption):
-        duplicate = MedicationOption.all_objects.filter(
-            generic_english__iexact=instance.generic_english.strip(),
-            dosage__iexact=instance.dosage or '', brand_english__iexact=instance.brand_english or '')
+        duplicate = catalog_identity_lookup(MedicationOption.all_objects.all(),
+            {field: getattr(instance, field) for field in MEDICATION_IDENTITY_FIELDS})
         if duplicate.exclude(pk=instance.pk).exists():
             raise ValidationError({'generic_english': ['الدواء موجود؛ أعد تفعيله إن كان متقاعداً']})
 
@@ -29,7 +29,7 @@ def create_catalog(model, data):
     data.pop('version', None)
     data.pop('is_active', None)
     instance = model(**data)
-    _validate(instance)
+    validate_catalog(instance)
     instance.save()
     return instance
 
@@ -46,7 +46,7 @@ def update_catalog(model, pk, data, expected_version=None):
         if key not in allowed:
             raise ValidationError({key: ['حقل غير قابل للتعديل']})
         setattr(instance, key, value)
-    _validate(instance)
+    validate_catalog(instance)
     instance.version += 1
     instance.save()
     return instance
@@ -96,6 +96,8 @@ class ScaleService:
         check_mutation(scale, expected_version)
         if scale.fields.filter(is_active=True).count() >= 100:
             raise ValidationError({'fields': ['الحد الأقصى 100 سؤال نشط']})
+        data = data.copy()
+        data.setdefault('default', data.get('min_val', 0))
         field = ScaleField(scale=scale, **data)
         field.full_clean()
         field.save()

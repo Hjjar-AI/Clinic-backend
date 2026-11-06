@@ -1,7 +1,7 @@
 # backend/apps/accounts/serializers.py
 from rest_framework import serializers
-import base64
-import binascii
+from core.image_data import validate_embedded_image
+from core.serializers import domain_validation
 from .models import User
 
 
@@ -33,24 +33,20 @@ class UserSerializer(serializers.ModelSerializer):
         return sorted(codename for codename in ALL_PERMISSIONS if obj.has_perm(codename))
 
     def validate_stamp_data(self, value):
-        if not value:
-            return value
-        allowed_prefixes = {
-            'data:image/png;base64,': b'\x89PNG\r\n\x1a\n',
-            'data:image/jpeg;base64,': b'\xff\xd8\xff',
-        }
-        prefix = next((item for item in allowed_prefixes if value.startswith(item)), None)
-        if not prefix:
-            raise serializers.ValidationError('صيغة الختم غير مدعومة')
-        try:
-            decoded = base64.b64decode(value[len(prefix):], validate=True)
-        except (binascii.Error, ValueError):
-            raise serializers.ValidationError('بيانات الختم غير صالحة')
-        if len(decoded) > 2 * 1024 * 1024:
-            raise serializers.ValidationError('حجم الختم يتجاوز 2 ميغابايت')
-        if not decoded.startswith(allowed_prefixes[prefix]):
-            raise serializers.ValidationError('محتوى الختم لا يطابق صيغته')
+        return domain_validation(validate_embedded_image, value, 'stamp_data', error_field='stamp_data')
+
+    def validate_username(self, value):
+        value = User.normalize_username(value).strip()
+        matches = User.objects.filter(username=value)
+        if self.instance:
+            matches = matches.exclude(pk=self.instance.pk)
+        if not value or matches.exists():
+            raise serializers.ValidationError('اسم المستخدم غير صالح أو موجود بالفعل')
         return value
+
+    def validate_preferences(self, value):
+        from core.json_schemas import validate_preferences
+        return domain_validation(validate_preferences, value)
 
 
 class LoginSerializer(serializers.Serializer):

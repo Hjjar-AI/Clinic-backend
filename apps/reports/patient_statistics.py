@@ -51,7 +51,6 @@ class PatientStatisticsService(BaseStatisticsService):
 
     def get_patients_by_doctor(self, user):
         from apps.patients.models import PatientCareTeam
-        rows = PatientCareTeam.objects.filter(patient__in=self.get_accessible_patients(user),
-            ended_at__isnull=True, started_at__lte=timezone.now(), user__role='doctor', user__is_active=True).values(
+        rows = PatientCareTeam.objects.effective_at().filter(patient__in=self.get_accessible_patients(user), user__role='doctor', user__is_active=True).values(
             'user_id', 'user__full_name', 'user__username').annotate(count=Count('patient_id', distinct=True)).order_by('user_id')
         return [(row['user__full_name'] or row['user__username'], row['count']) for row in rows]

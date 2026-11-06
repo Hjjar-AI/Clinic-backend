@@ -14,7 +14,7 @@ Full ZIP carries managed app/auth/history/archived inventory, complete IDs/times
 
 Full restore replaces app/auth inventory/media, retains signed revisions/exact documents, writes automatic safety archive, revokes sessions and requires relogin. Catalog-only recovery merges selected catalogs without replacing patients/users/history. Cache generations and installation-local recovery receipts remain outside replacement inventory; restored admin may replay only bounded safety-copy success receipt with the same key/payload, never rerun completed recovery.
 
-Operation gate drains earlier HTTP readers/writers and participating jobs before exclusive snapshot/restore/catalog work. PostgreSQL coordinates worker/host session advisory locks; other profiles require common POSIX OPERATION_LOCK_DIR. Protected streams are buffered within gate; external DB/storage writers must be quiesced. Postcommit failure preserves committed media/receipt; precommit rollback compensates files. Actual external topology/worker termination remains unverified.
+Operation gate drains earlier HTTP readers/writers and participating jobs before exclusive snapshot/restore/catalog work. PostgreSQL coordinates worker/host session advisory locks; other profiles require common shared/exclusive-capable OPERATION_LOCK_DIR. Protected streams are buffered within gate; external DB/storage writers must be quiesced. Postcommit failure preserves committed media/receipt; precommit rollback compensates files. Actual external topology/worker termination remains unverified.
 
 Interrupted receipt blocks further restore. Reconcile database **and** media from safety archive, then explicitly acknowledge:
 
@@ -30,8 +30,12 @@ Automatic backup uses unique `clinic_backup_...zip` and atomic publication, enfo
 
 ## Jobs and system tools
 
+Use Linux systemd timers/cron or Windows Task Scheduler to launch the same individual management commands. Configure the virtual-environment Python executable, backend working directory and production environment explicitly; Windows services/tasks may have a different PATH from your interactive terminal. Set a non-overlap policy for each scheduled job, retain the shared operation gate, and protect job output. `run_scheduler` remains development-only. The cross-platform server does not start jobs, migrations or seeding automatically.
+
 | Command / endpoint | Current behavior |
 | --- | --- |
+| check_runtime [--render-pdf] | Database-free native/runtime diagnosis; optional synthetic in-memory PDF. No migrations, seeding or clinic records. |
+| serve [--host HOST --port 5019 --threads 8] | Waitress on Windows/Linux; dependency/source checks before listening, no schema changes. |
 | send_appointment_reminders | Local scheduled/confirmed day/hour windows, up to 60-minute late-hour grace, actual date/time text; occurrence UUID dedupe, terminal bookings excluded. |
 | send_task_reminders | Open/in-progress due-window actions, assignee/owner delivery, stable occurrence retries; terminal actions stop reminders. |
 | run_scheduler | Development loop; poll no slower than half hour-reminder window/minimum 60s, independent BACKUP_CHECK_INTERVAL_HOURS backup cadence; one job failure does not stop others. |
@@ -51,7 +55,7 @@ Medication spreadsheet import is content-only: five mapped fields, existing cont
 | Startup keys/hosts/DB/cache denial | Separate private keys, production hosts/profile/driver/shared cache and explicit settings; retained backup key is needed for old archives. |
 | SQLite missing path/table/schema | Correct parent/ownership and actual selected connection; new schema needs authorization. Do not bootstrap/reseed/delete migrations blindly. |
 | CheckConstraint TypeError | Verify source/interpreter; native factory supports Django 5.0 check versus 5.1+ condition. Do not change versions to hide pinned-runtime failure. |
-| MIME/PDF import failure or 503 | Distinguish Python magic package/native libmagic; check Pango/Cairo/GObject, both deployed fonts and sanitized renderer logs. |
+| MIME/PDF import failure or 503 | Distinguish Python magic package/native libmagic; run `python manage.py check_runtime --render-pdf`; check Pango/Fontconfig, both deployed fonts and sanitized renderer logs. Windows also needs DLL directories and the libmagic database; [setup](setup.md#native-libraries-by-os). |
 | Request waits/cache stale | Check exclusive gate/interrupted receipt and DB/shared cache configuration. Generation is DB-backed; use authorized app invalidation. |
 | Login/CSRF/CORS | Match hostname/5019/proxy/exact origin, bootstrap CSRF/config/credentials; inspect lockout/revocation/forced password. Recovery uses authorized reset command. |
 | Route/static reload 404 | Existing frontend bundle/collected static, history/API/admin routing; dev proxy is not production/preview. |

@@ -1,16 +1,27 @@
 """Quiesce HTTP and scheduler work before recovery or catalog replacement.
 
 PostgreSQL coordinates all hosts using session advisory locks. Other database
-profiles require a common POSIX lock directory on every worker/job host.
+profiles require a common lock directory on a filesystem supporting shared/exclusive locks on every worker/job host.
 """
 from contextlib import contextmanager
 from functools import wraps
 import threading
+import sys
 from pathlib import Path
 from django.conf import settings
 from django.db import connection
 
 _local = threading.local()
+
+
+def file_lock_backend():
+    import portalocker
+    if sys.platform == 'win32':
+        # One Win32 API/range for both modes, with true blocking acquisition.
+        # The CRT exclusive locker otherwise has a finite retry window.
+        from portalocker.portalocker import Win32Locker
+        return Win32Locker()
+    return portalocker
 
 
 @contextmanager
@@ -32,11 +43,16 @@ def operation_gate(exclusive=False):
         with connection.cursor() as cursor:
             cursor.execute(f'SELECT {function}(%s)', [731925041])
     else:
-        import fcntl
+        import portalocker
         directory = Path(getattr(settings, 'OPERATION_LOCK_DIR', settings.BACKUP_DIR))
         directory.mkdir(parents=True, exist_ok=True)
+        locker = file_lock_backend()
         lock_file = (directory / '.clinic-operation.lock').open('a+b')
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        try:
+            locker.lock(lock_file, portalocker.LOCK_EX if exclusive else portalocker.LOCK_SH)
+        except BaseException:
+            lock_file.close()
+            raise
     _local.depth, _local.exclusive = 1, exclusive
     try:
         yield
@@ -47,9 +63,10 @@ def operation_gate(exclusive=False):
             with connection.cursor() as cursor:
                 cursor.execute(f'SELECT {function}(%s)', [731925041])
         else:
-            import fcntl
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-            lock_file.close()
+            try:
+                locker.unlock(lock_file)
+            finally:
+                lock_file.close()
 
 
 def gated(exclusive=False):

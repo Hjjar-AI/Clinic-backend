@@ -11,17 +11,13 @@ from core.permissions import (
     HasManageUsers,
     HasViewDoctors,
 )
-from django.contrib.auth.models import Permission
 from django.db import transaction
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 
-from core.exceptions import ConflictError, error_response
 from apps.notifications.services import NotificationService
 from core.permissions import ALL_PERMISSIONS, DEFAULT_PERMISSIONS
-from core.signals import log_action
 from django.core.exceptions import ValidationError
-from django.utils import timezone
 from django.db.models import Q
 from core.query_utils import apply_ordering
 
@@ -169,30 +165,7 @@ class UserViewSet(viewsets.ModelViewSet):
         })
 
     @action(detail=True, methods=['put'])
-    @transaction.atomic
     def update_permissions(self, request, pk=None):
-        user = self.get_object()
-        perm_codenames = request.data.get('permissions', [])
-        if not isinstance(perm_codenames, list) or any(not isinstance(item, str) for item in perm_codenames):
-            raise ValidationError({'permissions': ['قائمة أسماء صلاحيات مطلوبة']})
-        expected_version = request_version(request)
-        user = User.objects.select_for_update().get(pk=user.pk)
-        if user.version != expected_version:
-            raise ConflictError('تم تعديل صلاحيات المستخدم بواسطة مستخدم آخر')
-        unknown = sorted(set(perm_codenames) - set(ALL_PERMISSIONS))
-        if unknown:
-            return error_response(400, 'صلاحيات غير معروفة', {'permissions': unknown})
-        before = sorted(user.user_permissions.values_list('codename', flat=True))
-        user.user_permissions.clear()
-        if perm_codenames:
-            perms = Permission.objects.filter(codename__in=perm_codenames)
-            user.user_permissions.set(perms)
-        user.session_revoked_at = timezone.now()
-        user.version += 1
-        user.save(update_fields=['session_revoked_at', 'version'])
-        log_action(request.user.id, 'permissions_change', 'User', user.id, {
-            'summary': f'Permissions changed for {user.username}',
-            'before': before,
-            'after': sorted(perm_codenames),
-        })
+        self.service.set_permissions(self.get_object(), request.user,
+                                     request.data.get('permissions', []), request_version(request))
         return Response({'message': 'تم تحديث الصلاحيات'})

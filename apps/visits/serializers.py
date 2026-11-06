@@ -38,6 +38,13 @@ class PatientSummarySerializer(serializers.ModelSerializer):
         return obj.get_full_name()
 
 class VisitSerializer(serializers.ModelSerializer):
+    follow_up = serializers.SerializerMethodField()
+    follow_up_input = serializers.JSONField(write_only=True, required=False, allow_null=True)
+
+    def get_follow_up(self, obj):
+        from apps.patients.follow_up_services import follow_up_data
+        return follow_up_data(obj.follow_up)
+
     # Write-only fields for accepting nested data from the frontend
     diagnoses_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
     medications_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
@@ -64,20 +71,19 @@ class VisitSerializer(serializers.ModelSerializer):
     class Meta:
         model = Visit
         fields = [
-            'id', 'patient', 'patient_id', 'visit_date', 'main_complaints',
+            'id', 'patient', 'patient_id', 'follow_up', 'follow_up_input', 'visit_date', 'main_complaints',
             'history_presenting_complaint', 'treatment_text', 'doctor_notes',
-            'status', 'status_reason', 'clinical_status', 'accompanied_by', 'companion_relation', 'follow_up_date',
-            'follow_up_completed', 'pain_level', 'anxiety_level',
+            'status', 'status_reason', 'clinical_status', 'accompanied_by', 'companion_relation', 'pain_level', 'anxiety_level',
             'suicide_risk_level', 'violence_risk_level', 'firearm_access',
-            'level_of_care', 'care_basis', 'follow_up_type', 'date_signed', 'signed_by',
+            'level_of_care', 'care_basis', 'date_signed', 'signed_by',
             'supervisor', 'diagnosis_discussed', 'plan_discussed',
             'clinical_data', 'version', 'author',
             'created_at', 'updated_at', 'deleted_at',
             'diagnoses_input', 'medications_input', 'lab_values_input', 'scale_responses_input',
-            'supervisor_id', 'signed_by_id', 'signed_at', 'follow_up_outcome', 'follow_up_completed_at', 'follow_up_completed_by',
+            'supervisor_id', 'signed_by_id', 'signed_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'deleted_at', 'author',
-                            'signed_by', 'signed_by_id', 'date_signed', 'supervisor', 'follow_up_completed', 'signed_at', 'follow_up_outcome', 'follow_up_completed_at', 'follow_up_completed_by']
+                            'signed_by', 'signed_by_id', 'date_signed', 'supervisor', 'signed_at']
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)

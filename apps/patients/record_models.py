@@ -108,6 +108,7 @@ class PatientMedication(ClinicalPatientRecord):
 
 
 class PatientFollowUp(PatientRecord):
+    METHOD_CHOICES = [('In-person', 'In-person'), ('Telehealth', 'Telehealth'), ('Phone', 'Phone')]
     title = models.CharField(max_length=200)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='patient_follow_ups')
     due_date = models.DateField()
@@ -120,13 +121,14 @@ class PatientFollowUp(PatientRecord):
     outcome_reason = models.CharField(max_length=500, blank=True, default='')
     completed_at = models.DateTimeField(null=True, blank=True, editable=False)
     completed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='+')
-    legacy_visit_follow_up = models.BooleanField(default=False, editable=False)
+    method = models.CharField(max_length=30, blank=True, default='', choices=METHOD_CHOICES)
 
     class Meta:
         indexes = [models.Index(fields=['patient', 'status', 'due_date'])]
-        constraints = [models.UniqueConstraint(fields=['source_visit'], condition=Q(legacy_visit_follow_up=True, is_active=True),
-                       name='one_legacy_followup_per_visit'), check_constraint(
-                       condition=~Q(status='completed') | Q(completed_at__isnull=False, completed_by__isnull=False),
+        constraints = [check_constraint(
+                       condition=(Q(status='pending', completed_at__isnull=True, completed_by__isnull=True) |
+                                  (Q(status__in=['completed', 'missed', 'cancelled', 'waived'],
+                                     completed_at__isnull=False, completed_by__isnull=False) & ~Q(outcome_reason=''))),
                        name='followup_completion_metadata')]
 
 

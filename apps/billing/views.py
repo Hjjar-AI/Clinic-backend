@@ -14,7 +14,6 @@ from core.permissions import (
     CanAccessInvoice,
 )
 from apps.patients.models import Patient
-from apps.patients.services import PatientService
 from apps.visits.models import Visit
 from datetime import datetime
 from core.exceptions import error_response
@@ -87,10 +86,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         })
 
     def perform_create(self, serializer):
-        patient = serializer.validated_data['patient']
-        if not PatientService().list_patients(self.request.user, {}).filter(pk=patient.pk).exists():
-            self.permission_denied(self.request)
-        instance = self.service.create_invoice(serializer.validated_data)
+        instance = self.service.create_invoice(serializer.validated_data, self.request.user)
         serializer.instance = instance
 
     def perform_update(self, serializer):
@@ -98,10 +94,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         version = request_version(self.request)
         data = serializer.validated_data.copy()
         data.pop('version', None)
-        serializer.instance = self.service.update_invoice(instance, data, version)
+        serializer.instance = self.service.update_invoice(instance, data, version, actor=self.request.user)
 
     def perform_destroy(self, instance):
-        self.service.delete_invoice(instance, request_version(self.request))
+        self.service.delete_invoice(instance, request_version(self.request), actor=self.request.user)
 
     @action(detail=True, methods=['put'])
     def transition(self, request, pk=None):

@@ -52,12 +52,9 @@ if DATABASES['default']['ENGINE'] == 'django.db.backends.sqlite3':
         '  DATABASE_PORT=5432'
     )
 
-# 2. LocMemCache. It is process-local, so the invalidate_group() version-
-#    counter scheme in core/cache_utils.py only works within a single
-#    process. With multiple gunicorn/uwsgi workers, each worker keeps its
-#    own counter and its own cached values; a write that invalidates a group
-#    in one worker leaves the other workers serving stale dashboard, report,
-#    and settings data until they restart.
+# 2. LocMemCache cannot share preview/state across server processes or jobs.
+# Cache invalidation generations are DB-backed; that does not make the cached
+# preview payload itself process-shared, on either Windows or Linux.
 if 'locmem' in CACHES['default']['BACKEND'].lower():
     raise RuntimeError(
         'Production is running on LocMemCache. Set CACHE_BACKEND to a '
@@ -69,6 +66,6 @@ if 'locmem' in CACHES['default']['BACKEND'].lower():
         '  CACHE_LOCATION=redis://127.0.0.1:6379/1'
     )
 
-OPERATION_LOCK_DIR = os.environ.get('OPERATION_LOCK_DIR')
+OPERATION_LOCK_DIR = os.environ.get('OPERATION_LOCK_DIR', '').strip() or None
 if DATABASES['default']['ENGINE'] != 'django.db.backends.postgresql' and not OPERATION_LOCK_DIR:
-    raise RuntimeError('Non-PostgreSQL recovery requires OPERATION_LOCK_DIR on shared POSIX lock storage for every worker and job')
+    raise RuntimeError('Non-PostgreSQL recovery requires OPERATION_LOCK_DIR on shared/exclusive-capable lock storage for every worker and job')

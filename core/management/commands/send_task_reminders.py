@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
 from apps.tasks.models import UserTask
-from apps.notifications.services import NotificationService
+from apps.tasks.reminders import notify_task_due
 from apps.settings.services import SettingsService
 
 
@@ -14,7 +14,6 @@ class Command(BaseCommand):
 
     @gated()
     def handle(self, *args, **options):
-        service = NotificationService()
         today = timezone.localdate()
         reminder_days = SettingsService().get_clinic_info()['task_reminder_days']
         due_on = today + timedelta(days=reminder_days)
@@ -32,14 +31,6 @@ class Command(BaseCommand):
                 )
             )
             for task in tasks:
-                user_id = task.assigned_to_id or task.user_id
-                service.create(
-                    user_id,
-                    f'موعد تسليم المهمة: {task.title}',
-                    f'المهمة "{task.title}" مستحقة بتاريخ {task.due_date}',
-                    link='/tasks',  # safe relative URL
-                    type='warning',
-                    dedupe_key=f'task-due:{task.pk}:{task.reminder_generation}:{task.due_date.isoformat()}',
-                )
+                notify_task_due(task)
                 task.reminder_sent = True
                 task.save(update_fields=['reminder_sent', 'updated_at'])

@@ -1,3 +1,4 @@
+from apps.patients.follow_up_services import follow_up_data
 from core.mutation import request_version
 from core.access import accessible_patients
 # backend/apps/patients/views.py
@@ -193,7 +194,7 @@ class PatientViewSet(PatientRecordsMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def timeline(self, request, pk=None):
         patient = self.get_object()
-        visits = patient.visits.filter(deleted_at__isnull=True).prefetch_related(
+        visits = patient.visits.filter(deleted_at__isnull=True).select_related('follow_up').prefetch_related(
             'visit_diagnoses__diagnosis',
             'visit_medications__medication',
         ).order_by('-visit_date')
@@ -204,7 +205,7 @@ class PatientViewSet(PatientRecordsMixin, viewsets.ModelViewSet):
             'main_complaints': v.main_complaints,
             'diagnoses': v.get_diagnoses(),
             'medications': v.get_medications(),
-            'follow_up_date': v.follow_up_date,
+            'follow_up': follow_up_data(v.follow_up),
         } for v in items]
         return Response({
             'data': {

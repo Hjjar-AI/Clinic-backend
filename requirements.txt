@@ -12,4 +12,8 @@ Faker==18.9.0
 django-phonenumber-field[phonenumbers]==7.3.0
 python-dotenv==1.0.1
 whitenoise==6.7.0
-weasyprint
+weasyprint==70.0
+# Shared/exclusive locks on Unix and Windows; Windows shared locks need pywin32.
+portalocker==4.3.0; sys_platform != "win32"
+portalocker[win32]==4.3.0; sys_platform == "win32"
+waitress==3.0.2

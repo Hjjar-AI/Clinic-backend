@@ -4,7 +4,7 @@ import re
 import uuid
 import hashlib
 
-import magic
+from core.native_dependencies import detect_mime
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 
@@ -31,9 +31,11 @@ _SAFE_EXT_RE = re.compile(r'^\.[A-Za-z0-9]{1,10}$')
 
 
 def _resolve_extension(file):
-    file.seek(0)
-    mime = magic.from_buffer(file.read(2048), mime=True)
-    file.seek(0)
+    mime = getattr(file, 'verified_mime', None)
+    if mime is None:
+        file.seek(0)
+        mime = detect_mime(file.read(2048))
+        file.seek(0)
 
     ext = MIME_TO_EXT.get(mime)
     if ext:
@@ -61,3 +63,7 @@ def save_uploaded_file(file, directory, prefix_id):
     file.seek(0)
     path = default_storage.save(f'{directory}/{unique_name}', ContentFile(content))
     return path
+
+def uploaded_file_metadata(file, path):
+    return dict(filename=os.path.basename(path), original_filename=file.name, filepath=path,
+                file_size=file.verified_size, checksum=file.verified_checksum, mime_type=file.verified_mime)

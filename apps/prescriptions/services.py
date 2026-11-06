@@ -2,13 +2,13 @@ from django.template.loader import render_to_string
 from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
-from apps.visits.models import Visit
-from .models import PrescriptionSignature
 from core.pdf_utils import render_pdf_from_html
 from core.image_data import validate_embedded_image
 from core.exceptions import ConflictError
 from apps.settings.services import SettingsService
+from core.age import display_year_only_age
 from datetime import date
+from django.db import transaction
 import logging
 import secrets
 from django.core.exceptions import ValidationError
@@ -23,6 +23,7 @@ class PrescriptionService:
         from .issuance import finalized_revision
         revision = finalized_revision(visit)
         patient = visit.patient
+        approved_date = date.fromisoformat(revision.snapshot['fields']['visit_date'])
         medications = revision.snapshot['medications']
 
         invalid = [
@@ -44,13 +45,13 @@ class PrescriptionService:
             'visit_version': visit.version,
             'template_version': self.TEMPLATE_VERSION,
             'patient_id': patient.id,
-            'patient_number': revision.snapshot['patient'].get('patient_number') or patient.patient_number,
+            'patient_number': revision.snapshot['patient']['patient_number'],
             'patient_name': revision.snapshot['patient']['name'],
-            'patient_age': visit.visit_date.year - revision.snapshot['patient']['dob_year'] if revision.snapshot['patient']['dob_year'] else 'غير محدد',
+            'patient_age': display_year_only_age(revision.snapshot['patient']['dob_year'], approved_date),
             'patient_gender': revision.snapshot['patient']['gender'] or 'غير محدد',
             'patient_address': patient.permanent_address or 'غير مسجل',
             'patient_national_id': revision.snapshot['patient']['national_id'] or 'غير محدد',
-            'visit_date': visit.visit_date.strftime('%d/%m/%Y'),
+            'visit_date': approved_date.strftime('%d/%m/%Y'),
             'medications': [
                 {
                     'name': med.get('name', ''),
@@ -69,6 +70,13 @@ class PrescriptionService:
         }
 
     def create_preview(self, visit, user_id):
+        from django.core.exceptions import PermissionDenied
+        from apps.accounts.models import User
+        from core.access import require_actor_permission, accessible_visits
+        actor = require_actor_permission(User(pk=user_id), 'export_pdf')
+        visit = accessible_visits(actor).select_related('patient').filter(pk=visit.pk).first()
+        if visit is None:
+            raise PermissionDenied('غير مصرح بالوصول إلى الزيارة')
         snapshot = self.build_snapshot(visit)
         token = secrets.token_urlsafe(24)
         cache.set(
@@ -132,20 +140,38 @@ class PrescriptionService:
         pdf = render_pdf_from_html(html)
         return pdf
 
+    def issue_prescription(self, visit, actor, preview_token, signature=None, stamp=None, **options):
+        """Render first; issued evidence and audit commit together before consuming preview."""
+        from django.core.exceptions import PermissionDenied
+        from core.access import require_actor_permission, accessible_visits
+        from core.signals import log_action
+        from .issuance import record_document
+        actor = require_actor_permission(actor, 'export_pdf')
+        if actor.role not in {'admin', 'doctor'} or not actor.has_perm('edit_visit'):
+            raise PermissionDenied('إصدار المستندات مخصص للطبيب المخول')
+        current = accessible_visits(actor).select_related('patient').filter(pk=visit.pk).first()
+        if current is None:
+            raise PermissionDenied('غير مصرح بالوصول إلى الزيارة')
+        snapshot = self.get_preview(preview_token, actor.pk, current)
+        if 'print_options' in options:
+            from .printing import normalize_print_options
+            snapshot = {**snapshot, 'print_options': normalize_print_options(options['print_options']),
+                        'issue_date': timezone.localdate().strftime('%d/%m/%Y')}
+        pdf = self.generate_prescription_pdf(snapshot, signature, stamp)
+        if not isinstance(pdf, bytes) or not pdf:
+            return None
+        with transaction.atomic():
+            record_document(current, actor, 'prescription', snapshot, pdf, signature, stamp)
+            log_action(actor.pk, 'generate_prescription', 'Visit', current.pk, {
+                'summary': f'Generated prescription from visit version {current.version}',
+                'visit_version': current.version, 'template_version': snapshot['template_version'],
+            })
+            transaction.on_commit(lambda: self.discard_preview(preview_token), robust=True)
+        return pdf
+
     def discard_preview(self, token):
         if token:
             cache.delete(f'prescription-preview:{token}')
 
     def _calculate_age(self, patient, visit_date=None):
-        if not patient.dob_year:
-            return 'غير محدد'
-        year = visit_date.year if visit_date else date.today().year
-        return year - patient.dob_year
-
-    def save_signature(self, user, visit_id, signature_data, stamp_data):
-        validate_embedded_image(signature_data, 'signature', required=True)
-        validate_embedded_image(stamp_data, 'stamp')
-        sig, created = PrescriptionSignature.objects.get_or_create(
-            user=user, visit_id=visit_id, signature_data=signature_data, stamp_data=stamp_data
-        )
-        return sig
+        return display_year_only_age(patient.dob_year, visit_date)

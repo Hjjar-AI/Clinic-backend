@@ -25,7 +25,7 @@ import secrets
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
-from django.utils import timezone
+from apps.accounts.security import revoke_sessions
 from django.db import transaction
 
 User = get_user_model()
@@ -57,7 +57,7 @@ class Command(BaseCommand):
                 return
             user.set_password(new_pass)
             user.force_password_change = False
-            user.session_revoked_at = timezone.now()
+            revoke_sessions(user)
             user.version += 1
             user.save(update_fields=['password', 'force_password_change', 'session_revoked_at', 'version'])
 

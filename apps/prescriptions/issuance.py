@@ -3,12 +3,13 @@ from django.db import transaction
 from core.exceptions import ConflictError
 from django.core.exceptions import ValidationError, PermissionDenied
 from .models import IssuedDocument
+from apps.visits.revisions import latest_signed_revision
 
 
 def finalized_revision(visit):
     if visit.status not in {'final', 'locked'}:
         raise ValidationError({'visit': ['يجب اعتماد الزيارة قبل إصدار المستند']})
-    revision = visit.revisions.order_by('-number').first()
+    revision = latest_signed_revision(visit)
     if not revision:
         raise ValidationError({'visit': ['لا توجد نسخة معتمدة وموقعة لهذه الزيارة']})
     return revision
@@ -16,8 +17,17 @@ def finalized_revision(visit):
 
 @transaction.atomic
 def record_document(visit, actor, kind, snapshot, pdf, signature='', stamp=''):
-    if actor.role not in {'admin', 'doctor'} or not actor.has_perm('edit_visit'):
+    from core.access import require_actor_permission
+    actor = require_actor_permission(actor, 'edit_visit')
+    if not isinstance(snapshot, dict) or not isinstance(pdf, bytes) or not pdf:
+        raise ValidationError({'document': ['يلزم مستند وبيانات معاينة صالحان']})
+    if actor.role not in {'admin', 'doctor'}:
         raise PermissionDenied('إصدار المستندات مخصص للطبيب المخول')
+    if kind not in {'prescription', 'referral'}:
+        raise ValidationError({'document_type': ['نوع مستند غير صالح']})
+    from core.image_data import validate_embedded_image
+    validate_embedded_image(signature, 'signature', required=kind == 'prescription')
+    validate_embedded_image(stamp, 'stamp')
     from apps.visits.services import lock_visit
     visit = lock_visit(visit.pk, actor)
     permission = 'export_pdf' if kind == 'prescription' else 'view_referrals'

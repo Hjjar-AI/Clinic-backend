@@ -1,38 +1,16 @@
+from .choices import VisitStatus, RiskLevel, LevelOfCare, CareBasis, AccompaniedBy
 # backend/apps/visits/models.py
 from django.db import models, transaction
 from core.constraints import check_constraint
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
-from core.models import TimeStampedModel, SoftDeleteModel, ImmutableModel
+from core.models import TimeStampedModel, SoftDeleteModel, StoredFileMetadata, ImmutableModel
 
 class Visit(SoftDeleteModel, TimeStampedModel):
-    STATUS_CHOICES = [
-        ('draft', 'Draft'),
-        ('final', 'Final'),
-        ('amended', 'Amended'),
-        ('locked', 'Locked'),
-    ]
-    ACCOMPANIED_BY_CHOICES = [
-        ('alone', 'Alone'),
-        ('companion', 'With companion'),
-    ]
-    RISK_LEVEL_CHOICES = [
-        ('Low', 'Low'),
-        ('Moderate', 'Moderate'),
-        ('High', 'High'),
-    ]
-    LEVEL_OF_CARE_CHOICES = [
-        ('Outpatient', 'Outpatient'),
-        ('IOP', 'IOP'),
-        ('PHP', 'PHP'),
-        ('Inpatient', 'Inpatient'),
-        ('Residential', 'Residential'),
-    ]
-    FOLLOW_UP_TYPE_CHOICES = [
-        ('In-person', 'In-person'),
-        ('Telehealth', 'Telehealth'),
-        ('Phone', 'Phone'),
-    ]
+    STATUS_CHOICES = VisitStatus.choices
+    ACCOMPANIED_BY_CHOICES = AccompaniedBy.choices
+    RISK_LEVEL_CHOICES = RiskLevel.choices
+    LEVEL_OF_CARE_CHOICES = LevelOfCare.choices
     patient = models.ForeignKey(
         'patients.Patient',
         on_delete=models.PROTECT,
@@ -53,8 +31,8 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         default='',
     )
     companion_relation = models.CharField(max_length=100, blank=True, default='')
-    follow_up_date = models.DateField(null=True, blank=True)
-    follow_up_completed = models.BooleanField(default=False)
+    follow_up = models.OneToOneField('patients.PatientFollowUp', on_delete=models.PROTECT,
+        null=True, blank=True, editable=False, related_name='planned_visit')
     pain_level = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
@@ -78,28 +56,15 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         default='',
     )
     firearm_access = models.BooleanField(null=True, blank=True, default=None)
-    care_basis = models.CharField(max_length=20, default='unknown', choices=[('unknown', 'Unknown'), ('voluntary', 'Voluntary'), ('involuntary', 'Involuntary')])
+    care_basis = models.CharField(max_length=20, default='unknown', choices=CareBasis.choices)
     level_of_care = models.CharField(
         max_length=50,
         choices=LEVEL_OF_CARE_CHOICES,
         blank=True,
         default='',
     )
-    follow_up_type = models.CharField(
-        max_length=30,
-        choices=FOLLOW_UP_TYPE_CHOICES,
-        blank=True,
-        default='',
-    )
     signed_at = models.DateTimeField(null=True, blank=True, editable=False)
     amendment_reason = models.CharField(max_length=500, blank=True, default='')
-    follow_up_outcome = models.CharField(max_length=20, default='pending', choices=[
-        ('pending', 'Pending'), ('completed', 'Completed'), ('missed', 'Missed'),
-        ('cancelled', 'Cancelled'), ('waived', 'Waived'),
-    ])
-    follow_up_completed_at = models.DateTimeField(null=True, blank=True)
-    follow_up_completed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='completed_follow_ups')
     date_signed = models.DateField(null=True, blank=True)
     signed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -117,7 +82,6 @@ class Visit(SoftDeleteModel, TimeStampedModel):
     plan_discussed = models.BooleanField(null=True, blank=True, default=None)
     clinical_data = models.JSONField(default=dict, blank=True)
     lab_values = models.JSONField(default=list, blank=True)
-    version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -129,7 +93,6 @@ class Visit(SoftDeleteModel, TimeStampedModel):
         indexes = [
             models.Index(fields=['patient', 'visit_date']),
             models.Index(fields=['status', '-visit_date']),
-            models.Index(fields=['follow_up_date']),
             models.Index(fields=['deleted_at']),
         ]
         constraints = [
@@ -148,13 +111,6 @@ class Visit(SoftDeleteModel, TimeStampedModel):
                 ),
                 name='visit_anxiety_level_valid',
             ),
-            check_constraint(
-                condition=(
-                    models.Q(follow_up_date__isnull=True)
-                    | models.Q(follow_up_date__gte=models.F('visit_date'))
-                ),
-                name='visit_follow_up_not_before_visit',
-            ),
         ]
 
     def __str__(self):
@@ -172,61 +128,23 @@ class Visit(SoftDeleteModel, TimeStampedModel):
     @transaction.atomic
     def set_diagnoses(self, diagnoses_list):
         from .input_validation import normalize_rows
-        diagnoses_list = normalize_rows(diagnoses_list, 'diagnoses', self)
-        self.visit_diagnoses.all().delete()
-        for idx, d in enumerate(diagnoses_list):
-            diagnosis_id = d.get('id') if d.get('id') else None
-            self.visit_diagnoses.create(
-                visit=self,
-                diagnosis_id=diagnosis_id,
-                custom_code=d.get('code', ''),
-                custom_name=d.get('name', ''),
-                custom_arabic=d.get('arabic_name', ''),
-                order=idx,
-            )
+        from .nested import replace_diagnoses
+        return replace_diagnoses(self, normalize_rows(diagnoses_list, 'diagnoses', self))
 
     @transaction.atomic
     def set_medications(self, medications_list):
         from .input_validation import normalize_rows
-        medications_list = normalize_rows(medications_list, 'medications', self)
-        self.visit_medications.all().delete()
-        for idx, m in enumerate(medications_list):
-            medication_id = m.get('id') if m.get('id') else None
-            is_custom = m.get('is_custom', False)
-            self.visit_medications.create(
-                visit=self,
-                medication_id=medication_id,
-                custom_name=m.get('name', ''),
-                custom_dosage=m.get('dosage', ''),
-                custom_brand=m.get('brand', ''),
-                is_custom=is_custom,
-                controlled_snapshot=m['controlled'],
-                schedule=m.get('schedule', ''),
-                order=idx,
-            )
+        from .nested import replace_medications
+        return replace_medications(self, normalize_rows(medications_list, 'medications', self))
 
     def get_lab_values(self):
         return self.lab_values
 
     def set_lab_values(self, lab_list):
-        """
-        Persist lab values immediately.
-
-        Previous implementation only assigned the in-memory attribute and
-        relied on a later caller to save. But every caller in the codebase
-        (VisitService.create_visit/update_visit, VisitSerializer.create/update)
-        calls visit.save() *before* this method runs, and nothing saves
-        afterwards — so lab values entered through the UI were accepted,
-        returned 200/201, and silently discarded. Match the sibling
-        set_diagnoses / set_medications behaviour and persist here.
-
-        The pk guard keeps this safe if called on an unsaved instance
-        (save(update_fields=...) would raise on a row with no primary key).
-        """
         from .lab_validation import normalize_lab_values
-        self.lab_values = normalize_lab_values(lab_list)
-        if self.pk is not None:
-            self.save(update_fields=['lab_values'])
+        from .nested import replace_lab_values
+        return replace_lab_values(self, normalize_lab_values(lab_list))
+
 
 class VisitDiagnosis(models.Model):
     visit = models.ForeignKey(
@@ -271,18 +189,12 @@ class VisitMedication(models.Model):
     class Meta:
         ordering = ['order', 'id']
 
-class VisitAttachment(SoftDeleteModel, TimeStampedModel):
+class VisitAttachment(SoftDeleteModel, TimeStampedModel, StoredFileMetadata):
     visit = models.ForeignKey(
         Visit,
         on_delete=models.CASCADE,
         related_name='attachments',
     )
-    filename = models.CharField(max_length=255)
-    original_filename = models.CharField(max_length=255)
-    filepath = models.CharField(max_length=500)
-    file_size = models.PositiveBigIntegerField(null=True, blank=True)
-    checksum = models.CharField(max_length=64, blank=True, editable=False)
-    mime_type = models.CharField(max_length=100, blank=True, default='')
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

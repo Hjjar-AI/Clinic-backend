@@ -3,7 +3,6 @@
 Scope never replaces the endpoint's action permission.
 """
 from django.db.models import Q
-from django.utils import timezone
 
 
 def patient_scope(user):
@@ -11,7 +10,8 @@ def patient_scope(user):
         return Q(pk__in=[])
     if user.role == 'admin':
         return Q()
-    membership = Q(care_team__user=user, care_team__ended_at__isnull=True, care_team__started_at__lte=timezone.now())
+    from apps.patients.models import PatientCareTeam
+    membership = Q(pk__in=PatientCareTeam.objects.effective_at().filter(user=user).values('patient_id'))
     if user.role == 'doctor':
         return Q(visits__author=user) | membership
     if user.role == 'receptionist':
@@ -43,3 +43,13 @@ def accessible_appointments(user):
 def accessible_invoices(user):
     from apps.billing.models import Invoice
     return Invoice.objects.filter(patient__in=accessible_patients(user, True))
+
+
+def require_actor_permission(actor, permission):
+    """Re-read effective grants at a service boundary, without trusting cached actors."""
+    from django.core.exceptions import PermissionDenied
+    from apps.accounts.models import User
+    current = User.objects.filter(pk=getattr(actor, 'pk', None), is_active=True).first()
+    if current is None or not current.has_perm(permission):
+        raise PermissionDenied('غير مصرح بهذا الإجراء')
+    return current

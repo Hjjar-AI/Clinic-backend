@@ -8,6 +8,20 @@ from django.http import HttpResponse
 from datetime import datetime
 from .base import BaseExportService
 from apps.patients.services import PatientService
+from apps.patients.querysets import care_team_names
+
+PATIENT_COLUMNS = {
+    'full_name': ('الاسم الكامل', lambda p: p.get_full_name()),
+    'national_id': ('الرقم الوطني', lambda p: p.national_id or ''),
+    'phone': ('الهاتف', lambda p: p.phone or ''),
+    'gender': ('الجنس', lambda p: p.gender or ''),
+    'dob_year': ('سنة الميلاد', lambda p: p.dob_year or ''),
+    'address': ('العنوان', lambda p: p.permanent_address or ''),
+    'registration_date': ('تاريخ الإضافة', lambda p: p.registration_date.strftime('%d/%m/%Y') if p.registration_date else ''),
+    'doctor': ('فريق الرعاية', lambda p: '، '.join(care_team_names(p))),
+    'patient_number': ('رقم الملف', lambda p: p.patient_number),
+    'completeness': ('اكتمال الملف', lambda p: f"{p.get_completeness()['percent']}%"),
+}
 
 class PatientExportService(BaseExportService):
     def _patients(self, user, filters=None):
@@ -15,18 +29,7 @@ class PatientExportService(BaseExportService):
 
     def export_patients_csv(self, user, fields=None, filters=None):
         patients = self._patients(user, filters)
-        field_map = {
-            'full_name': ('الاسم الكامل', lambda p: p.get_full_name()),
-            'national_id': ('الرقم الوطني', lambda p: p.national_id or ''),
-            'phone': ('الهاتف', lambda p: p.phone or ''),
-            'gender': ('الجنس', lambda p: p.gender or ''),
-            'dob_year': ('سنة الميلاد', lambda p: str(p.dob_year or '')),
-            'address': ('العنوان', lambda p: p.permanent_address or ''),
-            'registration_date': ('تاريخ الإضافة', lambda p: p.registration_date.strftime('%d/%m/%Y') if p.registration_date else ''),
-            'doctor': ('فريق الرعاية', lambda p: '، '.join(member.user.full_name or member.user.username for member in p.care_team.filter(ended_at__isnull=True).select_related('user'))),
-            'patient_number': ('رقم الملف', lambda p: p.patient_number),
-            'completeness': ('اكتمال الملف', lambda p: f"{p.get_completeness()['percent']}%"),
-        }
+        field_map = PATIENT_COLUMNS
         if fields is not None and (not isinstance(fields, list) or not fields or any(f not in field_map for f in fields)):
             raise ValidationError({'fields': ['أعمدة غير صالحة']})
         if fields is None:
@@ -44,18 +47,7 @@ class PatientExportService(BaseExportService):
 
     def export_patients_excel(self, user, fields=None, filters=None):
         patients = self._patients(user, filters)
-        field_map = {
-            'full_name': ('الاسم الكامل', lambda p: p.get_full_name()),
-            'national_id': ('الرقم الوطني', lambda p: p.national_id or ''),
-            'phone': ('الهاتف', lambda p: p.phone or ''),
-            'gender': ('الجنس', lambda p: p.gender or ''),
-            'dob_year': ('سنة الميلاد', lambda p: p.dob_year or ''),
-            'address': ('العنوان', lambda p: p.permanent_address or ''),
-            'registration_date': ('تاريخ الإضافة', lambda p: p.registration_date.strftime('%d/%m/%Y') if p.registration_date else ''),
-            'doctor': ('فريق الرعاية', lambda p: '، '.join(member.user.full_name or member.user.username for member in p.care_team.filter(ended_at__isnull=True).select_related('user'))),
-            'patient_number': ('رقم الملف', lambda p: p.patient_number),
-            'completeness': ('اكتمال الملف', lambda p: f"{p.get_completeness()['percent']}%"),
-        }
+        field_map = PATIENT_COLUMNS
         if fields is not None and (not isinstance(fields, list) or not fields or any(f not in field_map for f in fields)):
             raise ValidationError({'fields': ['أعمدة غير صالحة']})
         fields = fields or []

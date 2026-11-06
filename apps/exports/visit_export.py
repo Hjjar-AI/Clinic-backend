@@ -7,20 +7,22 @@ from django.http import HttpResponse
 from datetime import datetime
 from .base import BaseExportService
 
+VISIT_COLUMNS = ['المريض', 'تاريخ الزيارة', 'الشكوى', 'حالة التوثيق', 'الحالة السريرية']
+
+
+def visit_export_row(visit):
+    return [visit.patient.get_full_name(), visit.visit_date.isoformat() if visit.visit_date else '',
+            visit.main_complaints or '', visit.status or '', visit.clinical_status or '']
+
+
 class VisitExportService(BaseExportService):
     def export_visits_csv(self, user, filters=None):
         visits = self.filtered_visits(user, filters)
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(['المريض', 'تاريخ الزيارة', 'الشكوى', 'حالة التوثيق', 'الحالة السريرية'])
+        writer.writerow(VISIT_COLUMNS)
         for v in visits:
-            writer.writerow([csv_cell(value) for value in [
-                v.patient.get_full_name(),
-                v.visit_date.isoformat() if v.visit_date else '',
-                v.main_complaints or '',
-                v.status or '',
-                v.clinical_status or '',
-            ]])
+            writer.writerow([csv_cell(value) for value in visit_export_row(v)])
         response = HttpResponse(output.getvalue(), content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="visits_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
         return self.stamp_response(response)
@@ -30,15 +32,9 @@ class VisitExportService(BaseExportService):
         wb = Workbook()
         ws = wb.active
         ws.title = 'الزيارات'
-        ws.append(['المريض', 'تاريخ الزيارة', 'الشكوى', 'حالة التوثيق', 'الحالة السريرية'])
+        ws.append(VISIT_COLUMNS)
         for v in visits:
-            ws.append([
-                v.patient.get_full_name(),
-                v.visit_date.isoformat() if v.visit_date else '',
-                v.main_complaints or '',
-                v.status or '',
-                v.clinical_status or '',
-            ])
+            ws.append(visit_export_row(v))
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         response['Content-Disposition'] = f'attachment; filename="visits_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
         for sheet in wb.worksheets:

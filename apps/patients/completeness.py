@@ -18,7 +18,7 @@ def recommended_fields():
 
 def completeness(patient):
     fields = recommended_fields()
-    missing = [field for field in fields if not (patient.care_team.filter(ended_at__isnull=True).exists()
+    missing = [field for field in fields if not (patient.care_team.effective_at().exists()
                if field == 'care_team' else getattr(patient, field))]
     return {'complete': not missing, 'missing_fields': missing,
             'percent': round((len(fields) - len(missing)) / len(fields) * 100) if fields else 100,
@@ -29,7 +29,7 @@ def incomplete_query():
     for field in recommended_fields():
         if field == 'care_team':
             from .models import PatientCareTeam
-            result |= ~Q(pk__in=PatientCareTeam.objects.filter(ended_at__isnull=True).values('patient_id'))
+            result |= ~Q(pk__in=PatientCareTeam.objects.effective_at().values('patient_id'))
         elif field in ('dob_year', 'registration_date'):
             result |= Q(**{field + '__isnull': True})
         else:

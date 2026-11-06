@@ -8,7 +8,6 @@ from .services import PrescriptionService
 from apps.visits.models import Visit
 from core.permissions import CanAccessVisit, HasExportPdf, HasViewVisits
 from core.exceptions import error_response
-from core.signals import log_action
 
 
 class PrescriptionPreviewView(APIView):
@@ -41,24 +40,9 @@ class PrescriptionGenerateView(APIView):
         )
         self.check_object_permissions(request, visit)
         preview_token = request.data.get('preview_token')
-        snapshot = self.service.get_preview(preview_token, request.user.id, visit)
-        if 'print_options' in request.data:
-            from .printing import normalize_print_options
-            from django.utils import timezone
-            snapshot = {**snapshot, 'print_options': normalize_print_options(request.data['print_options']),
-                        'issue_date': timezone.localdate().strftime('%d/%m/%Y')}
-        result = self.service.generate_prescription_pdf(snapshot, signature_data, stamp_data)
-
+        options = {'print_options': request.data['print_options']} if 'print_options' in request.data else {}
+        result = self.service.issue_prescription(visit, request.user, preview_token, signature_data, stamp_data, **options)
         if isinstance(result, bytes):
-            from .issuance import record_document
-            record_document(visit, request.user, 'prescription', snapshot, result, signature_data, stamp_data)
-            self.service.save_signature(request.user, visit_id, signature_data, stamp_data)
-            self.service.discard_preview(preview_token)
-            log_action(request.user.id, 'generate_prescription', 'Visit', visit.id, {
-                'summary': f'Generated prescription from visit version {visit.version}',
-                'visit_version': visit.version,
-                'template_version': snapshot['template_version'],
-            })
             response = HttpResponse(result, content_type='application/pdf')
             response['Content-Disposition'] = f'attachment; filename="prescription_{visit_id}.pdf"'
             return response

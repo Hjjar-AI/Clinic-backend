@@ -1,3 +1,4 @@
+from .choices import AppointmentStatus
 import uuid
 # backend/apps/appointments/models.py
 from django.db import models
@@ -7,14 +8,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from core.models import TimeStampedModel, SoftDeleteModel
 
 class Appointment(SoftDeleteModel, TimeStampedModel):
-    STATUS_CHOICES = [
-        ('scheduled', 'Scheduled'),
-        ('confirmed', 'Confirmed'),
-        ('arrived', 'Arrived'),
-        ('completed', 'Completed'),
-        ('cancelled', 'Cancelled'),
-        ('no-show', 'No-show'),
-    ]
+    STATUS_CHOICES = AppointmentStatus.choices
     patient = models.ForeignKey(
         'patients.Patient',
         on_delete=models.PROTECT,
@@ -37,7 +31,6 @@ class Appointment(SoftDeleteModel, TimeStampedModel):
     reminder_generation = models.UUIDField(default=uuid.uuid4, editable=False)
     reminder_sent = models.BooleanField(default=False)
     reminder_sent_hour = models.BooleanField(default=False)
-    version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
 
     class Meta:
         indexes = [

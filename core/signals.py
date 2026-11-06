@@ -13,20 +13,11 @@ from django.conf import settings
 from datetime import date, datetime, time
 from decimal import Decimal
 
-# Models we want to audit (add more as needed)
-AUDIT_MODELS = [
-    'Patient', 'Visit', 'Appointment', 'Invoice', 'UserTask',
-    'ClinicalScale', 'DiagnosisOption', 'MedicationOption', 'ClinicalNoteTemplate',
-    'PatientDocument', 'VisitAttachment', 'ClinicSetting', 'User',
-    'PatientCareTeam', 'PatientIdentifier', 'PatientContact', 'PatientRepresentative', 'PatientAllergy',
-    'PatientMedication', 'PatientFollowUp', 'PatientCorrection', 'PatientMerge', 'PatientDuplicateReview',
-]
-
+# Explicit allowlist; clinical text stays in protected domain history.
 AUDIT_FIELDS = {
     'Patient': ['first_name', 'father_name', 'surname', 'dob_year', 'gender', 'national_id',
                 'phone', 'doctor_id', 'registration_date', 'identity_verification', 'allergy_status', 'medication_status', 'is_active', 'deleted_at'],
-    'Visit': ['visit_date', 'status', 'status_reason', 'follow_up_date', 'follow_up_completed',
-              'follow_up_outcome', 'follow_up_completed_at', 'follow_up_completed_by_id',
+    'Visit': ['visit_date', 'status', 'status_reason', 'follow_up_id',
               'suicide_risk_level', 'violence_risk_level', 'signed_by_id', 'signed_at', 'version',
               'is_active', 'deleted_at'],
     'Appointment': ['appointment_date', 'appointment_time', 'duration_minutes', 'status',
@@ -45,7 +36,19 @@ AUDIT_FIELDS = {
     'ClinicalNoteTemplate': ['name', 'category', 'is_active', 'deleted_at'],
     'PatientDocument': ['original_filename', 'category', 'document_date', 'source', 'provider', 'verification', 'verified_at', 'verified_by_id', 'version', 'is_active', 'deleted_at'],
     'VisitAttachment': ['original_filename', 'is_active', 'deleted_at'],
+    'PatientCareTeam': ['patient_id', 'user_id', 'role', 'started_at', 'ended_at', 'assigned_by_id', 'ended_by_id'],
+    'PatientIdentifier': ['patient_id', 'identifier_type', 'verification', 'verified_at', 'verified_by_id', 'is_active', 'retired_at', 'retired_by_id', 'updated_at'],
+    'PatientContact': ['patient_id', 'is_primary', 'is_emergency', 'is_active', 'retired_at', 'retired_by_id', 'updated_at'],
+    'PatientRepresentative': ['patient_id', 'verification', 'verified_at', 'verified_by_id', 'valid_from', 'valid_until', 'is_active', 'retired_at', 'updated_at'],
+    'PatientAllergy': ['patient_id', 'source_visit_id', 'is_active', 'retired_at', 'retired_by_id', 'updated_at'],
+    'PatientMedication': ['patient_id', 'source_visit_id', 'is_active', 'retired_at', 'retired_by_id', 'updated_at'],
+    'PatientFollowUp': ['patient_id', 'owner_id', 'status', 'method', 'due_date', 'source_visit_id', 'appointment_id', 'completed_visit_id', 'completed_at', 'completed_by_id', 'is_active', 'retired_at', 'updated_at'],
+    'PatientCorrection': ['patient_id', 'actor_id', 'record_type', 'record_id', 'created_at'],
+    'PatientMerge': ['source_id', 'survivor_id', 'actor_id', 'created_at'],
+    'PatientDuplicateReview': ['patient_id', 'other_patient_id', 'status', 'reviewed_by_id', 'updated_at'],
 }
+
+AUDIT_MODELS = tuple(AUDIT_FIELDS)
 
 SENSITIVE_AUDIT_FIELDS = {'national_id', 'phone'}
 

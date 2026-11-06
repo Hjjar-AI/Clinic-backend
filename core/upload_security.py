@@ -1,4 +1,4 @@
-import magic
+from core.native_dependencies import detect_mime
 import zipfile
 import olefile
 import io
@@ -24,7 +24,7 @@ SPREADSHEET_MIME_TYPES = {
 
 def validate_mime(file, allowed_mime_types=None):
     file.seek(0)
-    mime = magic.from_buffer(file.read(2048), mime=True)
+    mime = detect_mime(file.read(2048))
     file.seek(0)
     allowed = allowed_mime_types or ALLOWED_MIME_TYPES
     file.verified_mime = mime

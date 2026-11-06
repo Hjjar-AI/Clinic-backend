@@ -4,9 +4,33 @@ Local entry commands are in [README](../README.md); [operations](operations.md) 
 
 ## Dependencies and environment
 
-Python 3.10–3.12 for pinned Django 5.0.6/DRF 3.15.1. `requirements/{sqlite,postgresql,mysql,mariadb}.txt` include shared pins plus selected driver; `cache-{memcached,redis}.txt` adds only client. SQLite is built in, PostgreSQL uses psycopg, MySQL/MariaDB mysqlclient needs client headers if no wheel. External/cache servers and WSGI driver are separate. Other installed Django backends do not imply schema/locking compatibility.
+Python 3.10–3.12 (3.12 recommended) on modern Windows x64 or Linux for pinned Django 5.0.6/DRF 3.15.1. Windows 7/Python 3.8 are outside this target. `requirements/{sqlite,postgresql,mysql,mariadb}.txt` include shared pins plus selected driver; `cache-{memcached,redis}.txt` adds only client. SQLite is built in, PostgreSQL uses psycopg, MySQL/MariaDB mysqlclient needs client headers if no wheel. External/cache servers and WSGI driver are separate. Other installed Django backends do not imply schema/locking compatibility.
 
-Debian/Ubuntu system libraries: libmagic1, Pango/Cairo/GObject, libffi-dev, shared-mime-info; macOS: libmagic/pango/cairo/gdk-pixbuf/libffi. WeasyPrint is the PDF renderer; both bundled Cairo/Inter fonts must resolve together from frontend `public/static/fonts`, `dist/static/fonts` or `dist/fonts`, or Django `PDF_FONT_DIR` (not a parsed env variable). Missing assets fail rendering; [inspection](verification.md#pdf-inspection).
+Native PDF/MIME libraries require the OS-specific setup below. WeasyPrint is the PDF renderer; both bundled Cairo/Inter fonts must resolve together from frontend `public/static/fonts`, `dist/static/fonts` or `dist/fonts`, or `PDF_FONT_DIR` from the process environment/`.env`. Missing assets fail rendering; [inspection](verification.md#pdf-inspection).
+
+### Native libraries by OS
+
+The same application uses Portalocker 4.3.0, Waitress 3.0.2, python-magic 0.4.27 and WeasyPrint 70.0 on both OS profiles. Windows installs Portalocker's `win32` extra automatically through the requirements marker and uses its Win32 backend for both blocking shared and exclusive locks; shared locks must never fall back to an unlocked/exclusive-only substitute. PostgreSQL retains session advisory locking. Other profiles require every participating worker/job to use the same lock file on storage supporting shared/exclusive locks; validate network filesystem behavior before using multiple hosts.
+
+On Debian/Ubuntu, install system Pango/Fontconfig/libmagic libraries using the package manager (package names vary by release), for example `libpango-1.0-0`, `libpangoft2-1.0-0`, `libfontconfig1`, `libmagic1` and `shared-mime-info`. On macOS, existing Homebrew/MacPorts equivalents remain applicable; macOS execution is not verified here. Python wheels do not replace native libraries.
+
+On Windows x64 install matching native libraries with [MSYS2 UCRT64](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows). In its UCRT64 shell:
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-pango mingw-w64-ucrt-x86_64-file
+```
+
+The [file package](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-file) provides both `libmagic-1.dll` and `magic.mgc`. Set these in the backend process environment or private `.env`, adjusting your installation path:
+
+```dotenv
+CLINIC_DLL_DIRECTORIES=C:/msys64/ucrt64/bin
+WEASYPRINT_DLL_DIRECTORIES=C:/msys64/ucrt64/bin
+LIBMAGIC_DATABASE=C:/msys64/ucrt64/share/misc/magic.mgc
+```
+
+Directory lists use the OS path separator (`;` on Windows). Use forward slashes in `.env` paths to avoid backslash escape surprises. Configured DLL directories are registered before native imports and added to the process PATH for libmagic discovery; DLL handles remain alive. An explicit MIME database uses one detector per thread. Keep matching 64-bit Python/native libraries and restart after environment changes. Font overrides use `PDF_FONT_DIR=C:/Clinic/fonts`; both required font files must be present together.
+
+After installing/configuring dependencies, run `python manage.py check_runtime --render-pdf` with the selected environment Python. It checks actual local shared/exclusive locks, Waitress availability, MIME detection, native PDF/fonts and time-zone data; the optional PDF is synthetic and retained only in memory. It makes no database queries, migrations or clinic-data writes. Local lock checks do not certify a network filesystem, nor does a synthetic PDF certify Arabic layout/physical printing. `python manage.py serve` runs these dependency checks (without PDF rendering), then Django's source checks before accepting traffic.
 
 `config/settings/base.py`, `database.py` and `.env.example` own defaults. Copy example only when `.env` is absent; never overwrite private values. Generate separate secrets privately and retain original backup signing keys.
 
@@ -40,24 +64,27 @@ Debian/Ubuntu system libraries: libmagic1, Pango/Cairo/GObject, libffi-dev, shar
 | --- | --- |
 | MEDIA_ROOT / MEDIA_URL | `backend/media/`, `/media/`; clinical bytes only through authorized API downloads in DEBUG and production. |
 | Static/templates | `staticfiles/`, `/static/`, existing sibling `frontend/dist/`; templates in backend and existing frontend bundle. Authorized collectstatic gathers existing assets. |
-| OPERATION_LOCK_DIR | For non-PostgreSQL production, common reliable POSIX lock storage across every worker/job. PostgreSQL uses DB session advisory gates. |
+| OPERATION_LOCK_DIR | For non-PostgreSQL production, explicitly configure common shared/exclusive-capable lock storage across every worker/job. Development defaults to BACKUP_DIR. PostgreSQL uses DB session advisory gates. |
+| PDF_FONT_DIR | Optional directory containing both bundled Cairo/Inter font files; parsed from environment. |
+| CLINIC_DLL_DIRECTORIES / WEASYPRINT_DLL_DIRECTORIES | Windows native library directories, separated by `;`; required for installations whose DLLs are outside normal discovery paths. |
+| LIBMAGIC_DATABASE | Optional explicit `magic.mgc` file, normally needed for the MSYS2 Windows installation; detectors remain thread-local. |
 | Runtime directories | Ignored `.env`, `data/`, `media/`, `backups/`, `staticfiles/`; protect backups/fonts/keys and patient data. Creating folders is not schema initialization. |
 
 Schema work needs explicit authorization. `bootstrap`/`runserver_auto` prepare migrations; bootstrap `--with-demo-data` seeds, `--with-frontend` installs/builds, `--clean` deletes SQLite/custom migrations and needs destructive scope. Deliberate `seed_db` creates/updates role defaults/users/catalogs/tasks; passwords print once and new users require rotation. Default seed usernames admin/doctor1/receptionist1 are not fixed passwords. Never invoke these helpers only to fix a folder/check source.
 
 ## Production
 
-All processes/jobs explicitly use `DJANGO_SETTINGS_MODULE=config.settings.production`, environment debug false, allowed hosts, external DB/shared cache, HTTPS and secure cookies. Production rejects empty hosts/SQLite/LocMemCache and non-PostgreSQL without common lock storage. Disable demo/auto-seed; keep credentials in protected environment. Shared cache is required for cross-worker preview/state, even though cache generations are durable DB state.
+All processes/jobs explicitly use `DJANGO_SETTINGS_MODULE=config.settings.production`, environment debug false, allowed hosts, external DB/shared cache, HTTPS and secure cookies. Production rejects empty hosts/SQLite/LocMemCache and non-PostgreSQL without explicitly configured common lock storage. OS portability does not remove these concurrency/deployment requirements. Disable demo/auto-seed; keep credentials in protected environment. Shared cache is required for cross-worker preview/state, even though cache generations are durable DB state.
 
 Apply authorized schema before starting changed models, especially CacheGeneration/RecoveryOperation/reminder-generation fields. Authorized assets: frontend frozen install/build then backend collectstatic; collecting first misses new assets. Current Vite output has source maps/minification disabled; choose release policy under build scope.
 
-Example loopback service command (installed Gunicorn):
+Cross-platform loopback service command (Waitress is included in requirements):
 
 ```bash
-gunicorn --workers 3 --bind 127.0.0.1:5019 config.wsgi:application
+python manage.py serve --settings=config.settings.production --host 127.0.0.1 --port 5019 --threads 8
 ```
 
-Use a deployment-owned systemd unit with backend WorkingDirectory, production module/private EnvironmentFile, deploy user/group, restart-on-failure and explicit DB/cache dependencies. Three workers is an example, not measured capacity. Monitor service status/journal; reload deliberately.
+On Linux, use a deployment-owned systemd unit; on Windows, use a service supervisor configured to launch the virtual-environment Python and the same `manage.py serve` command. Set backend working directory, private environment, production settings, restart behavior and DB/cache dependencies explicitly. Eight threads is an example, not measured capacity. Waitress does not terminate HTTPS; put it behind the deployment HTTPS proxy and retain secure cookies. DB/cache servers may run on another host; a cross-platform client does not install those servers. Monitor the service and restart deliberately.
 
 Nginx HTTPS location essentials (configured certificates/server name/upstream required):
 

@@ -1,3 +1,4 @@
+from .choices import Verification, CareRole, MaritalStatus, Gender, FollowUpMethod, FollowUpStatus, IdentifierType, AuthorityScope, RecordSource, AllergySeverity, AllergyStatus, MedicationStatus, SummaryStatus, ContactChannel, DuplicateStatus
 # backend/apps/patients/models.py
 from django.db import models
 from core.constraints import check_constraint
@@ -5,10 +6,11 @@ from django.db.models import Q
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.utils import timezone
-from core.models import TimeStampedModel, SoftDeleteModel
+from core.models import TimeStampedModel, SoftDeleteModel, StoredFileMetadata
 from .record_models import VERIFICATION, CARE_ROLES, MARITAL_STATUSES
+from .querysets import CareTeamQuerySet
 import uuid
-from core.normalization import normalize_identifier, normalize_name, normalize_phone, normalized_search_text
+from core.normalization import normalized_search_text
 
 
 def patient_number():
@@ -18,10 +20,7 @@ def current_year():
     return timezone.localdate().year
 
 class Patient(SoftDeleteModel, TimeStampedModel):
-    GENDER_CHOICES = [
-        ('ذكر', 'ذكر'),
-        ('أنثى', 'أنثى'),
-    ]
+    GENDER_CHOICES = Gender.choices
     patient_number = models.CharField(max_length=18, unique=True, default=patient_number, editable=False)
     identity_verification = models.CharField(max_length=20, choices=VERIFICATION, default='reported')
     identity_verified_at = models.DateTimeField(null=True, blank=True, editable=False)
@@ -29,8 +28,8 @@ class Patient(SoftDeleteModel, TimeStampedModel):
     preferred_language = models.CharField(max_length=30, blank=True, default='')
     preferred_contact_channel = models.CharField(max_length=20, blank=True, default='', choices=[('', 'Unspecified'), ('phone', 'Phone'), ('sms', 'SMS'), ('email', 'Email'), ('none', 'Do not contact')])
     communication_restrictions = models.TextField(blank=True, default='')
-    allergy_status = models.CharField(max_length=20, default='unknown', choices=[('unknown', 'Unknown'), ('none_known', 'None known'), ('recorded', 'Recorded')])
-    medication_status = models.CharField(max_length=20, default='unknown', choices=[('unknown', 'Unknown'), ('none_known', 'None known'), ('recorded', 'Recorded')])
+    allergy_status = models.CharField(max_length=20, default='unknown', choices=SummaryStatus.choices)
+    medication_status = models.CharField(max_length=20, default='unknown', choices=SummaryStatus.choices)
     merged_into = models.ForeignKey('self', on_delete=models.PROTECT, null=True, blank=True, related_name='merged_records', editable=False)
     first_name = models.CharField(max_length=100)
     father_name = models.CharField(max_length=100, blank=True, default='')
@@ -76,7 +75,6 @@ class Patient(SoftDeleteModel, TimeStampedModel):
         related_name='created_patients',
     )
     registration_date = models.DateField(null=True, blank=True)
-    version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
 
     class Meta:
         indexes = [
@@ -100,15 +98,10 @@ class Patient(SoftDeleteModel, TimeStampedModel):
             if original and original != self.patient_number:
                 from django.core.exceptions import ValidationError
                 raise ValidationError('رقم الملف دائم ولا يمكن تغييره')
-        for field in self._meta.concrete_fields:
-            if isinstance(field, (models.CharField, models.TextField)) and field.blank and getattr(self, field.name) is None:
-                setattr(self, field.name, '')
-        for field in ('first_name', 'father_name', 'surname', 'mother_name'):
-            value = getattr(self, field)
-            setattr(self, field, normalize_name(value) if value else value)
-        self.national_id = normalize_identifier(self.national_id) or ''
-        self.phone = normalize_phone(self.phone) or ''
-        self.emergency_contact_phone = normalize_phone(self.emergency_contact_phone) or ''
+        from .validation import IDENTITY_FIELDS, normalize_identity_data
+        fields = (*IDENTITY_FIELDS, 'national_id', 'phone', 'emergency_contact_phone')
+        for field, value in normalize_identity_data({field: getattr(self, field) for field in fields}).items():
+            setattr(self, field, value)
         self.normalised_full_name = normalized_search_text(self.get_full_name())
         update_fields = kwargs.get('update_fields')
         if update_fields is not None and set(update_fields) & {'first_name', 'father_name', 'surname'}:
@@ -137,18 +130,12 @@ class Patient(SoftDeleteModel, TimeStampedModel):
         return completeness(self)
 
 
-class PatientDocument(SoftDeleteModel, TimeStampedModel):
+class PatientDocument(SoftDeleteModel, TimeStampedModel, StoredFileMetadata):
     patient = models.ForeignKey(
         Patient,
         on_delete=models.PROTECT,
         related_name='documents',
     )
-    filename = models.CharField(max_length=255)
-    original_filename = models.CharField(max_length=255)
-    filepath = models.CharField(max_length=500)
-    file_size = models.PositiveBigIntegerField(null=True, blank=True)
-    checksum = models.CharField(max_length=64, blank=True, editable=False)
-    mime_type = models.CharField(max_length=100, blank=True, default='')
     document_date = models.DateField(null=True, blank=True)
     source = models.CharField(max_length=200, blank=True, default='')
     provider = models.CharField(max_length=200, blank=True, default='')
@@ -169,6 +156,8 @@ class PatientDocument(SoftDeleteModel, TimeStampedModel):
 
 
 class PatientCareTeam(TimeStampedModel):
+    objects = CareTeamQuerySet.as_manager()
+
     patient = models.ForeignKey(
         Patient,
         on_delete=models.PROTECT,

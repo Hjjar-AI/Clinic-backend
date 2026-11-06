@@ -1,5 +1,5 @@
 from core.constraints import archive_constraint, check_constraint, verification_constraint
-from .choices import Verification, CareRole, MaritalStatus, Gender, FollowUpMethod, FollowUpStatus, IdentifierType, AuthorityScope, RecordSource, AllergySeverity, AllergyStatus, MedicationStatus, SummaryStatus, ContactChannel, DuplicateStatus
+from .choices import Gender, SummaryStatus, ContactChannel
 # backend/apps/patients/models.py
 from django.db import models
 from django.db.models import Q
@@ -88,6 +88,8 @@ class Patient(SoftDeleteModel, TimeStampedModel):
         return f"{self.first_name} {self.surname or ''}".strip()
 
     def save(self, *args, **kwargs):
+        self.__dict__.pop('_summary_team', None)
+        self.__dict__.pop('_summary_contacts', None)
         if self.pk and not self._state.adding:
             original = type(self).all_objects.filter(pk=self.pk).values_list('patient_number', flat=True).first()
             if original and original != self.patient_number:
@@ -117,6 +119,8 @@ class Patient(SoftDeleteModel, TimeStampedModel):
         return row.value if row and row.is_active else ''
 
     def _emergency_contact(self):
+        if hasattr(self, '_summary_contacts'):
+            return next(iter(self._summary_contacts), None)
         return self.patientcontact_records.filter(is_active=True, is_primary=True, is_emergency=True).first() if self.pk else None
 
     @property
@@ -136,8 +140,16 @@ class Patient(SoftDeleteModel, TimeStampedModel):
 
     @property
     def doctor(self):
+        if hasattr(self, '_summary_team'):
+            member = next((row for row in self._summary_team if row.role == 'doctor'), None)
+            return member.user if member else None
         member = self.care_team.effective_at().filter(role='doctor').select_related('user').order_by('started_at', 'pk').first() if self.pk else None
         return member.user if member else None
+
+    def refresh_from_db(self, *args, **kwargs):
+        self.__dict__.pop('_summary_team', None)
+        self.__dict__.pop('_summary_contacts', None)
+        return super().refresh_from_db(*args, **kwargs)
 
     @property
     def doctor_id(self):

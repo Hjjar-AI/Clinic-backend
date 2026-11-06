@@ -45,7 +45,7 @@ def normalize_profile_data(data):
             data[field] = '' if data[field] is None else data[field].strip() if isinstance(data[field], str) else data[field]
     aliases = {'أعزب': 'single', 'عزباء': 'single', 'متزوج': 'married', 'متزوجة': 'married',
                'مطلق': 'divorced', 'مطلقة': 'divorced', 'أرمل': 'widowed', 'أرملة': 'widowed'}
-    if 'marital_status' in data:
+    if isinstance(data.get('marital_status'), str):
         data['marital_status'] = aliases.get(data['marital_status'], data['marital_status'])
     return normalize_identity_data(data)
 

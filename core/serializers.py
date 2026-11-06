@@ -13,6 +13,20 @@ class StrictFieldsMixin:
         return super().to_internal_value(data)
 
 
+class StrictPositiveIntegerField(serializers.IntegerField):
+    def to_internal_value(self, data):
+        if type(data) is not int or data < 1:
+            raise serializers.ValidationError('يلزم عدد صحيح موجب')
+        return super().to_internal_value(data)
+
+
+class StrictBooleanField(serializers.BooleanField):
+    def to_internal_value(self, data):
+        if type(data) is not bool:
+            raise serializers.ValidationError('يلزم نعم أو لا')
+        return data
+
+
 def domain_validation(validator, *args, error_field=None, **kwargs):
     try:
         return validator(*args, **kwargs)

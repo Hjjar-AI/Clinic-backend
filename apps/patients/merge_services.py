@@ -132,6 +132,8 @@ class PatientMergeService:
     @transaction.atomic
     def dismiss(self, patient, other_id, status, reason, actor, version):
         patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        from core.access import require_patient_actor
+        actor = require_patient_actor(patient, actor, 'edit_patient')
         require_access(patient, actor, write=True)
         check_mutation(patient, version)
         other = Patient.all_objects.filter(pk=parse_version(other_id)).first()

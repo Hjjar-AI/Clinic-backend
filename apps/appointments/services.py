@@ -125,7 +125,9 @@ class AppointmentService:
     @staticmethod
     def _lock_mutation(appointment, expected_version, actor):
         patient_id = Appointment.all_objects.values_list('patient_id', flat=True).get(pk=appointment.pk)
-        Patient.all_objects.select_for_update().get(pk=patient_id)
+        patient = Patient.all_objects.select_for_update().get(pk=patient_id)
+        if not patient.is_active or patient.deleted_at is not None:
+            raise ConflictError('ملف المريض مؤرشف؛ أعد تحميل الموعد')
         appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
         actor = require_actor_permission(actor, 'manage_appointments')
         if appointment.patient_id != patient_id:

@@ -1,4 +1,4 @@
-from core.serializers import StrictFieldsMixin
+from core.serializers import StrictFieldsMixin, StrictPositiveIntegerField, StrictBooleanField
 # backend/apps/visits/serializers.py
 from rest_framework import serializers
 from .models import Visit, VisitDiagnosis, VisitMedication, VisitAttachment, VisitScaleResponse
@@ -15,19 +15,19 @@ class FollowUpInputSerializer(StrictFieldsMixin, serializers.Serializer):
 
 
 class DiagnosisInputSerializer(StrictFieldsMixin, serializers.Serializer):
-    id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    id = StrictPositiveIntegerField(required=False, allow_null=True, min_value=1)
     code = serializers.CharField(required=False, allow_blank=True, max_length=50)
     name = serializers.CharField(required=False, allow_blank=True, max_length=200)
     arabic_name = serializers.CharField(required=False, allow_blank=True, max_length=200)
 
 
 class MedicationInputSerializer(StrictFieldsMixin, serializers.Serializer):
-    id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    id = StrictPositiveIntegerField(required=False, allow_null=True, min_value=1)
     name = serializers.CharField(required=False, allow_blank=True, max_length=200)
     dosage = serializers.CharField(required=False, allow_blank=True, max_length=100)
     brand = serializers.CharField(required=False, allow_blank=True, max_length=200)
     schedule = serializers.CharField(required=False, allow_blank=True, max_length=200)
-    is_custom = serializers.BooleanField(required=False)
+    is_custom = StrictBooleanField(required=False)
     controlled = serializers.BooleanField(read_only=True)
 
 
@@ -41,7 +41,7 @@ class LabInputSerializer(StrictFieldsMixin, serializers.Serializer):
 
 
 class ScaleResponseInputSerializer(StrictFieldsMixin, serializers.Serializer):
-    scale_id = serializers.IntegerField(min_value=1)
+    scale_id = StrictPositiveIntegerField(min_value=1)
     scale_name = serializers.CharField(read_only=True)
     responses = serializers.JSONField()
 

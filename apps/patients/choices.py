@@ -21,8 +21,8 @@ class MaritalStatus(TextChoices):
     WIDOWED = 'widowed', 'أرمل / أرملة'
 
 class Gender(TextChoices):
-    VALUE_0 = 'ذكر', 'ذكر'
-    VALUE_1 = 'أنثى', 'أنثى'
+    MALE = 'ذكر', 'ذكر'
+    FEMALE = 'أنثى', 'أنثى'
 
 class FollowUpMethod(TextChoices):
     IN_PERSON = 'In-person', 'In-person'

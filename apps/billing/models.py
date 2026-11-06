@@ -82,6 +82,6 @@ class InvoiceLine(models.Model):
     class Meta:
         ordering = ['order', 'pk']
         constraints = [
-            check_constraint(condition=models.Q(quantity__gt=0, quantity__lte=999999.99, unit_price__gte=0, amount__gte=0), name='invoice_line_amounts_valid'),
+            check_constraint(condition=models.Q(quantity__gt=0, quantity__lte=Decimal('999999.99'), unit_price__gte=0, amount__gte=0), name='invoice_line_amounts_valid'),
             check_constraint(condition=models.Q(amount=Round(models.F('quantity') * models.F('unit_price'), precision=2)), name='invoice_line_amount_matches'),
         ]

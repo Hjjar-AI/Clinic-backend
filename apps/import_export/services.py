@@ -266,4 +266,4 @@ class OptionsImportService(BulkImportService):
         return self._import_catalog(file_stream, 'diagnosis', merge_mode=merge_mode, expected_inventory=expected_inventory, actor=actor)
 
     def import_medications(self, file_stream, column_map=None, merge_mode='merge', expected_inventory=None, *, actor):
-        return self._import_catalog(file_stream, 'medication', column_map, merge_mode, expected_inventory)
+        return self._import_catalog(file_stream, 'medication', column_map, merge_mode, expected_inventory, actor=actor)

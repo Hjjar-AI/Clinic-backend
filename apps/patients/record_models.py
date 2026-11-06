@@ -1,6 +1,6 @@
-from core.constraints import check_constraint, retirement_constraint, verification_constraint
-from .choices import (Verification, CareRole, MaritalStatus, FollowUpMethod, FollowUpStatus, IdentifierType, AuthorityScope, RecordSource, AllergySeverity, AllergyStatus, MedicationStatus, DuplicateStatus)
 """Longitudinal patient records; encounter facts stay on visits/signed snapshots."""
+from core.constraints import check_constraint, retirement_constraint, verification_constraint
+from .choices import Verification, CareRole, MaritalStatus, FollowUpMethod, FollowUpStatus, IdentifierType, AuthorityScope, RecordSource, AllergySeverity, AllergyStatus, MedicationStatus, DuplicateStatus
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -106,6 +106,7 @@ class PatientAllergy(ClinicalPatientRecord):
 
     class Meta:
         constraints = [
+            check_constraint(condition=models.Q(source__in=RecordSource.values), name='patientallergy_source_valid'),
             retirement_constraint('patients_patientallergy_retirement_valid'),
             check_constraint(condition=models.Q(severity__in=AllergySeverity.values), name='patients_patientallergy_severity_valid'),
             check_constraint(condition=models.Q(status__in=AllergyStatus.values), name='patients_patientallergy_status_valid'),
@@ -122,6 +123,7 @@ class PatientMedication(ClinicalPatientRecord):
 
     class Meta:
         constraints = [
+            check_constraint(condition=models.Q(source__in=RecordSource.values), name='patientmedication_source_valid'),
             retirement_constraint('patients_patientmedication_retirement_valid'),
             check_constraint(condition=models.Q(status__in=MedicationStatus.values), name='patients_patientmedication_status_valid'),
             check_constraint(condition=Q(started_on__isnull=True) | Q(ended_on__isnull=True) | Q(ended_on__gte=models.F('started_on')), name='patient_medication_dates_valid'),

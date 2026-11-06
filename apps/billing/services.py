@@ -20,7 +20,9 @@ class BillingService:
     def _lock_invoice(invoice, actor):
         actor = require_actor_permission(actor, 'manage_billing')
         patient_id = Invoice.all_objects.values_list('patient_id', flat=True).get(pk=invoice.pk)
-        Patient.all_objects.select_for_update().get(pk=patient_id)
+        patient = Patient.all_objects.select_for_update().get(pk=patient_id)
+        if not patient.is_active or patient.deleted_at is not None:
+            raise ConflictError('ملف المريض مؤرشف؛ أعد تحميل الفاتورة')
         invoice = Invoice.all_objects.select_for_update().get(pk=invoice.pk)
         actor = require_actor_permission(actor, 'manage_billing')
         if invoice.patient_id != patient_id:

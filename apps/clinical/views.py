@@ -136,7 +136,12 @@ class ClinicalConstantsView(APIView):
     def get(self, request):
         from apps.visits.choices import RiskLevel, LevelOfCare, CareBasis
         from apps.patients.choices import FollowUpMethod, MaritalStatus, Gender
+        from apps.patients.record_services import RECORDS
+        record_choices = {kind: {name: [{'value': value, 'label': label} for value, label in model._meta.get_field(name).choices]
+            for name in fields if model._meta.get_field(name).choices}
+            for kind, (model, fields) in RECORDS.items()}
         return Response({'data': {
+            'record_choices': record_choices,
             'suicide_risk_levels': RiskLevel.values,
             'violence_risk_levels': RiskLevel.values,
             'level_of_care': LevelOfCare.values,

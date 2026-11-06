@@ -120,6 +120,7 @@ class PatientService:
         from core.access import require_patient_actor
         current_user = require_patient_actor(patient, current_user, 'edit_patient')
         check_mutation(patient, expected_version)
+        before_profile = {name: json_value(getattr(patient, name)) for name in self.CORRECTION_FIELDS}
         previous_summaries = {field: getattr(patient, field) for field in ('allergy_status', 'medication_status', 'family_history', 'important_notes')}
         previous_verification = patient.identity_verification
         data = self._normalize(data)
@@ -158,6 +159,8 @@ class PatientService:
                 PatientRecordService().save(patient, 'contacts', {} if retire else fields,
                     current_user, patient.version, primary.pk if primary else None, retire=retire, reason=reason)
                 patient.refresh_from_db()
+        changes = {name: {'before': before, 'after': json_value(getattr(patient, name))}
+                   for name, before in before_profile.items() if before != json_value(getattr(patient, name))}
         if changes:
             narrative = {key: value for key, value in changes.items() if key in CLINICAL_PROFILE_FIELDS}
             demographic = {key: value for key, value in changes.items() if key not in narrative}
@@ -209,7 +212,8 @@ class PatientService:
         include_archived = bool(filters and filters.get('include_archived') == 'true')
         manager = Patient.all_objects if include_archived else Patient.objects
         from core.access import accessible_patients
-        qs = accessible_patients(user, include_archived).select_related('primary_identifier')
+        from .querysets import summary_queryset
+        qs = summary_queryset(accessible_patients(user, include_archived))
 
         search = filters.get('search', '') if filters else ''
         if search:

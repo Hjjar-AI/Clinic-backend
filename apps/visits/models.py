@@ -1,7 +1,7 @@
 from core.constraints import archive_constraint, check_constraint
 from .choices import VisitStatus, RiskLevel, LevelOfCare, CareBasis, AccompaniedBy
 # backend/apps/visits/models.py
-from django.db import models, transaction
+from django.db import models
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from core.models import TimeStampedModel, SoftDeleteModel, StoredFileMetadata, ImmutableModel

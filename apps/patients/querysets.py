@@ -13,5 +13,14 @@ class CareTeamQuerySet(models.QuerySet):
 
 
 def care_team_names(patient):
+    if hasattr(patient, '_summary_team'):
+        return [member.user.full_name or member.user.username for member in patient._summary_team]
     return [member.user.full_name or member.user.username
             for member in patient.care_team.effective_at().select_related('user')]
+
+
+def summary_queryset(queryset):
+    from .models import PatientCareTeam, PatientContact
+    return queryset.select_related('primary_identifier').prefetch_related(
+        models.Prefetch('care_team', queryset=PatientCareTeam.objects.effective_at().select_related('user').order_by('started_at', 'pk'), to_attr='_summary_team'),
+        models.Prefetch('patientcontact_records', queryset=PatientContact.objects.filter(is_active=True, is_primary=True, is_emergency=True), to_attr='_summary_contacts'))

@@ -17,7 +17,9 @@ from .input_validation import normalize_rows, clinical_object, text
 def lock_visit(visit_id, actor=None, permission=None):
     """Lock the patient before its encounter, matching patient reconciliation."""
     patient_id = Visit.all_objects.values_list('patient_id', flat=True).get(pk=visit_id)
-    Patient.all_objects.select_for_update().get(pk=patient_id)
+    patient = Patient.all_objects.select_for_update().get(pk=patient_id)
+    if not patient.is_active or patient.deleted_at is not None:
+        raise ConflictError('ملف المريض مؤرشف؛ أعد تحميل البيانات')
     visit = Visit.all_objects.select_for_update().get(pk=visit_id)
     if visit.patient_id != patient_id:
         raise ConflictError('تغير ملف المريض؛ أعد تحميل الزيارة')

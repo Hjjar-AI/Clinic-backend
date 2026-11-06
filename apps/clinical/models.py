@@ -1,7 +1,6 @@
 from core.constraints import archive_constraint, check_constraint
 from .choices import ScaleFieldType
 from django.db import models
-from core.constraints import check_constraint
 from django.db.models.functions import Lower, Trim
 from django.core.validators import MinValueValidator
 from core.models import SoftDeleteModel, TimeStampedModel
@@ -15,7 +14,7 @@ class DiagnosisOption(SoftDeleteModel):
     class Meta:
         constraints = [
             archive_constraint('clinical_diagnosisoption_archive_valid'),
-            *[check_constraint(condition=models.Q(version__gte=1), name='diagnosisoption_version_positive')],
+            check_constraint(condition=models.Q(version__gte=1), name='diagnosisoption_version_positive'),
         ]
         ordering = ['order', 'code', 'id']
 
@@ -35,10 +34,8 @@ class MedicationOption(SoftDeleteModel):
     class Meta:
         constraints = [
             archive_constraint('clinical_medicationoption_archive_valid'),
-            *[
             check_constraint(condition=models.Q(version__gte=1), name='medicationoption_version_positive'),
             models.UniqueConstraint(Lower(Trim('generic_english')), Lower(Trim('dosage')), Lower(Trim('brand_english')), name='medication_identity_unique'),
-        ],
         ]
         ordering = ['order', 'generic_english', 'id']
 
@@ -67,7 +64,7 @@ class ClinicalScale(SoftDeleteModel, TimeStampedModel):
     class Meta:
         constraints = [
             archive_constraint('clinical_clinicalscale_archive_valid'),
-            *[check_constraint(condition=models.Q(version__gte=1), name='clinicalscale_version_positive')],
+            check_constraint(condition=models.Q(version__gte=1), name='clinicalscale_version_positive'),
         ]
         ordering = ['name', 'id']
 
@@ -105,28 +102,11 @@ class ScaleField(SoftDeleteModel, TimeStampedModel):
         constraints = [
             archive_constraint('clinical_scalefield_archive_valid'),
             check_constraint(condition=models.Q(field_type__in=ScaleFieldType.values), name='clinical_scalefield_field_type_valid'),
-            *[
             check_constraint(condition=models.Q(version__gte=1), name='scalefield_version_positive'),
-            check_constraint(
-                condition=models.Q(max_val__gt=models.F('min_val')),
-                name='scale_field_range_valid',
-            ),
-            check_constraint(
-                condition=models.Q(step__gt=0),
-                name='scale_field_step_positive',
-            ),
-            check_constraint(
-                condition=models.Q(step__lte=models.F('max_val') - models.F('min_val')),
-                name='scale_field_step_within_range',
-            ),
-            check_constraint(
-                condition=(
-                    models.Q(default__gte=models.F('min_val'))
-                    & models.Q(default__lte=models.F('max_val'))
-                ),
-                name='scale_field_default_in_range',
-            ),
-        ],
+            check_constraint(condition=models.Q(max_val__gt=models.F('min_val')), name='scale_field_range_valid'),
+            check_constraint(condition=models.Q(step__gt=0), name='scale_field_step_positive'),
+            check_constraint(condition=models.Q(step__lte=models.F('max_val') - models.F('min_val')), name='scale_field_step_within_range'),
+            check_constraint(condition=models.Q(default__gte=models.F('min_val')) & models.Q(default__lte=models.F('max_val')), name='scale_field_default_in_range'),
         ]
 
 

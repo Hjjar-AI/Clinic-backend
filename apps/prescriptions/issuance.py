@@ -30,6 +30,7 @@ def record_document(visit, actor, kind, snapshot, pdf, signature='', stamp=''):
     validate_embedded_image(stamp, 'stamp')
     from apps.visits.services import lock_visit
     visit = lock_visit(visit.pk, actor)
+    actor = require_actor_permission(actor, 'edit_visit')
     permission = 'export_pdf' if kind == 'prescription' else 'view_referrals'
     if not actor.has_perm(permission):
         raise PermissionDenied('غير مصرح بإصدار المستند')

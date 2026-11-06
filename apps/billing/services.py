@@ -22,6 +22,7 @@ class BillingService:
         patient_id = Invoice.all_objects.values_list('patient_id', flat=True).get(pk=invoice.pk)
         Patient.all_objects.select_for_update().get(pk=patient_id)
         invoice = Invoice.all_objects.select_for_update().get(pk=invoice.pk)
+        actor = require_actor_permission(actor, 'manage_billing')
         if invoice.patient_id != patient_id:
             raise ConflictError('تغير ملف المريض؛ أعد تحميل الفاتورة')
         if not accessible_invoices(actor).filter(pk=invoice.pk).exists():
@@ -130,6 +131,7 @@ class BillingService:
             patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
         if not patient or patient.deleted_at is not None or not patient.is_active:
             raise ValidationError(['المريض غير موجود'])
+        actor = require_actor_permission(actor, 'manage_billing')
         if not accessible_patients(actor).filter(pk=patient.pk).exists():
             raise PermissionDenied('غير مصرح بالوصول إلى الملف')
         if data.get('visit') is not None and not visit:

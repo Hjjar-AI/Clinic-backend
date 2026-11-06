@@ -57,18 +57,18 @@ class ScaleViewSet(viewsets.ModelViewSet):
         return queryset.prefetch_related('fields')
 
     def perform_create(self, serializer):
-        serializer.instance = create_catalog(ClinicalScale, serializer.validated_data)
+        serializer.instance = create_catalog(ClinicalScale, serializer.validated_data, actor=self.request.user)
 
     def perform_update(self, serializer):
-        serializer.instance = update_catalog(ClinicalScale, serializer.instance.pk, serializer.validated_data, request_version(self.request))
+        serializer.instance = update_catalog(ClinicalScale, serializer.instance.pk, serializer.validated_data, request_version(self.request), actor=self.request.user)
 
     def perform_destroy(self, instance):
-        self.service.delete_scale(instance.pk, request_version(self.request))
+        self.service.delete_scale(instance.pk, request_version(self.request), actor=self.request.user)
 
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
         instance = self.get_object()
-        instance = restore_catalog(instance, request_version(request))
+        instance = restore_catalog(instance, request_version(request), actor=request.user)
         return Response({'data': self.get_serializer(instance).data})
 
     @action(detail=True, methods=['post'], url_path='add-field')
@@ -76,6 +76,6 @@ class ScaleViewSet(viewsets.ModelViewSet):
         scale = self.get_object()
         serializer = ScaleFieldSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        field = self.service.add_field(scale, serializer.validated_data, request_version(request))
+        field = self.service.add_field(scale, serializer.validated_data, request_version(request), actor=request.user)
         scale.refresh_from_db(fields=['version'])
         return Response(ScaleFieldSerializer(field).data, status=status.HTTP_201_CREATED, headers={'X-Resource-Version': str(scale.version)})

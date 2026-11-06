@@ -1,3 +1,4 @@
+from core.access import require_actor_permission
 # backend/apps/accounts/services.py
 from django.contrib.auth import login, logout
 from django.core.exceptions import ValidationError, PermissionDenied
@@ -93,7 +94,8 @@ class UserService:
         user.groups.set([group])
 
     @transaction.atomic
-    def create_user(self, username, password, full_name, role, stamp_data=None):
+    def create_user(self, username, password, full_name, role, stamp_data=None, *, actor, preferences=None):
+        require_actor_permission(actor, 'manage_users')
         username = User.normalize_username(username).strip()
         validate_embedded_image(stamp_data, 'stamp_data')
         if User.objects.filter(username=username).exists():
@@ -108,7 +110,8 @@ class UserService:
             full_name=full_name,
             role=role,
             force_password_change=True,
-            stamp_data=stamp_data,
+            stamp_data=stamp_data or '',
+            preferences={} if preferences is None else preferences,
         )
         self._apply_role_group(user, role)
         return user
@@ -120,9 +123,10 @@ class UserService:
         # Evaluate rows in a stable order; count() alone does not acquire row locks.
         active_admin_ids = self._lock_active_admins()
         user = User.objects.select_for_update().get(pk=user.pk)
+        actor = require_actor_permission(request.user, 'manage_users')
         check_user_version(user, expected_version)
         # Enforce privilege escalation prevention: only superusers can modify these fields.
-        if not request.user.is_superuser:
+        if not actor.is_superuser:
             data.pop('is_staff', None)
             data.pop('is_superuser', None)
             data.pop('is_active', None)
@@ -157,7 +161,7 @@ class UserService:
             self._apply_role_group(user, user.role)
             revoke_sessions(user)
             user.save(update_fields=['session_revoked_at'])
-            log_action(request.user.id, 'role_change', 'User', user.id, {
+            log_action(actor.id, 'role_change', 'User', user.id, {
                 'summary': f'Role changed from {old_role} to {user.role}; direct grants reset',
                 'before_role': old_role,
                 'after_role': user.role,
@@ -169,6 +173,7 @@ class UserService:
     def deactivate_user(self, user, actor, expected_version=None):
         active_admin_ids = self._lock_active_admins()
         user = User.objects.select_for_update().get(pk=user.pk)
+        actor = require_actor_permission(actor, 'manage_users')
         from core.mutation import check_mutation
         check_mutation(user, expected_version)
         if user.pk == actor.pk:
@@ -192,6 +197,7 @@ class UserService:
         if unknown:
             raise ValidationError({'permissions': unknown})
         user = User.objects.select_for_update().get(pk=user.pk)
+        actor = require_actor_permission(actor, 'manage_users')
         check_user_version(user, expected_version)
         before = sorted(user.user_permissions.values_list('codename', flat=True))
         user.user_permissions.set(Permission.objects.filter(codename__in=codenames))

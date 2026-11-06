@@ -77,7 +77,7 @@ class BackupRestoreService:
         metadata = data.get('metadata', {})
         if not isinstance(metadata, dict):
             raise ValueError('Invalid backup metadata')
-        if metadata.get('format_version') != 2 or metadata.get('schema') != 'complete-records':
+        if metadata.get('format_version') != 3 or metadata.get('schema') != 'complete-records':
             raise ValueError('Backup uses an incomplete legacy schema; full recovery is unsupported')
         models = {model._meta.label_lower: model for model in backup_models()}
         records = data.get('records')
@@ -181,7 +181,7 @@ class BackupRestoreService:
                 'diagnoses_count': counts.get('clinical.diagnosisoption', 0),
                 'medications_count': counts.get('clinical.medicationoption', 0),
                 'media_files_count': len(media), 'created_at': data['metadata']['created_at'],
-                'format_version': 2, 'compatible': True, 'counts': counts,
+                'format_version': 3, 'compatible': True, 'counts': counts,
                 'will_replace': sorted(counts) if restore_patients else [],
                 'will_merge': ([] if restore_patients else
                     (['clinical.diagnosisoption'] if restore_diagnoses else []) +

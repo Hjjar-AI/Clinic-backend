@@ -52,18 +52,18 @@ class TemplateViewSet(viewsets.ModelViewSet):
         }, default='name')
 
     def perform_create(self, serializer):
-        instance = self.service.create_template(serializer.validated_data)
+        instance = self.service.create_template(serializer.validated_data, actor=self.request.user)
         serializer.instance = instance
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        serializer.instance = self.service.update_template(instance.id, serializer.validated_data, request_version(self.request))
+        serializer.instance = self.service.update_template(instance.id, serializer.validated_data, request_version(self.request), actor=self.request.user)
 
     def perform_destroy(self, instance):
-        self.service.delete_template(instance.id, request_version(self.request))
+        self.service.delete_template(instance.id, request_version(self.request), actor=self.request.user)
 
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
         instance = self.get_object()
-        instance = restore_catalog(instance, request_version(request))
+        instance = restore_catalog(instance, request_version(request), actor=request.user)
         return Response({'data': self.get_serializer(instance).data})

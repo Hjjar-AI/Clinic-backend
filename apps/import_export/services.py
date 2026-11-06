@@ -221,7 +221,9 @@ class OptionsImportService(BulkImportService):
 
     @gated(exclusive=True)
     @transaction.atomic
-    def _import_catalog(self, file_stream, kind, column_map=None, merge_mode='merge', expected_inventory=None):
+    def _import_catalog(self, file_stream, kind, column_map=None, merge_mode='merge', expected_inventory=None, *, actor):
+        from core.access import require_actor_permission
+        require_actor_permission(actor, 'manage_options')
         allowed = {'merge','replace'} if kind == 'diagnosis' else {'merge','overwrite'}
         if merge_mode not in allowed: raise ValidationError('طريقة الدمج غير صالحة')
         model = DiagnosisOption if kind == 'diagnosis' else MedicationOption
@@ -260,8 +262,8 @@ class OptionsImportService(BulkImportService):
                 result['rows'].append({'row':row['row'], 'outcome':outcome, 'reason':''})
         return result
 
-    def import_diagnoses(self, file_stream, merge_mode='merge', expected_inventory=None):
-        return self._import_catalog(file_stream, 'diagnosis', merge_mode=merge_mode, expected_inventory=expected_inventory)
+    def import_diagnoses(self, file_stream, merge_mode='merge', expected_inventory=None, *, actor):
+        return self._import_catalog(file_stream, 'diagnosis', merge_mode=merge_mode, expected_inventory=expected_inventory, actor=actor)
 
-    def import_medications(self, file_stream, column_map=None, merge_mode='merge', expected_inventory=None):
+    def import_medications(self, file_stream, column_map=None, merge_mode='merge', expected_inventory=None, *, actor):
         return self._import_catalog(file_stream, 'medication', column_map, merge_mode, expected_inventory)

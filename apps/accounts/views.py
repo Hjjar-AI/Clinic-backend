@@ -119,6 +119,8 @@ class UserViewSet(viewsets.ModelViewSet):
             full_name=serializer.validated_data.get('full_name', ''),
             role=serializer.validated_data.get('role', 'doctor'),
             stamp_data=serializer.validated_data.get('stamp_data'),
+            preferences=serializer.validated_data.get('preferences', {}),
+            actor=self.request.user,
         )
         serializer.instance = user
 

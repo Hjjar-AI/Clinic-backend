@@ -62,7 +62,7 @@ class SettingsService:
         }
 
     @transaction.atomic
-    def update_clinic_info(self, data, expected_version=None):
+    def update_clinic_info(self, data, expected_version=None, *, actor):
         from core.exceptions import ConflictError
         from django.core.exceptions import ValidationError
         limits = {key: spec.max_length for key, spec in TEXT_SETTINGS.items()}
@@ -98,6 +98,8 @@ class SettingsService:
                 raise ValidationError({key: ['حقل غير معروف']})
         ClinicSetting.objects.get_or_create(key='__version', defaults={'value': '1'})
         version = ClinicSetting.objects.select_for_update().get(key='__version')
+        from core.access import require_actor_permission
+        require_actor_permission(actor, 'manage_settings')
         expected = data.get('version', expected_version)
         if type(expected) is not int or expected != int(version.value):
             raise ConflictError('تغيرت إعدادات العيادة؛ أعد تحميلها')

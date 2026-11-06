@@ -5,5 +5,5 @@ from .models import Notification
 class NotificationSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = Notification
-        fields = ['id', 'title', 'message', 'link', 'type', 'is_read', 'created_at']
+        fields = ['id', 'title', 'message', 'link', 'type', 'is_read', 'created_at', 'entity_type', 'entity_id', 'occurrence', 'category']
         read_only_fields = fields

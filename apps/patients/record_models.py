@@ -3,7 +3,6 @@ from .choices import (Verification, CareRole, MaritalStatus, FollowUpMethod, Fol
 """Longitudinal patient records; encounter facts stay on visits/signed snapshots."""
 from django.conf import settings
 from django.db import models
-from core.constraints import check_constraint
 from django.db.models import Q
 from django.core.validators import RegexValidator
 from core.models import TimeStampedModel, ImmutableModel
@@ -46,8 +45,7 @@ class PatientIdentifier(PatientRecord):
             verification_constraint('patients_patientidentifier_verification_valid', ''),
             check_constraint(condition=models.Q(identifier_type__in=IdentifierType.values), name='patients_patientidentifier_identifier_type_valid'),
             check_constraint(condition=models.Q(verification__in=[item[0] for item in VERIFICATION]), name='patients_patientidentifier_verification_valid'),
-            *[models.UniqueConstraint(fields=['patient', 'identifier_type', 'value', 'issuer', 'issuing_country'],
-                       condition=Q(is_active=True), name='unique_patient_identifier')],
+            models.UniqueConstraint(fields=['patient', 'identifier_type', 'value', 'issuer', 'issuing_country'], condition=Q(is_active=True), name='unique_patient_identifier'),
         ]
 
 
@@ -63,8 +61,7 @@ class PatientContact(PatientRecord):
     class Meta:
         constraints = [
             retirement_constraint('patients_patientcontact_retirement_valid'),
-            *[models.UniqueConstraint(fields=['patient'], condition=Q(is_active=True, is_primary=True),
-                                              name='one_primary_patient_contact')],
+            models.UniqueConstraint(fields=['patient'], condition=Q(is_active=True, is_primary=True), name='one_primary_patient_contact'),
         ]
 
 
@@ -86,8 +83,7 @@ class PatientRepresentative(PatientRecord):
             verification_constraint('patients_patientrepresentative_verification_valid', ''),
             check_constraint(condition=models.Q(authority_scope__in=AuthorityScope.values), name='patients_patientrepresentative_authority_scope_valid'),
             check_constraint(condition=models.Q(verification__in=[item[0] for item in VERIFICATION]), name='patients_patientrepresentative_verification_valid'),
-            *[check_constraint(condition=Q(valid_from__isnull=True) | Q(valid_until__isnull=True) |
-                       Q(valid_until__gte=models.F('valid_from')), name='representative_dates_valid')],
+            check_constraint(condition=Q(valid_from__isnull=True) | Q(valid_until__isnull=True) | Q(valid_until__gte=models.F('valid_from')), name='representative_dates_valid'),
         ]
 
 
@@ -128,8 +124,7 @@ class PatientMedication(ClinicalPatientRecord):
         constraints = [
             retirement_constraint('patients_patientmedication_retirement_valid'),
             check_constraint(condition=models.Q(status__in=MedicationStatus.values), name='patients_patientmedication_status_valid'),
-            *[check_constraint(condition=Q(started_on__isnull=True) | Q(ended_on__isnull=True) |
-                       Q(ended_on__gte=models.F('started_on')), name='patient_medication_dates_valid')],
+            check_constraint(condition=Q(started_on__isnull=True) | Q(ended_on__isnull=True) | Q(ended_on__gte=models.F('started_on')), name='patient_medication_dates_valid'),
         ]
 
 
@@ -156,11 +151,7 @@ class PatientFollowUp(PatientRecord):
             check_constraint(condition=models.Q(status__in=FollowUpStatus.values), name='patients_patientfollowup_status_valid'),
             check_constraint(condition=models.Q(method__in=[*FollowUpMethod.values, '']), name='patients_patientfollowup_method_valid'),
             check_constraint(condition=models.Q(completed_visit__isnull=True, completed_revision__isnull=True) | models.Q(status='completed', completed_visit__isnull=False, completed_revision__isnull=False), name='followup_revision_evidence_valid'),
-            *[check_constraint(
-                       condition=(Q(status='pending', outcome_at__isnull=True, outcome_by__isnull=True) |
-                                  (Q(status__in=['completed', 'missed', 'cancelled', 'waived'],
-                                     outcome_at__isnull=False, outcome_by__isnull=False) & ~Q(outcome_reason=''))),
-                       name='followup_completion_metadata')],
+            check_constraint(condition=Q(status='pending', outcome_at__isnull=True, outcome_by__isnull=True) | Q(status__in=['completed', 'missed', 'cancelled', 'waived'], outcome_at__isnull=False, outcome_by__isnull=False) & ~Q(outcome_reason=''), name='followup_completion_metadata'),
         ]
 
 
@@ -184,8 +175,8 @@ class PatientDuplicateReview(TimeStampedModel):
     class Meta:
         constraints = [
             check_constraint(condition=models.Q(status__in=DuplicateStatus.values), name='patients_patientduplicatereview_status_valid'),
-            *[models.UniqueConstraint(fields=['patient', 'other_patient'], name='unique_patient_duplicate_review'),
-                       check_constraint(condition=Q(patient__lt=models.F('other_patient')), name='ordered_duplicate_pair')],
+            models.UniqueConstraint(fields=['patient', 'other_patient'], name='unique_patient_duplicate_review'),
+            check_constraint(condition=Q(patient__lt=models.F('other_patient')), name='ordered_duplicate_pair'),
         ]
 
 

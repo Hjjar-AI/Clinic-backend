@@ -2,7 +2,6 @@ from core.constraints import archive_constraint, check_constraint
 from .choices import VisitStatus, RiskLevel, LevelOfCare, CareBasis, AccompaniedBy
 # backend/apps/visits/models.py
 from django.db import models, transaction
-from core.constraints import check_constraint
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from core.models import TimeStampedModel, SoftDeleteModel, StoredFileMetadata, ImmutableModel
@@ -97,6 +96,7 @@ class Visit(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['deleted_at']),
         ]
         constraints = [
+            check_constraint(condition=models.Q(signed_at__isnull=True, signed_by__isnull=True, date_signed__isnull=True) | models.Q(signed_at__isnull=False, signed_by__isnull=False, date_signed__isnull=False), name='visit_signing_stamps_consistent'),
             archive_constraint('visits_visit_archive_valid'),
             check_constraint(condition=models.Q(status__in=VisitStatus.values), name='visits_visit_status_valid'),
             check_constraint(condition=models.Q(accompanied_by__in=[*AccompaniedBy.values, '']), name='visits_visit_accompanied_by_valid'),
@@ -104,23 +104,9 @@ class Visit(SoftDeleteModel, TimeStampedModel):
             check_constraint(condition=models.Q(violence_risk_level__in=[*RiskLevel.values, '']), name='visits_visit_violence_risk_level_valid'),
             check_constraint(condition=models.Q(care_basis__in=CareBasis.values), name='visits_visit_care_basis_valid'),
             check_constraint(condition=models.Q(level_of_care__in=[*LevelOfCare.values, '']), name='visits_visit_level_of_care_valid'),
-            *[
             check_constraint(condition=models.Q(version__gte=1, status__in=['draft', 'final', 'amended', 'locked']), name='visit_version_status_valid'),
-            check_constraint(
-                condition=(
-                    models.Q(pain_level__isnull=True)
-                    | models.Q(pain_level__gte=0, pain_level__lte=10)
-                ),
-                name='visit_pain_level_valid',
-            ),
-            check_constraint(
-                condition=(
-                    models.Q(anxiety_level__isnull=True)
-                    | models.Q(anxiety_level__gte=0, anxiety_level__lte=10)
-                ),
-                name='visit_anxiety_level_valid',
-            ),
-        ],
+            check_constraint(condition=models.Q(pain_level__isnull=True) | models.Q(pain_level__gte=0, pain_level__lte=10), name='visit_pain_level_valid'),
+            check_constraint(condition=models.Q(anxiety_level__isnull=True) | models.Q(anxiety_level__gte=0, anxiety_level__lte=10), name='visit_anxiety_level_valid'),
         ]
 
     def clean(self):
@@ -259,6 +245,6 @@ class VisitRevision(ImmutableModel):
         ordering = ['number']
         constraints = [
             check_constraint(condition=models.Q(number__gte=1), name='visit_revision_number_positive'),
-            *[models.UniqueConstraint(fields=['visit', 'number'], name='unique_visit_revision')],
+            models.UniqueConstraint(fields=['visit', 'number'], name='unique_visit_revision'),
         ]
 

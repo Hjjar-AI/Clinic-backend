@@ -5,6 +5,13 @@ views, serializers, reports, and notification jobs.
 """
 from django.core.exceptions import ValidationError
 
+from apps.appointments.choices import AppointmentStatus
+from apps.visits.choices import VisitStatus
+from apps.tasks.choices import TaskStatus
+from apps.billing.choices import InvoiceStatus
+
+WORKFLOW_CHOICES = {'appointment': AppointmentStatus, 'visit': VisitStatus, 'task': TaskStatus, 'invoice': InvoiceStatus}
+
 
 LIFECYCLES = {
     'appointment': {
@@ -90,7 +97,7 @@ STATUS_PRESENTATION = {
 
 
 def valid_statuses(workflow):
-    return set(LIFECYCLES[workflow]['transitions'])
+    return set(WORKFLOW_CHOICES[workflow].values) if workflow in WORKFLOW_CHOICES else set(LIFECYCLES[workflow]['transitions'])
 
 
 def allowed_transitions(workflow, current):
@@ -132,3 +139,8 @@ def lifecycle_payload():
             for status in definition['transitions']
         }
     return payload
+
+# Fail at source initialization if metadata and the canonical model enum drift.
+for _workflow, _choices in WORKFLOW_CHOICES.items():
+    if set(LIFECYCLES[_workflow]['transitions']) != set(_choices.values):
+        raise RuntimeError('Lifecycle/model choices disagree: ' + _workflow)

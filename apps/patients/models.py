@@ -2,7 +2,6 @@ from core.constraints import archive_constraint, check_constraint, verification_
 from .choices import Verification, CareRole, MaritalStatus, Gender, FollowUpMethod, FollowUpStatus, IdentifierType, AuthorityScope, RecordSource, AllergySeverity, AllergyStatus, MedicationStatus, SummaryStatus, ContactChannel, DuplicateStatus
 # backend/apps/patients/models.py
 from django.db import models
-from core.constraints import check_constraint
 from django.db.models import Q
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -27,7 +26,7 @@ class Patient(SoftDeleteModel, TimeStampedModel):
     identity_verified_at = models.DateTimeField(null=True, blank=True, editable=False)
     identity_verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     preferred_language = models.CharField(max_length=30, blank=True, default='')
-    preferred_contact_channel = models.CharField(max_length=20, blank=True, default='', choices=[('', 'Unspecified'), ('phone', 'Phone'), ('sms', 'SMS'), ('email', 'Email'), ('none', 'Do not contact')])
+    preferred_contact_channel = models.CharField(max_length=20, blank=True, default='', choices=[('', 'Unspecified'), *ContactChannel.choices])
     communication_restrictions = models.TextField(blank=True, default='')
     allergy_status = models.CharField(max_length=20, default='unknown', choices=SummaryStatus.choices)
     medication_status = models.CharField(max_length=20, default='unknown', choices=SummaryStatus.choices)
@@ -77,15 +76,12 @@ class Patient(SoftDeleteModel, TimeStampedModel):
             archive_constraint('patients_patient_archive_valid'),
             verification_constraint('patients_patient_verification_valid', 'identity_'),
             check_constraint(condition=models.Q(identity_verification__in=[item[0] for item in VERIFICATION]), name='patients_patient_identity_verification_valid'),
-            check_constraint(condition=models.Q(preferred_contact_channel__in=[*[item[0] for item in [('', 'Unspecified'), ('phone', 'Phone'), ('sms', 'SMS'), ('email', 'Email'), ('none', 'Do not contact')]], '']), name='patients_patient_preferred_contact_channel_valid'),
+            check_constraint(condition=models.Q(preferred_contact_channel__in=[*ContactChannel.values, '']), name='patients_patient_preferred_contact_channel_valid'),
             check_constraint(condition=models.Q(allergy_status__in=SummaryStatus.values), name='patients_patient_allergy_status_valid'),
             check_constraint(condition=models.Q(medication_status__in=SummaryStatus.values), name='patients_patient_medication_status_valid'),
             check_constraint(condition=models.Q(gender__in=[*Gender.values, '']), name='patients_patient_gender_valid'),
             check_constraint(condition=models.Q(marital_status__in=[*[item[0] for item in MARITAL_STATUSES], '']), name='patients_patient_marital_status_valid'),
-            *[
             check_constraint(condition=models.Q(version__gte=1), name='patient_version_positive'),
-
-        ],
         ]
 
     def __str__(self):
@@ -216,14 +212,10 @@ class PatientCareTeam(TimeStampedModel):
 
     class Meta:
         constraints = [
+            check_constraint(condition=Q(ended_at__isnull=True, ended_by__isnull=True, removal_reason='') | Q(ended_at__isnull=False) & ~Q(removal_reason=''), name='care_team_end_metadata_valid'),
             check_constraint(condition=models.Q(role__in=[item[0] for item in CARE_ROLES]), name='patients_patientcareteam_role_valid'),
-            *[
-            models.UniqueConstraint(
-                fields=['patient', 'user'], condition=Q(ended_at__isnull=True),
-                name='unique_active_care_team_member',
-            ),
+            models.UniqueConstraint(fields=['patient', 'user'], condition=Q(ended_at__isnull=True), name='unique_active_care_team_member'),
             check_constraint(condition=Q(ended_at__isnull=True) | Q(ended_at__gte=models.F('started_at')), name='care_team_dates_valid'),
-        ],
         ]
 
     def __str__(self):

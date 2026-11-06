@@ -24,13 +24,13 @@ def appointment_reminders(sender, instance, created, **kwargs):
         return
     service = NotificationService()
     if instance.status not in {'scheduled', 'confirmed'}:
-        service.retire_related(appointment_reminder_prefix(instance, 'day'))
-        service.retire_related(appointment_reminder_prefix(instance, 'hour'))
+        service.retire_entity('appointments.appointment', instance.pk, 'day')
+        service.retire_entity('appointments.appointment', instance.pk, 'hour')
     elif not created:
         if not instance.reminder_sent:
-            service.retire_related(appointment_reminder_prefix(instance, 'day'))
+            service.retire_entity('appointments.appointment', instance.pk, 'day')
         if not instance.reminder_sent_hour:
-            service.retire_related(appointment_reminder_prefix(instance, 'hour'))
+            service.retire_entity('appointments.appointment', instance.pk, 'hour')
     if created and instance.status == 'scheduled':
         service.create(
             instance.doctor_id,
@@ -39,6 +39,8 @@ def appointment_reminders(sender, instance, created, **kwargs):
             link=_safe_url('/appointments', date=instance.appointment_date.isoformat()),
             type='info',
             dedupe_key=f'appointment-created:{instance.pk}',
+            entity_type='appointments.appointment', entity_id=instance.pk,
+            occurrence=instance.reminder_generation, category='created',
         )
 
 @receiver(post_save, sender=UserTask)
@@ -49,11 +51,11 @@ def task_reminders(sender, instance, created, **kwargs):
     reminder_prefix = task_reminder_prefix(instance)
     target_user_id = task_recipient(instance)
     if instance.status not in {'open', 'in_progress'}:
-        service.retire_related(reminder_prefix)
+        service.retire_entity('tasks.usertask', instance.pk, 'due')
     elif target_user_id:
-        service.retire_related(reminder_prefix, keep_user_id=target_user_id)
+        service.retire_entity('tasks.usertask', instance.pk, 'due', keep_user_id=target_user_id)
         if not created and not instance.reminder_sent:
-            service.retire_related(reminder_prefix)
+            service.retire_entity('tasks.usertask', instance.pk, 'due')
     if created and instance.due_date:
         reminder_days = SettingsService().get_clinic_info()['task_reminder_days']
         reminder_date = timezone.localdate() + timedelta(days=reminder_days)

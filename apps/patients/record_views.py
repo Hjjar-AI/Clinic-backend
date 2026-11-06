@@ -26,6 +26,8 @@ class PatientRecordsMixin:
     @action(detail=True, methods=['get', 'post'])
     def records(self, request, pk=None):
         patient = self.get_object()
+        if request.method == 'POST' and set(request.data) - {'kind', 'record_id', 'operation', 'fields', 'reason', 'version'}:
+            raise ValidationError('حقول طلب غير معروفة')
         kind = request.query_params.get('kind') if request.method == 'GET' else request.data.get('kind')
         if kind not in RECORDS:
             raise ValidationError({'kind': ['نوع سجل غير صالح']})

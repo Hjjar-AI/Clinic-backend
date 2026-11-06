@@ -191,7 +191,7 @@ class OptionsImportView(APIView):
                 return error_response(409, 'الملف أو خياراته تغيرت بعد المعاينة', {
                     'preview_token': ['نفّذ معاينة جديدة أولاً'],
                 })
-            result = self.service.import_diagnoses(file, merge_mode, expected_inventory=preview.get('inventory', ''))
+            result = self.service.import_diagnoses(file, merge_mode, expected_inventory=preview.get('inventory', ''), actor=request.user)
             cache.delete(f'options-import-preview:{token}')
             log_action(request.user.id, 'import', 'DiagnosisOption', 0, {
                 'summary': 'Diagnosis options import',
@@ -276,7 +276,7 @@ class MedicationMapView(APIView):
             return Response({'data':result})
         if preview.get('column_map') != column_map or preview.get('merge_mode') != merge_mode:
             return error_response(409, 'أعد معاينة خريطة الأعمدة وخيارات الدمج', {})
-        result = self.service.import_medications(file, column_map, merge_mode, expected_inventory=preview.get('inventory', ''))
+        result = self.service.import_medications(file, column_map, merge_mode, expected_inventory=preview.get('inventory', ''), actor=request.user)
         cache.delete(f'options-import-preview:{preview_token}')
         log_action(request.user.id, 'import', 'MedicationOption', 0, {
             'summary': 'Medication options import',

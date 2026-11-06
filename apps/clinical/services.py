@@ -1,3 +1,4 @@
+from core.access import require_actor_permission
 from core.operation_gate import gated
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -24,7 +25,8 @@ def validate_catalog(instance):
 
 @gated(exclusive=True)
 @transaction.atomic
-def create_catalog(model, data):
+def create_catalog(model, data, *, actor):
+    require_actor_permission(actor, 'manage_templates' if model is ClinicalNoteTemplate else 'manage_options')
     data = data.copy()
     data.pop('version', None)
     data.pop('is_active', None)
@@ -36,10 +38,11 @@ def create_catalog(model, data):
 
 @gated(exclusive=True)
 @transaction.atomic
-def update_catalog(model, pk, data, expected_version=None):
+def update_catalog(model, pk, data, expected_version=None, *, actor):
     data = data.copy()
     expected_version = data.pop('version', expected_version)
     instance = model.all_objects.select_for_update().get(pk=pk)
+    require_actor_permission(actor, 'manage_templates' if model is ClinicalNoteTemplate else 'manage_options')
     check_mutation(instance, expected_version)
     allowed = {f.name for f in model._meta.concrete_fields} - {'id','created_at','updated_at','version','is_active','deleted_at','archived_by','archive_reason'}
     for key, value in data.items():
@@ -54,8 +57,9 @@ def update_catalog(model, pk, data, expected_version=None):
 
 @gated(exclusive=True)
 @transaction.atomic
-def archive_catalog(model, pk, version):
+def archive_catalog(model, pk, version, *, actor):
     instance = model.all_objects.select_for_update().get(pk=pk)
+    require_actor_permission(actor, 'manage_templates' if model is ClinicalNoteTemplate else 'manage_options')
     check_mutation(instance, version)
     instance.soft_delete()
     return True
@@ -63,8 +67,9 @@ def archive_catalog(model, pk, version):
 
 @gated(exclusive=True)
 @transaction.atomic
-def restore_catalog(instance, version):
+def restore_catalog(instance, version, *, actor):
     instance = instance.__class__.all_objects.select_for_update().get(pk=instance.pk)
+    require_actor_permission(actor, 'manage_templates' if isinstance(instance, ClinicalNoteTemplate) else 'manage_options')
     if type(version) is not int or instance.version != version:
         raise ConflictError('تغير السجل؛ أعد تحميله')
     if not instance.is_active or instance.deleted_at:
@@ -73,26 +78,27 @@ def restore_catalog(instance, version):
 
 
 class DiagnosisService:
-    def create_diagnosis(self, **data):
-        return create_catalog(DiagnosisOption, data)
-    def update_diagnosis(self, diag_id, expected_version=None, **data):
-        return update_catalog(DiagnosisOption, diag_id, data, expected_version)
-    def soft_delete(self, diag_id, expected_version=None):
-        return archive_catalog(DiagnosisOption, diag_id, expected_version)
+    def create_diagnosis(self, *, actor, **data):
+        return create_catalog(DiagnosisOption, data, actor=actor)
+    def update_diagnosis(self, diag_id, expected_version=None, *, actor, **data):
+        return update_catalog(DiagnosisOption, diag_id, data, expected_version, actor=actor)
+    def soft_delete(self, diag_id, expected_version=None, *, actor):
+        return archive_catalog(DiagnosisOption, diag_id, expected_version, actor=actor)
 
 class MedicationService:
-    def create_medication(self, **data):
-        return create_catalog(MedicationOption, data)
-    def update_medication(self, med_id, expected_version=None, **data):
-        return update_catalog(MedicationOption, med_id, data, expected_version)
-    def soft_delete(self, med_id, expected_version=None):
-        return archive_catalog(MedicationOption, med_id, expected_version)
+    def create_medication(self, *, actor, **data):
+        return create_catalog(MedicationOption, data, actor=actor)
+    def update_medication(self, med_id, expected_version=None, *, actor, **data):
+        return update_catalog(MedicationOption, med_id, data, expected_version, actor=actor)
+    def soft_delete(self, med_id, expected_version=None, *, actor):
+        return archive_catalog(MedicationOption, med_id, expected_version, actor=actor)
 
 class ScaleService:
     @gated(exclusive=True)
     @transaction.atomic
-    def add_field(self, scale, data, expected_version=None):
+    def add_field(self, scale, data, expected_version=None, *, actor):
         scale = ClinicalScale.all_objects.select_for_update().get(pk=scale.pk)
+        require_actor_permission(actor, 'manage_options')
         check_mutation(scale, expected_version)
         if scale.fields.filter(is_active=True).count() >= 100:
             raise ValidationError({'fields': ['الحد الأقصى 100 سؤال نشط']})
@@ -104,13 +110,13 @@ class ScaleService:
         scale.version += 1
         scale.save(update_fields=['version', 'updated_at'])
         return field
-    def delete_scale(self, scale_id, expected_version=None):
-        return archive_catalog(ClinicalScale, scale_id, expected_version)
+    def delete_scale(self, scale_id, expected_version=None, *, actor):
+        return archive_catalog(ClinicalScale, scale_id, expected_version, actor=actor)
 
 class TemplateService:
-    def create_template(self, data):
-        return create_catalog(ClinicalNoteTemplate, data)
-    def update_template(self, template_id, data, expected_version=None):
-        return update_catalog(ClinicalNoteTemplate, template_id, data, expected_version)
-    def delete_template(self, template_id, expected_version=None):
-        return archive_catalog(ClinicalNoteTemplate, template_id, expected_version)
+    def create_template(self, data, *, actor):
+        return create_catalog(ClinicalNoteTemplate, data, actor=actor)
+    def update_template(self, template_id, data, expected_version=None, *, actor):
+        return update_catalog(ClinicalNoteTemplate, template_id, data, expected_version, actor=actor)
+    def delete_template(self, template_id, expected_version=None, *, actor):
+        return archive_catalog(ClinicalNoteTemplate, template_id, expected_version, actor=actor)

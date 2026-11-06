@@ -179,7 +179,7 @@ class IdempotencyOperation(models.Model):
         constraints = [models.UniqueConstraint(fields=['user', 'key'], name='unique_user_operation_key'),
             check_constraint(condition=models.Q(state__in=OperationState.values), name='operation_state_valid'),
             check_constraint(condition=models.Q(state='processing', response_body__isnull=True, response_status__isnull=True) |
-                models.Q(state='completed', response_body__isnull=False, response_status__gte=200, response_status__lt=300),
+                models.Q(state='completed', response_body__isnull=False, response_status__isnull=False, response_status__gte=200, response_status__lt=300),
                 name='operation_response_consistent'),
             check_constraint(condition=models.Q(expires_at__gt=models.F('created_at')), name='operation_expiry_valid')]
         indexes = [models.Index(fields=['expires_at'])]

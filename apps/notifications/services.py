@@ -3,18 +3,27 @@ from django.db.models import Q
 from django.utils import timezone
 from django.db import IntegrityError, transaction
 from .models import Notification
+import hashlib
 
-def notification_payload(title, message, link=None, type='info'):
-    return dict(title=title[:200], message=message, link=link, type=type)
+def notification_payload(title, message, link=None, type='info', *, entity_type='', entity_id=None, occurrence=None, category=''):
+    return dict(title=title[:200], message=message, link=link or '', type=type,
+                entity_type=entity_type, entity_id=entity_id, occurrence=occurrence, category=category)
 
 
 def notification_dedupe_key(key, user_id=None):
     if not key:
         return None
-    return (f'{key}:{user_id}' if user_id is not None else str(key))[:200]
+    value = f'{key}:{user_id}' if user_id is not None else str(key)
+    return value if len(value) <= 200 else 'sha256:' + hashlib.sha256(value.encode()).hexdigest()
 
 
 class NotificationService:
+    def retire_entity(self, entity_type, entity_id, category, keep_user_id=None):
+        rows = Notification.objects.filter(entity_type=entity_type, entity_id=entity_id, category=category, is_read=False)
+        if keep_user_id is not None:
+            rows = rows.exclude(user_id=keep_user_id)
+        return rows.delete()[0]
+
     def get_for_user(self, user_id, unread_only=False):
         qs = Notification.objects.filter(user_id=user_id)
         if unread_only:
@@ -58,8 +67,8 @@ class NotificationService:
             | Q(is_read=False, created_at__lt=unread_before)
         ).delete()[0]
 
-    def create(self, user_id, title, message, link=None, type='info', dedupe_key=None):
-        payload = notification_payload(title, message, link, type)
+    def create(self, user_id, title, message, link=None, type='info', dedupe_key=None, **reference):
+        payload = notification_payload(title, message, link, type, **reference)
         if not dedupe_key:
             return Notification.objects.create(user_id=user_id, **payload)
         try:
@@ -73,12 +82,12 @@ class NotificationService:
         except IntegrityError:
             return Notification.objects.get(user_id=user_id, dedupe_key=notification_dedupe_key(dedupe_key))
 
-    def create_for_users(self, user_ids, title, message, link=None, type='info', dedupe_key=None):
+    def create_for_users(self, user_ids, title, message, link=None, type='info', dedupe_key=None, **reference):
         now = timezone.now()
         notifications = [
             Notification(
                 user_id=uid,
-                **notification_payload(title, message, link, type),
+                **notification_payload(title, message, link, type, **reference),
                 dedupe_key=notification_dedupe_key(dedupe_key, uid),
                 created_at=now,
                 updated_at=now,

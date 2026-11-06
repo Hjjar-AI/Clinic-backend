@@ -2,7 +2,6 @@ from core.constraints import check_constraint
 from .choices import TaskStatus, TaskPriority
 import uuid
 from django.db import models
-from core.constraints import check_constraint
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.utils import timezone
@@ -55,31 +54,8 @@ class UserTask(TimeStampedModel):
         constraints = [
             check_constraint(condition=models.Q(priority__in=TaskPriority.values), name='tasks_usertask_priority_valid'),
             check_constraint(condition=models.Q(status__in=TaskStatus.values), name='tasks_usertask_status_valid'),
-            *[
             check_constraint(condition=models.Q(version__gte=1, status__in=['open', 'in_progress', 'completed', 'cancelled']), name='usertask_version_status_valid'),
-            check_constraint(
-                condition=(
-                    models.Q(
-                        status='completed',
-                        completed_at__isnull=False,
-                        cancelled_at__isnull=True,
-                    )
-                    | models.Q(
-                        status='cancelled',
-                        completed_at__isnull=True,
-                        completed_by__isnull=True,
-                        cancelled_at__isnull=False,
-                    )
-                    | models.Q(
-                        status__in=['open', 'in_progress'],
-                        completed_at__isnull=True,
-                        completed_by__isnull=True,
-                        cancelled_at__isnull=True,
-                    )
-                ),
-                name='task_terminal_timestamps_consistent',
-            ),
-        ],
+            check_constraint(condition=models.Q(status='completed', completed_at__isnull=False, cancelled_at__isnull=True) | models.Q(status='cancelled', completed_at__isnull=True, completed_by__isnull=True, cancelled_at__isnull=False) | models.Q(status__in=['open', 'in_progress'], completed_at__isnull=True, completed_by__isnull=True, cancelled_at__isnull=True), name='task_terminal_timestamps_consistent'),
         ]
 
     def __str__(self):

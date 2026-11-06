@@ -127,6 +127,7 @@ class VisitService:
         from core.access import require_actor_permission
         current_user = require_actor_permission(current_user, 'add_visit')
         patient = Patient.objects.select_for_update().get(pk=patient.pk)
+        current_user = require_actor_permission(current_user, 'add_visit')
         from apps.patients.record_services import require_access
         require_access(patient, current_user)
         data = data.copy()

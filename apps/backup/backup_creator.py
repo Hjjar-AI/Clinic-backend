@@ -56,7 +56,7 @@ class BackupCreatorService:
             rows = list(model._base_manager.order_by('pk'))
             records.extend(json.loads(serializers.serialize('json', rows, cls=BackupJSONEncoder)))
             counts[model._meta.label_lower] = len(rows)
-        return {'metadata': {'created_at': timezone.now().isoformat(), 'format_version': 2,
+        return {'metadata': {'created_at': timezone.now().isoformat(), 'format_version': 3,
                              'schema': 'complete-records', 'counts': counts,
                              'includes': sorted(counts)}, 'records': records}
 
@@ -92,7 +92,7 @@ class BackupCreatorService:
         maximum = getattr(settings, 'MAX_BULK_IMPORT_SIZE', 200 * 1024 * 1024)
         if sum(map(len, members.values())) > maximum * 5 or len(members) + 2 > 100_000:
             raise ValueError('Complete backup exceeds restore expansion limits')
-        manifest = {'format_version': 2, 'members': {
+        manifest = {'format_version': 3, 'members': {
             name: {'sha256': hashlib.sha256(value).hexdigest(), 'size': len(value)}
             for name, value in members.items()}}
         raw_manifest = payload_bytes(manifest)

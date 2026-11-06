@@ -5,6 +5,45 @@ from .models import Visit, VisitDiagnosis, VisitMedication, VisitAttachment, Vis
 from apps.patients.models import Patient
 from apps.accounts.models import User
 from .scale_validation import normalize_scale_response
+from apps.patients.choices import FollowUpMethod
+
+
+class FollowUpInputSerializer(StrictFieldsMixin, serializers.Serializer):
+    due_date = serializers.DateField(required=False, allow_null=True)
+    method = serializers.ChoiceField(choices=FollowUpMethod.choices, required=False, allow_blank=True)
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+
+class DiagnosisInputSerializer(StrictFieldsMixin, serializers.Serializer):
+    id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    code = serializers.CharField(required=False, allow_blank=True, max_length=50)
+    name = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    arabic_name = serializers.CharField(required=False, allow_blank=True, max_length=200)
+
+
+class MedicationInputSerializer(StrictFieldsMixin, serializers.Serializer):
+    id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    name = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    dosage = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    brand = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    schedule = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    is_custom = serializers.BooleanField(required=False)
+    controlled = serializers.BooleanField(read_only=True)
+
+
+class LabInputSerializer(StrictFieldsMixin, serializers.Serializer):
+    name = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    value = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    unit = serializers.CharField(required=False, allow_blank=True, max_length=50)
+    reference_range = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    date = serializers.CharField(required=False, allow_blank=True, max_length=10)
+    status = serializers.CharField(required=False, allow_blank=True, max_length=20)
+
+
+class ScaleResponseInputSerializer(StrictFieldsMixin, serializers.Serializer):
+    scale_id = serializers.IntegerField(min_value=1)
+    scale_name = serializers.CharField(read_only=True)
+    responses = serializers.JSONField()
 
 class VisitDiagnosisSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
@@ -40,17 +79,17 @@ class PatientSummarySerializer(StrictFieldsMixin, serializers.ModelSerializer):
 
 class VisitSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     follow_up = serializers.SerializerMethodField()
-    follow_up_input = serializers.JSONField(write_only=True, required=False, allow_null=True)
+    follow_up_input = FollowUpInputSerializer(write_only=True, required=False, allow_null=True)
 
     def get_follow_up(self, obj):
         from apps.patients.follow_up_services import follow_up_data
         return follow_up_data(obj.follow_up)
 
     # Write-only fields for accepting nested data from the frontend
-    diagnoses_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
-    medications_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
-    lab_values_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
-    scale_responses_input = serializers.ListField(child=serializers.DictField(), max_length=200, write_only=True, required=False)
+    diagnoses_input = DiagnosisInputSerializer(many=True, max_length=200, write_only=True, required=False)
+    medications_input = MedicationInputSerializer(many=True, max_length=200, write_only=True, required=False)
+    lab_values_input = LabInputSerializer(many=True, max_length=200, write_only=True, required=False)
+    scale_responses_input = ScaleResponseInputSerializer(many=True, max_length=100, write_only=True, required=False)
 
     patient = PatientSummarySerializer(read_only=True)
     patient_id = serializers.PrimaryKeyRelatedField(

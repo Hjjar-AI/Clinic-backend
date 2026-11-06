@@ -25,7 +25,7 @@ class SettingsView(APIView):
     def put(self, request):
         data = request.data
         try:
-            updated = self.service.update_clinic_info(data, request_version(request))
+            updated = self.service.update_clinic_info(data, request_version(request), actor=request.user)
         except ValueError as exc:
             return error_response(400, str(exc), {})
         return Response({'data': updated})
@@ -37,7 +37,7 @@ class ThemeView(APIView):
 
     def put(self, request):
         theme = request.data.get('theme', 'default')
-        updated = self.service.update_clinic_info({'theme': theme}, request_version(request))
+        updated = self.service.update_clinic_info({'theme': theme}, request_version(request), actor=request.user)
         return Response({'data': updated})
 
 

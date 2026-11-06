@@ -66,6 +66,9 @@ class PatientMergeService:
             raise ValidationError('معاينة الدمج لا تخص هذا الطلب')
         locked = {row.pk: row for row in Patient.all_objects.select_for_update().filter(pk__in=[source.pk, preview['target']]).order_by('pk')}
         source, target = locked[source.pk], locked.get(preview['target'])
+        actor = require_actor_permission(actor, 'edit_patient')
+        if actor.role != 'admin' or not actor.has_perm('delete_patient'):
+            raise PermissionDenied('الدمج مخصص للمدير المخول')
         if not target or source.pk == target.pk or source.merged_into_id or target.merged_into_id:
             raise ValidationError('ملفات الدمج غير صالحة')
         # Archived duplicates may be merged without restoring them.

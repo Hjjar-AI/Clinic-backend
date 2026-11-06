@@ -55,20 +55,20 @@ class DiagnosisViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def perform_create(self, serializer):
-        instance = self.service.create_diagnosis(**serializer.validated_data)
+        instance = self.service.create_diagnosis(actor=self.request.user, **serializer.validated_data)
         serializer.instance = instance
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        serializer.instance = self.service.update_diagnosis(instance.id, expected_version=request_version(self.request), **serializer.validated_data)
+        serializer.instance = self.service.update_diagnosis(instance.id, expected_version=request_version(self.request), actor=self.request.user, **serializer.validated_data)
 
     def perform_destroy(self, instance):
-        self.service.soft_delete(instance.id, request_version(self.request))
+        self.service.soft_delete(instance.id, request_version(self.request), actor=self.request.user)
 
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
         instance = self.get_object()
-        instance = restore_catalog(instance, request_version(request))
+        instance = restore_catalog(instance, request_version(request), actor=request.user)
         return Response({'data': self.get_serializer(instance).data})
 
 
@@ -113,20 +113,20 @@ class MedicationViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def perform_create(self, serializer):
-        instance = self.service.create_medication(**serializer.validated_data)
+        instance = self.service.create_medication(actor=self.request.user, **serializer.validated_data)
         serializer.instance = instance
 
     def perform_update(self, serializer):
         instance = self.get_object()
-        serializer.instance = self.service.update_medication(instance.id, expected_version=request_version(self.request), **serializer.validated_data)
+        serializer.instance = self.service.update_medication(instance.id, expected_version=request_version(self.request), actor=self.request.user, **serializer.validated_data)
 
     def perform_destroy(self, instance):
-        self.service.soft_delete(instance.id, request_version(self.request))
+        self.service.soft_delete(instance.id, request_version(self.request), actor=self.request.user)
 
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
         instance = self.get_object()
-        instance = restore_catalog(instance, request_version(request))
+        instance = restore_catalog(instance, request_version(request), actor=request.user)
         return Response({'data': self.get_serializer(instance).data})
 
 

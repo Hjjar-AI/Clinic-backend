@@ -52,6 +52,8 @@ class Command(BaseCommand):
                     link=f'/appointments?date={apt.appointment_date}',
                     type='info',
                     dedupe_key=appointment_reminder_key(apt, 'day'),
+                    entity_type='appointments.appointment', entity_id=apt.pk,
+                    occurrence=apt.reminder_generation, category='day',
                 )
                 apt.reminder_sent = True
                 apt.save(update_fields=['reminder_sent', 'updated_at'])
@@ -87,6 +89,8 @@ class Command(BaseCommand):
                         link=f'/appointments?date={apt.appointment_date}',
                         type='warning',
                         dedupe_key=appointment_reminder_key(apt, 'hour'),
+                        entity_type='appointments.appointment', entity_id=apt.pk,
+                        occurrence=apt.reminder_generation, category='hour',
                     )
                     apt.reminder_sent_hour = True
                     apt.save(update_fields=['reminder_sent_hour', 'updated_at'])

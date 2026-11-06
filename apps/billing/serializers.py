@@ -27,6 +27,10 @@ class InvoiceLineSerializer(StrictFieldsMixin, serializers.ModelSerializer):
         read_only_fields = fields
 
 class InvoiceSerializer(StrictFieldsMixin, serializers.ModelSerializer):
+    total_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0'), required=False, coerce_to_string=True)
+    tax = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0'), required=False, coerce_to_string=True)
+    discount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0'), required=False, coerce_to_string=True)
+    final_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True, coerce_to_string=True)
     lines = InvoiceLineInputSerializer(many=True, required=False, write_only=True, allow_empty=False, max_length=200)
     line_items = InvoiceLineSerializer(source='lines', many=True, read_only=True)
     is_overdue = serializers.SerializerMethodField()

@@ -3,7 +3,6 @@ from .choices import UserRole
 # backend/apps/accounts/models.py
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models, transaction
-from core.constraints import check_constraint
 from django.utils import timezone
 from django.conf import settings
 from django.core.validators import MinValueValidator
@@ -58,7 +57,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     class Meta:
         constraints = [
             check_constraint(condition=models.Q(role__in=UserRole.values), name='accounts_user_role_valid'),
-            *[check_constraint(condition=models.Q(version__gte=1), name='user_version_positive')],
+            check_constraint(condition=models.Q(version__gte=1), name='user_version_positive'),
         ]
         indexes = [
             models.Index(fields=['role', 'is_active']),

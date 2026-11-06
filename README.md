@@ -17,6 +17,8 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements/sqlite.txt
 ```
 
+The current model redesign requires a fresh schema. Application migration scripts were removed as requested and have not been regenerated; [remaining schema/integration work](docs/workCurrent.md) must be handled before starting the application.
+
 Install native PDF/MIME libraries using the [OS setup instructions](docs/setup.md#native-libraries-by-os). Once configuration and schema are ready:
 
 ```bash

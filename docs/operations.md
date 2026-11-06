@@ -4,7 +4,7 @@ Use the intended activated interpreter/production settings; data-changing comman
 
 ## Recovery
 
-Full ZIP carries managed app/auth/history/archived inventory, complete IDs/timestamps and media, signed manifest/member hashes/sizes plus backup JSON/signature. JSON carries logical records without bytes; full recovery rejects missing/mismatched references, unsafe paths, unsupported schema, malformed counts or authentication. Preserve installation HMAC key; never hand-edit envelopes or bypass previews.
+Full ZIP format 3 carries managed app/auth/history/archived inventory, complete IDs/timestamps and media, signed manifest/member hashes/sizes plus backup JSON/signature. JSON carries logical records without bytes; full recovery rejects missing/mismatched references, unsafe paths, unsupported schema, malformed counts or authentication. This fresh-model format rejects earlier full-backup formats; retaining an HMAC key does not make an old schema compatible. Validation uses the authenticated inventory for primary ownership, same-patient links, signed/completion evidence, invoice totals and issued-byte checksums. Preserve installation HMAC key; never hand-edit envelopes or bypass previews.
 
 | API `/api/v1/backup/` POST | Contract |
 | --- | --- |

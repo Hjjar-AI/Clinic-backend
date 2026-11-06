@@ -1,10 +1,11 @@
+from core.serializers import StrictFieldsMixin
 # backend/apps/appointments/serializers.py
 from rest_framework import serializers
 from .models import Appointment
 from apps.patients.models import Patient
 from apps.accounts.models import User
 
-class AppointmentSerializer(serializers.ModelSerializer):
+class AppointmentSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
     patient_id = serializers.PrimaryKeyRelatedField(

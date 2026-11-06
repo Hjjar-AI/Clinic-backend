@@ -14,7 +14,7 @@ FOLLOW_UP_FIELDS = ['title', 'owner', 'due_date', 'method', 'status', 'source_vi
 def follow_up_data(row):
     if row is None:
         return None
-    fields = ['id', *FOLLOW_UP_FIELDS, 'is_active', 'completed_at', 'completed_by']
+    fields = ['id', *FOLLOW_UP_FIELDS, 'is_active', 'outcome_at', 'outcome_by', 'completed_revision']
     result = {}
     for name in fields:
         value = getattr(row, row._meta.get_field(name).attname)
@@ -28,7 +28,7 @@ def validate_follow_up(row, previous, actor, linked_visits):
     previous_status = previous.get('status', 'pending')
     follow_up_transition(previous_status, row.status)
     if previous_status != 'pending':
-        for name in ('due_date', 'method', 'outcome_reason', 'completed_visit', 'source_visit'):
+        for name in ('due_date', 'method', 'outcome_reason', 'completed_visit', 'source_visit', 'appointment'):
             field = row._meta.get_field(name)
             current = getattr(row, field.attname)
             current = current.isoformat() if hasattr(current, 'isoformat') else current
@@ -39,7 +39,9 @@ def validate_follow_up(row, previous, actor, linked_visits):
     if row.status != 'pending' and not row.outcome_reason.strip():
         raise ValidationError({'outcome_reason': ['سبب نتيجة المتابعة مطلوب']})
     if row.status != 'pending' and (not row.pk or previous_status == 'pending'):
-        row.completed_at, row.completed_by = timezone.now(), actor
+        row.outcome_at, row.outcome_by = timezone.now(), actor
+        row.completed_revision = (row.completed_visit.revisions.order_by('-number').first()
+                                  if row.completed_visit_id else None)
     if row.completed_visit_id and row.status != 'completed':
         raise ValidationError({'completed_visit': ['تربط الزيارة المنجزة بمتابعة مكتملة فقط']})
     if row.source_visit_id and row.due_date < row.source_visit.visit_date:

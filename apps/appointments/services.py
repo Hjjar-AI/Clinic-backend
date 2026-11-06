@@ -1,5 +1,7 @@
 from core.reminders import renew_reminder
 from core.mutation import check_mutation
+from core.access import require_actor_permission, accessible_appointments, accessible_patients
+from core.exceptions import ConflictError
 # backend/apps/appointments/services.py
 from django.db import transaction
 from django.core.exceptions import ValidationError
@@ -121,8 +123,16 @@ class AppointmentService:
         return slots
 
     @staticmethod
-    def _lock_mutation(appointment, expected_version):
+    def _lock_mutation(appointment, expected_version, actor):
+        patient_id = Appointment.all_objects.values_list('patient_id', flat=True).get(pk=appointment.pk)
+        Patient.all_objects.select_for_update().get(pk=patient_id)
         appointment = Appointment.all_objects.select_for_update().get(pk=appointment.pk)
+        actor = require_actor_permission(actor, 'manage_appointments')
+        if appointment.patient_id != patient_id:
+            raise ConflictError('تغير ملف المريض؛ أعد تحميل الموعد')
+        if not accessible_appointments(actor).filter(pk=appointment.pk).exists():
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied('غير مصرح بالوصول إلى الموعد')
         check_mutation(appointment, expected_version)
         return appointment
 
@@ -146,7 +156,7 @@ class AppointmentService:
         return True
 
     @transaction.atomic
-    def create_appointment(self, data):
+    def create_appointment(self, data, *, actor):
         patient = data.get('patient')
         doctor = data.get('doctor')
         if not patient or not doctor:
@@ -164,6 +174,11 @@ class AppointmentService:
             patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
         if not patient or not patient.is_active or patient.deleted_at:
             raise ValidationError(['المريض غير موجود أو مؤرشف'])
+        actor = require_actor_permission(actor, 'manage_appointments')
+        if (not accessible_patients(actor).filter(pk=patient.pk).exists()
+                or (actor.role == 'doctor' and getattr(doctor, 'pk', None) != actor.pk)):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied('غير مصرح بهذا الحجز')
         if not doctor or not doctor.is_active or doctor.role not in ['doctor', 'admin']:
             raise ValidationError(['الطبيب غير صالح'])
 
@@ -196,8 +211,8 @@ class AppointmentService:
         return appointment
 
     @transaction.atomic
-    def update_appointment(self, appointment, data, expected_version=None):
-        appointment = self._lock_mutation(appointment, expected_version)
+    def update_appointment(self, appointment, data, expected_version=None, *, actor):
+        appointment = self._lock_mutation(appointment, expected_version, actor)
         # Clients echo these relations; only an actual reassignment is rejected.
         for field in ('patient', 'doctor'):
             if data.get(field) is not None and data[field] != getattr(appointment, field):
@@ -229,8 +244,8 @@ class AppointmentService:
         return appointment
 
     @transaction.atomic
-    def reschedule(self, appointment, new_date_str, new_time, expected_version=None):
-        appointment = self._lock_mutation(appointment, expected_version)
+    def reschedule(self, appointment, new_date_str, new_time, expected_version=None, *, actor):
+        appointment = self._lock_mutation(appointment, expected_version, actor)
         if appointment.status == 'completed':
             raise ValidationError({'status': ['لا يمكن نقل موعد مكتمل']})
         day, clock = self._schedule_values(new_date_str, new_time)
@@ -245,8 +260,8 @@ class AppointmentService:
         return appointment
 
     @transaction.atomic
-    def transition(self, appointment, target_status, expected_version=None, reason=''):
-        appointment = self._lock_mutation(appointment, expected_version)
+    def transition(self, appointment, target_status, expected_version=None, reason='', *, actor):
+        appointment = self._lock_mutation(appointment, expected_version, actor)
         previous_status = appointment.status
         if not self._apply_status(appointment, target_status, reason):
             return appointment
@@ -260,20 +275,20 @@ class AppointmentService:
         ])
         return appointment
 
-    def cancel(self, appointment, expected_version=None, reason=''):
-        return self.transition(appointment, 'cancelled', expected_version, reason)
+    def cancel(self, appointment, expected_version=None, reason='', *, actor):
+        return self.transition(appointment, 'cancelled', expected_version, reason, actor=actor)
 
-    def complete(self, appointment, expected_version=None):
-        return self.transition(appointment, 'completed', expected_version)
+    def complete(self, appointment, expected_version=None, *, actor):
+        return self.transition(appointment, 'completed', expected_version, actor=actor)
 
     @transaction.atomic
-    def archive(self, appointment, expected_version=None):
-        appointment = self._lock_mutation(appointment, expected_version)
+    def archive(self, appointment, expected_version=None, *, actor):
+        appointment = self._lock_mutation(appointment, expected_version, actor)
         if appointment.status != 'cancelled':
             raise ValidationError({
                 'status': ['لا يمكن أرشفة الموعد قبل إلغائه مع تسجيل السبب'],
             })
-        appointment.soft_delete()
+        appointment.soft_delete(actor)
         return appointment
 
     def get_accessible_appointments(self, user):

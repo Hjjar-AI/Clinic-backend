@@ -127,6 +127,11 @@ class BackupRestoreService:
                 if any((related, value) not in identifiers for value in values):
                     raise ValueError('Backup contains a dangling membership')
         inventory = {(obj.object._meta.label_lower, obj.object.pk): obj.object for obj in objects}
+        from apps.patients.integrity import validate_inventory
+        try:
+            validate_inventory(inventory)
+        except ValidationError as exc:
+            raise ValueError('Backup relationship or historical evidence validation failed') from exc
         selected_follow_ups = set()
         for obj in objects:
             visit = obj.object

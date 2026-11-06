@@ -42,7 +42,7 @@ AUDIT_FIELDS = {
     'PatientRepresentative': ['patient_id', 'verification', 'verified_at', 'verified_by_id', 'valid_from', 'valid_until', 'is_active', 'retired_at', 'updated_at'],
     'PatientAllergy': ['patient_id', 'source_visit_id', 'is_active', 'retired_at', 'retired_by_id', 'updated_at'],
     'PatientMedication': ['patient_id', 'source_visit_id', 'is_active', 'retired_at', 'retired_by_id', 'updated_at'],
-    'PatientFollowUp': ['patient_id', 'owner_id', 'status', 'method', 'due_date', 'source_visit_id', 'appointment_id', 'completed_visit_id', 'completed_at', 'completed_by_id', 'is_active', 'retired_at', 'updated_at'],
+    'PatientFollowUp': ['patient_id', 'owner_id', 'status', 'method', 'due_date', 'source_visit_id', 'appointment_id', 'completed_visit_id', 'completed_revision_id', 'outcome_at', 'outcome_by_id', 'is_active', 'retired_at', 'updated_at'],
     'PatientCorrection': ['patient_id', 'actor_id', 'record_type', 'record_id', 'created_at'],
     'PatientMerge': ['source_id', 'survivor_id', 'actor_id', 'created_at'],
     'PatientDuplicateReview': ['patient_id', 'other_patient_id', 'status', 'reviewed_by_id', 'updated_at'],

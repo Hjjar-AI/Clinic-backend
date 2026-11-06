@@ -156,6 +156,8 @@ class BillingService:
             notes=data.get('notes', ''),
             currency=self._currency(data.get('currency', 'SYP')),
         )
+        from apps.patients.integrity import validate_links
+        validate_links(invoice)
         invoice.full_clean()
         invoice.save()
         self._save_lines(invoice, rows)

@@ -1,3 +1,4 @@
+from core.serializers import StrictFieldsMixin
 # backend/apps/visits/serializers.py
 from rest_framework import serializers
 from .models import Visit, VisitDiagnosis, VisitMedication, VisitAttachment, VisitScaleResponse
@@ -5,27 +6,27 @@ from apps.patients.models import Patient
 from apps.accounts.models import User
 from .scale_validation import normalize_scale_response
 
-class VisitDiagnosisSerializer(serializers.ModelSerializer):
+class VisitDiagnosisSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = VisitDiagnosis
         fields = ['id', 'diagnosis', 'custom_code', 'custom_name', 'custom_arabic', 'order']
 
-class VisitMedicationSerializer(serializers.ModelSerializer):
+class VisitMedicationSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = VisitMedication
         fields = ['id', 'medication', 'custom_name', 'custom_dosage', 'custom_brand', 'is_custom', 'schedule', 'order']
 
-class VisitAttachmentSerializer(serializers.ModelSerializer):
+class VisitAttachmentSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = VisitAttachment
         fields = ['id', 'original_filename', 'file_size', 'mime_type', 'created_at']
 
-class VisitScaleResponseSerializer(serializers.ModelSerializer):
+class VisitScaleResponseSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = VisitScaleResponse
         fields = ['scale_id', 'scale_name_snapshot', 'responses_json']
 
-class PatientSummarySerializer(serializers.ModelSerializer):
+class PatientSummarySerializer(StrictFieldsMixin, serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -37,7 +38,7 @@ class PatientSummarySerializer(serializers.ModelSerializer):
     def get_full_name(self, obj):
         return obj.get_full_name()
 
-class VisitSerializer(serializers.ModelSerializer):
+class VisitSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     follow_up = serializers.SerializerMethodField()
     follow_up_input = serializers.JSONField(write_only=True, required=False, allow_null=True)
 

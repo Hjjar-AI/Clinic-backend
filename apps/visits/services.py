@@ -101,7 +101,7 @@ class VisitService:
         visit.save(update_fields=['signed_by', 'signed_at', 'date_signed', 'updated_at'])
         scalar = {field.name: field.value_from_object(visit) for field in visit._meta.concrete_fields}
         snapshot = json.loads(json.dumps({
-            'schema_version': 3, 'follow_up': self._follow_up_data(visit), 'fields': scalar, 'diagnoses': visit.get_diagnoses(),
+            'schema_version': 4, 'follow_up': self._follow_up_data(visit), 'fields': scalar, 'diagnoses': visit.get_diagnoses(),
             'medications': visit.get_medications(), 'lab_values': visit.get_lab_values(),
             'scales': list(visit.scale_responses.values('scale_id', 'scale_name_snapshot', 'responses_json')),
             'attachments': list(visit.attachments.values('id', 'original_filename', 'filepath', 'file_size')),
@@ -115,8 +115,12 @@ class VisitService:
             'clinician': {'id': actor.pk, 'name': actor.full_name or actor.username},
         }, cls=DjangoJSONEncoder, allow_nan=False))
         number = (visit.revisions.order_by('-number').values_list('number', flat=True).first() or 0) + 1
-        VisitRevision.objects.create(visit=visit, number=number, snapshot=snapshot,
-                                     signer=actor, signed_at=visit.signed_at, reason=visit.amendment_reason)
+        revision = VisitRevision(visit=visit, number=number, snapshot=snapshot,
+                                 signer=actor, signed_at=visit.signed_at, reason=visit.amendment_reason)
+        from apps.patients.integrity import validate_links
+        validate_links(revision)
+        revision.full_clean()
+        revision.save()
 
     @transaction.atomic
     def create_visit(self, patient, data, current_user):

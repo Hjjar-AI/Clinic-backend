@@ -12,7 +12,7 @@ from core.normalization import normalized_search_text
 from core.query_utils import apply_ordering
 from core.verification import stamp_verification
 from .validation import EDITABLE_FIELDS, IDENTITY_FIELDS, CORRECTION_FIELDS, CLINICAL_PROFILE_FIELDS, normalize_profile_data, validate_profile_data
-from .projections import CONTACT_FIELDS, sync_profile_identifier, profile_contact_values
+from .projections import CONTACT_FIELDS, sync_profile_identifier, profile_contact_values, PROFILE_RECORD_FIELDS
 
 def end_care_team_membership(member, actor, reason):
     # Cancelling a planned membership must not produce an end before its start.
@@ -47,8 +47,8 @@ class PatientService:
                 raise ValidationError(['الطبيب المحدد غير صالح'])
         return None
 
-    def _sync_identifier(self, patient, actor, previous=''):
-        sync_profile_identifier(patient, actor, previous)
+    def _sync_identifier(self, patient, actor, value, reason='Primary identity corrected'):
+        sync_profile_identifier(patient, actor, value, reason)
 
     def _verify_profile(self, patient, data, actor, identity_changed=False, previous_verification=None, previous_summaries=None):
         from .models import PatientAllergy, PatientMedication
@@ -67,13 +67,15 @@ class PatientService:
 
     def prepare_create(self, data, current_user):
         """Validate the same proposed aggregate for preview and creation, without writes."""
+        from core.access import require_actor_permission
+        current_user = require_actor_permission(current_user, 'edit_patient')
         data = self._normalize(data)
         self._validate(data, is_edit=False)
         doctor = self._resolve_doctor(data, current_user)
-        patient = Patient(**{key: value for key, value in data.items() if key in self.EDITABLE_FIELDS})
+        patient = Patient(**{key: value for key, value in data.items() if key in self.EDITABLE_FIELDS - PROFILE_RECORD_FIELDS})
         patient.registration_date = patient.registration_date or timezone.localdate()
         patient.created_by = current_user
-        patient.doctor = doctor  # Compatibility display only; access/assignment is care-team based.
+        patient._prepared_profile = {key: data[key] for key in PROFILE_RECORD_FIELDS if key in data}
         self._verify_profile(patient, data, current_user)
         patient.full_clean()
         members = data.get('care_team_ids', [])
@@ -87,22 +89,24 @@ class PatientService:
         users = list(User.objects.filter(pk__in=ids, is_active=True))
         if len(users) != len(ids):
             raise ValidationError({'care_team_ids': ['يوجد عضو غير متاح']})
-        if patient.emergency_contact_name:
+        if data.get('emergency_contact_name'):
             from .models import PatientContact
             contact = PatientContact(patient=patient, is_emergency=True, is_primary=True,
-                                     created_by=current_user, updated_by=current_user, **profile_contact_values(patient))
+                                     created_by=current_user, updated_by=current_user, **profile_contact_values(patient, data))
             contact.full_clean(exclude=['patient'])
         return patient, users
 
     @transaction.atomic
     def create_patient(self, data, current_user):
         patient, users = self.prepare_create(data, current_user)
+        profile = patient.__dict__.pop('_prepared_profile')
         patient.save()
-        self._sync_identifier(patient, current_user)
-        if patient.emergency_contact_name:
+        self._sync_identifier(patient, current_user, profile.get('national_id', ''))
+        patient.save(update_fields=['primary_identifier'])
+        if profile.get('emergency_contact_name'):
             from .models import PatientContact
             PatientContact.objects.create(patient=patient, is_emergency=True, is_primary=True,
-                created_by=current_user, updated_by=current_user, **profile_contact_values(patient))
+                created_by=current_user, updated_by=current_user, **profile_contact_values(patient, profile))
         for member in users:
             PatientCareTeam.objects.create(patient=patient, user=member, assigned_by=current_user,
                 role='doctor' if member.role == 'doctor' else 'coordinator')
@@ -113,9 +117,10 @@ class PatientService:
         from .models import PatientCorrection
         from .record_services import json_value
         patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        from core.access import require_patient_actor
+        current_user = require_patient_actor(patient, current_user, 'edit_patient')
         check_mutation(patient, expected_version)
         previous_summaries = {field: getattr(patient, field) for field in ('allergy_status', 'medication_status', 'family_history', 'important_notes')}
-        previous_identifier = patient.national_id
         previous_verification = patient.identity_verification
         data = self._normalize(data)
         self._validate(data, is_edit=True, existing=patient)
@@ -125,17 +130,18 @@ class PatientService:
         if changes and (not isinstance(reason, str) or not reason.strip() or len(reason) > 500):
             raise ValidationError({'correction_reason': ['سبب تصحيح البيانات مطلوب (حتى 500 محرف)']})
         for key, value in data.items():
-            if key in self.EDITABLE_FIELDS:
+            if key in self.EDITABLE_FIELDS - PROFILE_RECORD_FIELDS:
                 setattr(patient, key, value)
         # Changing verified identity requires explicit re-verification; never silently carry the old assertion.
         identity_changed = any(key in changes for key in set(self.IDENTITY_FIELDS) | {'dob_year', 'gender', 'national_id'})
         if identity_changed and 'identity_verification' not in data:
             patient.identity_verification = 'reported'
         self._verify_profile(patient, data, current_user, identity_changed, previous_verification, previous_summaries)
+        if 'national_id' in data:
+            self._sync_identifier(patient, current_user, data['national_id'], reason.strip() or 'Primary identity corrected')
         patient.version += 1
         patient.full_clean()
         patient.save()
-        self._sync_identifier(patient, current_user, previous_identifier)
         contact_fields = CONTACT_FIELDS
         if any(key in changes for key in contact_fields):
             from .models import PatientContact
@@ -143,7 +149,7 @@ class PatientService:
             primary = PatientContact.objects.filter(patient=patient, is_active=True, is_primary=True).first()
             if primary and not primary.is_emergency:
                 raise ValidationError({'emergency_contact_name': ['عدّل الاتصال الأساسي من سجل الاتصالات أولاً']})
-            fields = profile_contact_values(patient)
+            fields = profile_contact_values(patient, data)
             fields.update(is_primary=True, is_emergency=True)
             retire = not fields['name']
             if retire and (fields['phone'] or fields['relationship']):
@@ -163,29 +169,33 @@ class PatientService:
 
     @transaction.atomic
     def soft_delete_patient(self, patient, user, expected_version=None):
+        from core.access import require_patient_actor
+        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        user = require_patient_actor(patient, user, 'delete_patient')
         if user.role != 'admin':
             raise ValidationError(['غير مصرح لك بهذا الإجراء'])
-        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
         check_mutation(patient, expected_version)
         patient.soft_delete(user, 'Patient archived; clinical history retained')
         return True
 
     @transaction.atomic
     def anonymize(self, patient, user, expected_version=None):
+        from core.access import require_patient_actor
         # Identity restriction is pseudonymization, not erasure of signed history.
+        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        user = require_patient_actor(patient, user, 'delete_patient')
         if user.role != 'admin':
             raise ValidationError(['غير مصرح لك بهذا الإجراء'])
-        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
         check_mutation(patient, expected_version)
         patient.first_name = 'مجهول'
         patient.surname = str(patient.pk)
-        for field in ('father_name', 'mother_name', 'national_id', 'phone', 'permanent_address',
-                      'emergency_contact_name', 'emergency_contact_phone', 'occupation'):
+        for field in ('father_name', 'mother_name', 'phone', 'permanent_address', 'occupation'):
             setattr(patient, field, '')
         from .models import PatientIdentifier, PatientContact, PatientRepresentative
-        PatientIdentifier.objects.filter(patient=patient).update(value=patient.patient_number, issuer='', verification='unknown', is_active=False, retired_at=timezone.now(), retired_by=user, retirement_reason='Identity restricted')
+        PatientIdentifier.objects.filter(patient=patient).update(value=patient.patient_number, issuer='', verification='unknown', verified_at=None, verified_by=None, is_active=False, retired_at=timezone.now(), retired_by=user, retirement_reason='Identity restricted')
         PatientContact.objects.filter(patient=patient).update(name='Restricted', phone='', email='', notes='', is_active=False, retired_at=timezone.now(), retired_by=user, retirement_reason='Identity restricted')
-        PatientRepresentative.objects.filter(patient=patient).update(name='Restricted', phone='', evidence='', is_active=False, retired_at=timezone.now(), retired_by=user, retirement_reason='Identity restricted')
+        PatientRepresentative.objects.filter(patient=patient).update(name='Restricted', phone='', evidence='', verification='unknown', verified_at=None, verified_by=None, is_active=False, retired_at=timezone.now(), retired_by=user, retirement_reason='Identity restricted')
+        patient.primary_identifier = None
         patient.identity_verification = 'unknown'
         patient.identity_verified_at = None
         patient.identity_verified_by = None
@@ -199,7 +209,7 @@ class PatientService:
         include_archived = bool(filters and filters.get('include_archived') == 'true')
         manager = Patient.all_objects if include_archived else Patient.objects
         from core.access import accessible_patients
-        qs = accessible_patients(user, include_archived).select_related('doctor')
+        qs = accessible_patients(user, include_archived).select_related('primary_identifier')
 
         search = filters.get('search', '') if filters else ''
         if search:
@@ -213,7 +223,7 @@ class PatientService:
                 Q(first_name__icontains=search) |
                 Q(father_name__icontains=search) |
                 Q(surname__icontains=search) |
-                Q(national_id__icontains=search) |
+                Q(primary_identifier__value__icontains=search) |
                 Q(phone__icontains=search) | Q(patient_number__icontains=search) | Q(patientidentifier_records__value__icontains=search)
             )
         if filters:
@@ -251,7 +261,7 @@ class PatientService:
         national_id = data.get('national_id')
         phone = data.get('phone')
         if national_id:
-            strong |= Q(national_id=national_id) | Q(patientidentifier_records__value=national_id, patientidentifier_records__is_active=True)
+            strong |= Q(primary_identifier__value=national_id) | Q(patientidentifier_records__value=national_id, patientidentifier_records__is_active=True)
         if phone:
             strong |= Q(phone=phone)
         name = ' '.join(filter(None, [data.get('first_name'), data.get('father_name'), data.get('surname')]))
@@ -262,19 +272,23 @@ class PatientService:
             )
         if not strong:
             return qs.none()
-        return qs.filter(strong).select_related('doctor').order_by('-updated_at')[:10]
+        return qs.filter(strong).select_related('primary_identifier').order_by('-updated_at')[:10]
 
     @transaction.atomic
     def restore_patient(self, patient, user, expected_version):
+        from core.access import require_patient_actor
+        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        user = require_patient_actor(patient, user, 'delete_patient', include_archived=True)
         if user.role != 'admin':
             raise PermissionDenied('الاستعادة مخصصة للمدير')
-        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
         if type(expected_version) is not int or patient.version != expected_version:
             raise ConflictError('تغير السجل؛ أعد تحميله')
         if patient.merged_into_id:
             raise ValidationError('الملف مدمج؛ استخدم الملف الباقي')
         patient.is_active = True
         patient.deleted_at = None
+        patient.archived_by = None
+        patient.archive_reason = ''
         patient.full_clean()
         patient.restore()
         return patient
@@ -293,6 +307,8 @@ class PatientService:
     @transaction.atomic
     def add_care_team_member(self, patient, user_id, role, expected_version=None, actor=None, reason=''):
         patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        from core.access import require_patient_actor
+        actor = require_patient_actor(patient, actor, 'edit_patient')
         check_mutation(patient, expected_version)
         if actor is None:
             raise ValidationError('المستخدم المنفذ مطلوب')
@@ -314,6 +330,8 @@ class PatientService:
     @transaction.atomic
     def remove_care_team_member(self, patient, user_id, expected_version=None, actor=None, reason=''):
         patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        from core.access import require_patient_actor
+        actor = require_patient_actor(patient, actor, 'edit_patient')
         check_mutation(patient, expected_version)
         if actor is None:
             raise ValidationError('المستخدم المنفذ مطلوب')
@@ -329,9 +347,22 @@ class PatientService:
         return patient.version
 
 class PatientDocumentService:
+    @staticmethod
+    def _lock_document(doc, actor):
+        patient_id = PatientDocument.all_objects.values_list('patient_id', flat=True).get(pk=doc.pk)
+        patient = Patient.all_objects.select_for_update().get(pk=patient_id)
+        doc = PatientDocument.all_objects.select_for_update().get(pk=doc.pk)
+        if doc.patient_id != patient_id:
+            raise ConflictError('تغير ملف المريض؛ أعد تحميل المستند')
+        from core.access import require_patient_actor
+        actor = require_patient_actor(patient, actor, 'manage_patient_documents')
+        return doc, actor
+
     @transaction.atomic
     def upload_document(self, patient, file, uploaded_by, category='other', description='', metadata=None):
         patient = Patient.objects.select_for_update().get(pk=patient.pk)
+        from core.access import require_patient_actor
+        uploaded_by = require_patient_actor(patient, uploaded_by, 'manage_patient_documents')
         from core.upload_security import validate_upload
         validate_upload(file)
         if not isinstance(category, str) or len(category) > 50:
@@ -352,8 +383,8 @@ class PatientDocumentService:
             raise
 
     @transaction.atomic
-    def update_document(self, doc, data, expected_version):
-        doc = PatientDocument.all_objects.select_for_update().get(pk=doc.pk)
+    def update_document(self, doc, data, expected_version, *, actor):
+        doc, actor = self._lock_document(doc, actor)
         check_mutation(doc, expected_version)
         provenance_changed = any(field in data and getattr(doc, field) != data[field] for field in ('document_date', 'source', 'provider'))
         previous_verification = None if provenance_changed else doc.verification
@@ -363,15 +394,15 @@ class PatientDocumentService:
             if field in data:
                 setattr(doc, field, data[field])
         from .record_services import stamp_verification
-        stamp_verification(doc, data.pop('_actor', None), previous_verification)
+        stamp_verification(doc, actor, previous_verification)
         doc.version += 1
         doc.full_clean()
         doc.save()
         return doc
 
     @transaction.atomic
-    def soft_delete_document(self, doc, expected_version):
-        doc = PatientDocument.all_objects.select_for_update().get(pk=doc.pk)
+    def soft_delete_document(self, doc, expected_version, *, actor):
+        doc, actor = self._lock_document(doc, actor)
         check_mutation(doc, expected_version)
-        doc.soft_delete()
+        doc.soft_delete(actor)
         return True

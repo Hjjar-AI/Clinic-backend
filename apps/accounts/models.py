@@ -1,3 +1,4 @@
+from core.constraints import check_constraint
 from .choices import UserRole
 # backend/apps/accounts/models.py
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
@@ -42,7 +43,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
     force_password_change = models.BooleanField(default=False)
-    stamp_data = models.TextField(blank=True, null=True)
+    stamp_data = models.TextField(blank=True, default='')
     preferences = models.JSONField(default=dict, blank=True)
     session_revoked_at = models.DateTimeField(null=True, blank=True)
     failed_login_attempts = models.PositiveIntegerField(default=0)
@@ -55,7 +56,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = []
 
     class Meta:
-        constraints = [check_constraint(condition=models.Q(version__gte=1), name='user_version_positive')]
+        constraints = [
+            check_constraint(condition=models.Q(role__in=UserRole.values), name='accounts_user_role_valid'),
+            *[check_constraint(condition=models.Q(version__gte=1), name='user_version_positive')],
+        ]
         indexes = [
             models.Index(fields=['role', 'is_active']),
         ]

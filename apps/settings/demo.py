@@ -34,7 +34,7 @@ def generate_demo_data(num_patients=None, max_visits_per_patient=None):
     if not diagnoses or not medications:
         raise ValueError('لا توجد تشخيصات أو أدوية مسجلة. قم بتشغيل seed أولاً.')
 
-    used_national_ids = set(Patient.objects.values_list('national_id', flat=True))
+    used_national_ids = set(Patient.objects.values_list('primary_identifier__value', flat=True))
     patients_created = 0
     for _ in range(num_patients):
         gender = random.choice(['ذكر', 'أنثى'])
@@ -43,7 +43,8 @@ def generate_demo_data(num_patients=None, max_visits_per_patient=None):
             if national_id not in used_national_ids:
                 used_national_ids.add(national_id)
                 break
-        patient = Patient(
+        from apps.patients.services import PatientService
+        patient = PatientService().create_patient(dict(
             first_name=fake.first_name(),
             father_name=fake.first_name_male(),
             surname=fake.last_name(),
@@ -56,13 +57,8 @@ def generate_demo_data(num_patients=None, max_visits_per_patient=None):
             phone='09' + ''.join([str(random.randint(0, 9)) for _ in range(8)]),
             permanent_address='دمشق، ' + fake.city(),
             registration_date=timezone.localdate(),
-            doctor=doctor,
-            created_by=doctor,
-        )
-        patient.save()
-        from apps.patients.models import PatientCareTeam, PatientIdentifier
-        PatientCareTeam.objects.create(patient=patient, user=doctor, role='doctor', assigned_by=doctor)
-        PatientIdentifier.objects.create(patient=patient, identifier_type='national_id', value=patient.national_id, created_by=doctor, updated_by=doctor)
+            care_team_ids=[doctor.pk],
+        ), doctor)
 
         num_visits = random.randint(1, max_visits_per_patient)
         for _ in range(num_visits):

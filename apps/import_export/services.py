@@ -119,7 +119,7 @@ class BulkImportService:
             row = {k.strip(): v.strip() for k, v in source.items()}
             national_id = normalize_identifier(row.get('الرقم الوطني', ''))
             phone = normalize_phone(row.get('الهاتف', ''))
-            if national_id and (national_id in seen_ids or Patient.all_objects.filter(national_id=national_id).exists()):
+            if national_id and (national_id in seen_ids or Patient.all_objects.filter(primary_identifier__value=national_id).exists()):
                 results['warnings'].append(f'الصف {idx+2}: رقم هوية مشترك؛ سيضاف ملف مستقل دون تغيير الرقم')
             if phone and (phone in seen_phones or Patient.objects.filter(phone=phone).exists()):
                 results['warnings'].append(f'الصف {idx+2}: الهاتف مشترك مع مريض آخر؛ لن يتم حذف الصف')
@@ -190,6 +190,8 @@ class OptionsImportService(BulkImportService):
                 for key, value in data.items(): setattr(instance,key,value)
                 instance.is_active=True
                 instance.deleted_at=None
+                instance.archived_by=None
+                instance.archive_reason=''
                 validate_catalog(instance)
                 seen.add(identity)
                 result.append({'row':idx+2, 'outcome': 'reactivate' if was_inactive else 'update' if existing else 'create',
@@ -248,6 +250,8 @@ class OptionsImportService(BulkImportService):
                 for key,value in row['_data'].items(): setattr(instance,key,value)
                 instance.is_active=True
                 instance.deleted_at=None
+                instance.archived_by=None
+                instance.archive_reason=''
                 instance.version += int(instance.pk is not None)
                 validate_catalog(instance)
                 instance.save()

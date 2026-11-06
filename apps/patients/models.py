@@ -1,3 +1,4 @@
+from core.constraints import archive_constraint, check_constraint, verification_constraint
 from .choices import Verification, CareRole, MaritalStatus, Gender, FollowUpMethod, FollowUpStatus, IdentifierType, AuthorityScope, RecordSource, AllergySeverity, AllergyStatus, MedicationStatus, SummaryStatus, ContactChannel, DuplicateStatus
 # backend/apps/patients/models.py
 from django.db import models
@@ -50,23 +51,13 @@ class Patient(SoftDeleteModel, TimeStampedModel):
         validators=[MinValueValidator(1900), MaxValueValidator(current_year)],
     )
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True, default='')
-    national_id = models.CharField(max_length=50, blank=True, default='')  # removed unique=True
+    primary_identifier = models.OneToOneField('patients.PatientIdentifier', on_delete=models.PROTECT, null=True, blank=True, editable=False, related_name='+')
     marital_status = models.CharField(max_length=50, choices=MARITAL_STATUSES, blank=True, default='')
     occupation = models.CharField(max_length=100, blank=True, default='')
     permanent_address = models.TextField(blank=True, default='')
     phone = models.CharField(max_length=20, blank=True, default='')
-    emergency_contact_name = models.CharField(max_length=100, blank=True, default='')
-    emergency_contact_relation = models.CharField(max_length=50, blank=True, default='')
-    emergency_contact_phone = models.CharField(max_length=20, blank=True, default='')
     family_history = models.TextField(blank=True, default='')
     important_notes = models.TextField(blank=True, default='')
-    doctor = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='patients',
-    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -78,15 +69,23 @@ class Patient(SoftDeleteModel, TimeStampedModel):
 
     class Meta:
         indexes = [
-            models.Index(fields=['doctor', 'deleted_at']),
-            models.Index(fields=['national_id']),
             models.Index(fields=['phone']),
             models.Index(fields=['registration_date']),
             models.Index(fields=['dob_year']),
         ]
         constraints = [
+            archive_constraint('patients_patient_archive_valid'),
+            verification_constraint('patients_patient_verification_valid', 'identity_'),
+            check_constraint(condition=models.Q(identity_verification__in=[item[0] for item in VERIFICATION]), name='patients_patient_identity_verification_valid'),
+            check_constraint(condition=models.Q(preferred_contact_channel__in=[*[item[0] for item in [('', 'Unspecified'), ('phone', 'Phone'), ('sms', 'SMS'), ('email', 'Email'), ('none', 'Do not contact')]], '']), name='patients_patient_preferred_contact_channel_valid'),
+            check_constraint(condition=models.Q(allergy_status__in=SummaryStatus.values), name='patients_patient_allergy_status_valid'),
+            check_constraint(condition=models.Q(medication_status__in=SummaryStatus.values), name='patients_patient_medication_status_valid'),
+            check_constraint(condition=models.Q(gender__in=[*Gender.values, '']), name='patients_patient_gender_valid'),
+            check_constraint(condition=models.Q(marital_status__in=[*[item[0] for item in MARITAL_STATUSES], '']), name='patients_patient_marital_status_valid'),
+            *[
             check_constraint(condition=models.Q(version__gte=1), name='patient_version_positive'),
 
+        ],
         ]
 
     def __str__(self):
@@ -99,7 +98,7 @@ class Patient(SoftDeleteModel, TimeStampedModel):
                 from django.core.exceptions import ValidationError
                 raise ValidationError('رقم الملف دائم ولا يمكن تغييره')
         from .validation import IDENTITY_FIELDS, normalize_identity_data
-        fields = (*IDENTITY_FIELDS, 'national_id', 'phone', 'emergency_contact_phone')
+        fields = (*IDENTITY_FIELDS, 'phone')
         for field, value in normalize_identity_data({field: getattr(self, field) for field in fields}).items():
             setattr(self, field, value)
         self.normalised_full_name = normalized_search_text(self.get_full_name())
@@ -115,6 +114,39 @@ class Patient(SoftDeleteModel, TimeStampedModel):
         if self.surname:
             parts.append(self.surname)
         return " ".join(parts)
+
+    @property
+    def national_id(self):
+        row = self.primary_identifier if self.primary_identifier_id else None
+        return row.value if row and row.is_active else ''
+
+    def _emergency_contact(self):
+        return self.patientcontact_records.filter(is_active=True, is_primary=True, is_emergency=True).first() if self.pk else None
+
+    @property
+    def emergency_contact_name(self):
+        row = self._emergency_contact()
+        return row.name if row else ''
+
+    @property
+    def emergency_contact_relation(self):
+        row = self._emergency_contact()
+        return row.relationship if row else ''
+
+    @property
+    def emergency_contact_phone(self):
+        row = self._emergency_contact()
+        return row.phone if row else ''
+
+    @property
+    def doctor(self):
+        member = self.care_team.effective_at().filter(role='doctor').select_related('user').order_by('started_at', 'pk').first() if self.pk else None
+        return member.user if member else None
+
+    @property
+    def doctor_id(self):
+        doctor = self.doctor
+        return doctor.pk if doctor else None
 
     # Compatibility aliases for previously issued templates/API consumers.
     @property
@@ -154,6 +186,13 @@ class PatientDocument(SoftDeleteModel, TimeStampedModel, StoredFileMetadata):
     def __str__(self):
         return self.original_filename
 
+    class Meta:
+        constraints = [
+            archive_constraint('patients_patientdocument_archive_valid'),
+            verification_constraint('patients_patientdocument_verification_valid', ''),
+            check_constraint(condition=models.Q(verification__in=[item[0] for item in VERIFICATION]), name='patients_patientdocument_verification_valid'),
+        ]
+
 
 class PatientCareTeam(TimeStampedModel):
     objects = CareTeamQuerySet.as_manager()
@@ -177,13 +216,15 @@ class PatientCareTeam(TimeStampedModel):
 
     class Meta:
         constraints = [
+            check_constraint(condition=models.Q(role__in=[item[0] for item in CARE_ROLES]), name='patients_patientcareteam_role_valid'),
+            *[
             models.UniqueConstraint(
                 fields=['patient', 'user'], condition=Q(ended_at__isnull=True),
                 name='unique_active_care_team_member',
             ),
             check_constraint(condition=Q(ended_at__isnull=True) | Q(ended_at__gte=models.F('started_at')), name='care_team_dates_valid'),
+        ],
         ]
-        indexes = [models.Index(fields=['user'])]
 
     def __str__(self):
         return f"{self.patient} - {self.user} ({self.role})"

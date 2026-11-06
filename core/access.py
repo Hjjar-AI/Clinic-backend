@@ -53,3 +53,12 @@ def require_actor_permission(actor, permission):
     if current is None or not current.has_perm(permission):
         raise PermissionDenied('غير مصرح بهذا الإجراء')
     return current
+
+
+def require_patient_actor(patient, actor, permission, *, include_archived=False):
+    """Call after locking an existing parent; creation callers check their grant."""
+    from django.core.exceptions import PermissionDenied
+    current = require_actor_permission(actor, permission)
+    if not accessible_patients(current, include_archived).filter(pk=patient.pk).exists():
+        raise PermissionDenied('غير مصرح بالوصول إلى الملف')
+    return current

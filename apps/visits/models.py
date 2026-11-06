@@ -1,3 +1,4 @@
+from core.constraints import archive_constraint, check_constraint
 from .choices import VisitStatus, RiskLevel, LevelOfCare, CareBasis, AccompaniedBy
 # backend/apps/visits/models.py
 from django.db import models, transaction
@@ -96,6 +97,14 @@ class Visit(SoftDeleteModel, TimeStampedModel):
             models.Index(fields=['deleted_at']),
         ]
         constraints = [
+            archive_constraint('visits_visit_archive_valid'),
+            check_constraint(condition=models.Q(status__in=VisitStatus.values), name='visits_visit_status_valid'),
+            check_constraint(condition=models.Q(accompanied_by__in=[*AccompaniedBy.values, '']), name='visits_visit_accompanied_by_valid'),
+            check_constraint(condition=models.Q(suicide_risk_level__in=[*RiskLevel.values, '']), name='visits_visit_suicide_risk_level_valid'),
+            check_constraint(condition=models.Q(violence_risk_level__in=[*RiskLevel.values, '']), name='visits_visit_violence_risk_level_valid'),
+            check_constraint(condition=models.Q(care_basis__in=CareBasis.values), name='visits_visit_care_basis_valid'),
+            check_constraint(condition=models.Q(level_of_care__in=[*LevelOfCare.values, '']), name='visits_visit_level_of_care_valid'),
+            *[
             check_constraint(condition=models.Q(version__gte=1, status__in=['draft', 'final', 'amended', 'locked']), name='visit_version_status_valid'),
             check_constraint(
                 condition=(
@@ -111,7 +120,15 @@ class Visit(SoftDeleteModel, TimeStampedModel):
                 ),
                 name='visit_anxiety_level_valid',
             ),
+        ],
         ]
+
+    def clean(self):
+        super().clean()
+        from .input_validation import clinical_object
+        from .lab_validation import normalize_lab_values
+        clinical_object(self.clinical_data)
+        normalize_lab_values(self.lab_values)
 
     def __str__(self):
         return f"Visit {self.id} for {self.patient} on {self.visit_date}"
@@ -125,25 +142,20 @@ class Visit(SoftDeleteModel, TimeStampedModel):
                  'brand': row.custom_brand, 'is_custom': row.is_custom, 'schedule': row.schedule,
                  'controlled': row.controlled_snapshot} for row in self.visit_medications.all()]
 
-    @transaction.atomic
-    def set_diagnoses(self, diagnoses_list):
-        from .input_validation import normalize_rows
-        from .nested import replace_diagnoses
-        return replace_diagnoses(self, normalize_rows(diagnoses_list, 'diagnoses', self))
+    def set_diagnoses(self, diagnoses_list, *, actor, expected_version):
+        from .services import VisitService
+        return VisitService().update_visit(self, {'diagnoses_input': diagnoses_list}, actor, expected_version)
 
-    @transaction.atomic
-    def set_medications(self, medications_list):
-        from .input_validation import normalize_rows
-        from .nested import replace_medications
-        return replace_medications(self, normalize_rows(medications_list, 'medications', self))
+    def set_medications(self, medications_list, *, actor, expected_version):
+        from .services import VisitService
+        return VisitService().update_visit(self, {'medications_input': medications_list}, actor, expected_version)
 
     def get_lab_values(self):
         return self.lab_values
 
-    def set_lab_values(self, lab_list):
-        from .lab_validation import normalize_lab_values
-        from .nested import replace_lab_values
-        return replace_lab_values(self, normalize_lab_values(lab_list))
+    def set_lab_values(self, lab_list, *, actor, expected_version):
+        from .services import VisitService
+        return VisitService().update_visit(self, {'lab_values_input': lab_list}, actor, expected_version)
 
 
 class VisitDiagnosis(models.Model):
@@ -202,6 +214,11 @@ class VisitAttachment(SoftDeleteModel, TimeStampedModel, StoredFileMetadata):
         related_name='uploaded_visit_attachments',
     )
 
+    class Meta:
+        constraints = [
+            archive_constraint('visits_visitattachment_archive_valid'),
+        ]
+
 class VisitScaleResponse(models.Model):
     visit = models.ForeignKey(
         Visit,
@@ -233,7 +250,15 @@ class VisitRevision(ImmutableModel):
     signed_at = models.DateTimeField()
     reason = models.CharField(max_length=500, blank=True)
 
+    def clean(self):
+        super().clean()
+        from core.json_schemas import validate_revision_snapshot
+        validate_revision_snapshot(self.snapshot)
+
     class Meta:
         ordering = ['number']
-        constraints = [models.UniqueConstraint(fields=['visit', 'number'], name='unique_visit_revision')]
+        constraints = [
+            check_constraint(condition=models.Q(number__gte=1), name='visit_revision_number_positive'),
+            *[models.UniqueConstraint(fields=['visit', 'number'], name='unique_visit_revision')],
+        ]
 

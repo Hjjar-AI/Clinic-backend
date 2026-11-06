@@ -1,3 +1,4 @@
+from core.constraints import archive_constraint, check_constraint
 from .choices import InvoiceStatus, PaymentMethod
 from decimal import Decimal
 
@@ -51,12 +52,15 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
 
     class Meta:
         indexes = [
-            models.Index(fields=['patient']),
-            models.Index(fields=['visit']),
             models.Index(fields=['status']),
             models.Index(fields=['issued_date']),
         ]
         constraints = [
+            archive_constraint('billing_invoice_archive_valid'),
+            check_constraint(condition=models.Q(status__in=InvoiceStatus.values), name='billing_invoice_status_valid'),
+            check_constraint(condition=models.Q(payment_method__in=[*PaymentMethod.values, '']), name='billing_invoice_payment_method_valid'),
+            check_constraint(condition=models.Q(status='paid') | models.Q(paid_at__isnull=True, paid_by__isnull=True), name='unpaid_invoice_no_payment_stamps'),
+            *[
             check_constraint(
                 condition=~models.Q(status='paid') | models.Q(paid_at__isnull=False, paid_by__isnull=False),
                 name='paid_invoice_has_payment_metadata',
@@ -89,6 +93,7 @@ class Invoice(SoftDeleteModel, TimeStampedModel):
                 ),
                 name='invoice_due_date_not_before_issue',
             ),
+        ],
         ]
 
     def __str__(self):

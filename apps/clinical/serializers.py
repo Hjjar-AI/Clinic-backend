@@ -1,3 +1,4 @@
+from core.serializers import StrictFieldsMixin
 from core.serializers import domain_validation
 from .validation import validate_scale_definition, validate_template_content
 from rest_framework import serializers
@@ -10,7 +11,7 @@ from .models import (
 )
 
 
-class DiagnosisOptionSerializer(serializers.ModelSerializer):
+class DiagnosisOptionSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     usage_count = serializers.IntegerField(read_only=True, default=0)
     class Meta:
         read_only_fields = ['is_active']
@@ -21,7 +22,7 @@ class DiagnosisOptionSerializer(serializers.ModelSerializer):
         ]
 
 
-class MedicationOptionSerializer(serializers.ModelSerializer):
+class MedicationOptionSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     usage_count = serializers.IntegerField(read_only=True, default=0)
     class Meta:
         read_only_fields = ['is_active']
@@ -33,7 +34,7 @@ class MedicationOptionSerializer(serializers.ModelSerializer):
         ]
 
 
-class ScaleFieldSerializer(serializers.ModelSerializer):
+class ScaleFieldSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = ScaleField
         fields = [
@@ -53,7 +54,7 @@ class ScaleFieldSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class ClinicalScaleSerializer(serializers.ModelSerializer):
+class ClinicalScaleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     fields = ScaleFieldSerializer(many=True, read_only=True)
     usage_count = serializers.SerializerMethodField()
     max_active_fields = serializers.IntegerField(read_only=True, default=100)
@@ -71,7 +72,7 @@ class ClinicalScaleSerializer(serializers.ModelSerializer):
         return VisitScaleResponse.objects.filter(scale_id=obj.id).count()
 
 
-class ClinicalNoteTemplateSerializer(serializers.ModelSerializer):
+class ClinicalNoteTemplateSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     usage_count = serializers.SerializerMethodField()
 
     class Meta:

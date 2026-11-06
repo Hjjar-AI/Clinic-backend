@@ -1,4 +1,5 @@
 from django.db import models
+from core.constraints import check_constraint
 from django.core.validators import MinValueValidator
 from django.utils import timezone
 
@@ -82,7 +83,9 @@ class SoftDeleteModel(OptionalTextModel):
         now = timezone.now()
         self.deleted_at = None
         self.is_active = True
-        update_fields = ['deleted_at', 'is_active']
+        self.archived_by = None
+        self.archive_reason = ''
+        update_fields = ['deleted_at', 'is_active', 'archived_by', 'archive_reason']
         if hasattr(self, 'version'):
             self.version += 1
             update_fields.append('version')
@@ -90,47 +93,6 @@ class SoftDeleteModel(OptionalTextModel):
             self.updated_at = now
             update_fields.append('updated_at')
         self.save(update_fields=update_fields)
-
-class AuditLog(models.Model):
-    user = models.ForeignKey(
-        'accounts.User',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='audit_logs',
-    )
-    action = models.CharField(max_length=50)
-    entity_type = models.CharField(max_length=50)
-    entity_id = models.PositiveBigIntegerField()
-    details = models.JSONField(default=dict, blank=True)
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['-created_at', '-id']
-        indexes = [
-            models.Index(fields=['user', 'created_at']),
-            models.Index(fields=['entity_type', 'entity_id']),
-        ]
-
-    def __str__(self):
-        return f"{self.action} {self.entity_type}#{self.entity_id} by {self.user}"
-
-class IdempotencyOperation(models.Model):
-    user = models.ForeignKey('accounts.User', on_delete=models.CASCADE)
-    key = models.CharField(max_length=100)
-    fingerprint = models.CharField(max_length=64)
-    state = models.CharField(max_length=20, default='processing')
-    response_body = models.BinaryField(null=True)
-    response_status = models.PositiveSmallIntegerField(null=True)
-    response_headers = models.JSONField(default=dict)
-    created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField()
-
-    class Meta:
-        constraints = [models.UniqueConstraint(fields=['user', 'key'], name='unique_user_operation_key')]
-        indexes = [models.Index(fields=['expires_at'])]
-
 
 class ImmutableQuerySet(models.QuerySet):
     def bulk_create(self, objs, *args, **kwargs):
@@ -165,6 +127,64 @@ class ImmutableModel(models.Model):
         raise ValidationError('Historical records are immutable')
 
 
+class AuditLog(ImmutableModel):
+    user = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='audit_logs',
+    )
+    action = models.CharField(max_length=50)
+    entity_type = models.CharField(max_length=50)
+    entity_id = models.PositiveBigIntegerField()
+    details = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['entity_type', 'entity_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.action} {self.entity_type}#{self.entity_id} by {self.user}"
+
+class OperationState(models.TextChoices):
+    PROCESSING = 'processing', 'Processing'
+    COMPLETED = 'completed', 'Completed'
+
+
+class RecoveryState(models.TextChoices):
+    PROCESSING = 'processing', 'Processing'
+    COMPLETED = 'completed', 'Completed'
+    INTERRUPTED = 'interrupted', 'Interrupted'
+    RECONCILED = 'reconciled', 'Reconciled'
+
+
+class IdempotencyOperation(models.Model):
+    user = models.ForeignKey('accounts.User', on_delete=models.CASCADE)
+    key = models.CharField(max_length=100)
+    fingerprint = models.CharField(max_length=64)
+    state = models.CharField(max_length=20, choices=OperationState.choices, default=OperationState.PROCESSING)
+    response_body = models.BinaryField(null=True)
+    response_status = models.PositiveSmallIntegerField(null=True)
+    response_headers = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'key'], name='unique_user_operation_key'),
+            check_constraint(condition=models.Q(state__in=OperationState.values), name='operation_state_valid'),
+            check_constraint(condition=models.Q(state='processing', response_body__isnull=True, response_status__isnull=True) |
+                models.Q(state='completed', response_body__isnull=False, response_status__gte=200, response_status__lt=300),
+                name='operation_response_consistent'),
+            check_constraint(condition=models.Q(expires_at__gt=models.F('created_at')), name='operation_expiry_valid')]
+        indexes = [models.Index(fields=['expires_at'])]
+
+
 class CacheGeneration(models.Model):
     name = models.CharField(max_length=100, primary_key=True)
     token = models.CharField(max_length=32)
@@ -175,7 +195,14 @@ class RecoveryOperation(models.Model):
     key = models.CharField(max_length=100, unique=True)
     fingerprint = models.CharField(max_length=64)
     initiator = models.JSONField(default=dict)
-    state = models.CharField(max_length=20, default='processing')
+    state = models.CharField(max_length=20, choices=RecoveryState.choices, default=RecoveryState.PROCESSING)
     result = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=['state', 'expires_at'])]
+        constraints = [
+            check_constraint(condition=models.Q(state__in=RecoveryState.values), name='recovery_state_valid'),
+            check_constraint(condition=models.Q(expires_at__gt=models.F('created_at')), name='recovery_expiry_valid'),
+        ]

@@ -3,6 +3,16 @@ from .models import AuditLog
 from django.core.exceptions import ValidationError as DomainValidationError
 
 
+class StrictFieldsMixin:
+    """Read-only echoes remain inert; unknown request keys are never discarded."""
+    def to_internal_value(self, data):
+        if hasattr(data, 'keys'):
+            unknown = set(data.keys()) - set(self.fields)
+            if unknown:
+                raise serializers.ValidationError({name: ['حقل غير معروف'] for name in sorted(unknown)})
+        return super().to_internal_value(data)
+
+
 def domain_validation(validator, *args, error_field=None, **kwargs):
     try:
         return validator(*args, **kwargs)

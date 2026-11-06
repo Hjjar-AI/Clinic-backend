@@ -134,17 +134,16 @@ class ClinicalConstantsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        from django.conf import settings
-        return Response({
-            'data': {
-                'suicide_risk_levels': ['Low', 'Moderate', 'High'],
-                'violence_risk_levels': ['Low', 'Moderate', 'High'],
-                'level_of_care': [
-                    'Outpatient', 'IOP', 'PHP', 'Inpatient', 'Residential'
-                ],
-                'care_basis': ['unknown', 'voluntary', 'involuntary'],
-                'follow_up_methods': [value for value, _ in PatientFollowUp.METHOD_CHOICES],
-                'marital_status_male': ['أعزب', 'متزوج', 'مطلق', 'أرمل'],
-                'marital_status_female': ['عزباء', 'متزوجة', 'مطلقة', 'أرملة'],
-            }
-        })
+        from apps.visits.choices import RiskLevel, LevelOfCare, CareBasis
+        from apps.patients.choices import FollowUpMethod, MaritalStatus, Gender
+        return Response({'data': {
+            'suicide_risk_levels': RiskLevel.values,
+            'violence_risk_levels': RiskLevel.values,
+            'level_of_care': LevelOfCare.values,
+            'care_basis': CareBasis.values,
+            'follow_up_methods': FollowUpMethod.values,
+            'gender': [{'value': value, 'label': label} for value, label in Gender.choices],
+            'marital_status_male': MaritalStatus.values,
+            'marital_status_female': MaritalStatus.values,
+            'marital_status_options': [{'value': value, 'label': label} for value, label in MaritalStatus.choices],
+        }})

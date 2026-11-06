@@ -254,7 +254,7 @@ class PatientDocumentViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.instance = self.service.update_document(
-            self.get_object(), {**serializer.validated_data, '_actor': self.request.user}, request_version(self.request))
+            self.get_object(), serializer.validated_data, request_version(self.request), actor=self.request.user)
 
     def create(self, request, patient_pk=None):
         patient = get_object_or_404(accessible_patients(request.user), pk=patient_pk)
@@ -275,7 +275,7 @@ class PatientDocumentViewSet(viewsets.ModelViewSet):
         return Response({'data': serializer.data}, status=status.HTTP_201_CREATED)
 
     def perform_destroy(self, instance):
-        self.service.soft_delete_document(instance, request_version(self.request))
+        self.service.soft_delete_document(instance, request_version(self.request), actor=self.request.user)
 
     @action(detail=True, methods=['get'])
     def download(self, request, patient_pk=None, pk=None):

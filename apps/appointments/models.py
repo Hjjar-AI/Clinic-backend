@@ -1,3 +1,4 @@
+from core.constraints import archive_constraint, check_constraint
 from .choices import AppointmentStatus
 import uuid
 # backend/apps/appointments/models.py
@@ -36,15 +37,18 @@ class Appointment(SoftDeleteModel, TimeStampedModel):
         indexes = [
             models.Index(fields=['doctor', 'appointment_date', 'status']),
             models.Index(fields=['doctor', 'appointment_date', 'appointment_time']),
-            models.Index(fields=['patient']),
             models.Index(fields=['deleted_at']),
         ]
         constraints = [
+            archive_constraint('appointments_appointment_archive_valid'),
+            check_constraint(condition=models.Q(status__in=AppointmentStatus.values), name='appointments_appointment_status_valid'),
+            *[
             check_constraint(condition=models.Q(version__gte=1, status__in=['scheduled', 'confirmed', 'arrived', 'completed', 'cancelled', 'no-show']), name='appointment_version_status_valid'),
             check_constraint(
                 condition=models.Q(duration_minutes__gte=1, duration_minutes__lte=1440),
                 name='appointment_duration_valid',
             ),
+        ],
         ]
 
     def __str__(self):

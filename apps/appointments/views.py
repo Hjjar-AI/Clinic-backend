@@ -74,7 +74,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             self.permission_denied(self.request)
         if user.role == 'doctor' and doctor.pk != user.pk:
             self.permission_denied(self.request)
-        instance = self.service.create_appointment(serializer.validated_data)
+        instance = self.service.create_appointment(serializer.validated_data, actor=user)
         serializer.instance = instance
 
     def perform_update(self, serializer):
@@ -82,10 +82,10 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         version = request_version(self.request)
         data = serializer.validated_data.copy()
         data.pop('version', None)
-        serializer.instance = self.service.update_appointment(instance, data, version)
+        serializer.instance = self.service.update_appointment(instance, data, version, actor=self.request.user)
 
     def perform_destroy(self, instance):
-        self.service.archive(instance, self._required_version(self.request))
+        self.service.archive(instance, self._required_version(self.request), actor=self.request.user)
 
     def _paginate_queryset(self, qs, request):
         """
@@ -219,14 +219,14 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         apt = self.get_object()
         version = self._required_version(request)
-        updated = self.service.cancel(apt, version, request.data.get('reason', ''))
+        updated = self.service.cancel(apt, version, request.data.get('reason', ''), actor=request.user)
         return Response({'data': self.get_serializer(updated).data, 'message': 'تم إلغاء الموعد'})
 
     @action(detail=True, methods=['put'])
     def complete(self, request, pk=None):
         apt = self.get_object()
         version = self._required_version(request)
-        updated = self.service.complete(apt, version)
+        updated = self.service.complete(apt, version, actor=request.user)
         return Response({'data': self.get_serializer(updated).data, 'message': 'تم إكمال الموعد'})
 
     @action(detail=True, methods=['put'])
@@ -240,6 +240,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             target,
             self._required_version(request),
             request.data.get('reason', ''),
+            actor=request.user,
         )
         return Response({'data': self.get_serializer(updated).data})
 
@@ -268,7 +269,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 return error_response(400, 'Invalid time format; expected HH:MM', {})
         version = request_version(request)
-        updated = self.service.reschedule(apt, new_date, new_time, version)
+        updated = self.service.reschedule(apt, new_date, new_time, version, actor=request.user)
         return Response({'data': self.get_serializer(updated).data, 'message': 'تم نقل الموعد'})
 
     @action(detail=False, methods=['get'], url_path='next/(?P<patient_id>[^/.]+)')

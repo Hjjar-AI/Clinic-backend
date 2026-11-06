@@ -1,10 +1,16 @@
+from core.serializers import StrictFieldsMixin
 # backend/apps/patients/serializers.py
 from rest_framework import serializers
 from .models import Patient, PatientDocument, PatientCareTeam
+from apps.accounts.models import User
 from core.serializers import domain_validation
 from .validation import normalize_profile_data, validate_profile_data
 
-class PatientSerializer(serializers.ModelSerializer):
+class PatientSerializer(StrictFieldsMixin, serializers.ModelSerializer):
+    national_id = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    emergency_contact_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    emergency_contact_relation = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    emergency_contact_phone = serializers.CharField(required=False, allow_blank=True, max_length=20)
     completeness = serializers.SerializerMethodField()
     admission_date = serializers.DateField(source='registration_date', read_only=True)
     correction_reason = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=500)
@@ -20,7 +26,7 @@ class PatientSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source='get_full_name', read_only=True)
     doctor_id = serializers.PrimaryKeyRelatedField(
         source='doctor',
-        queryset=Patient._meta.get_field('doctor').remote_field.model.objects.filter(role='doctor', is_active=True),
+        queryset=User.objects.filter(role='doctor', is_active=True),
         write_only=True,
         required=False,
         allow_null=True,
@@ -62,7 +68,7 @@ class PatientSerializer(serializers.ModelSerializer):
         return obj.get_completeness()
 
 
-class PatientDocumentSerializer(serializers.ModelSerializer):
+class PatientDocumentSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True)
 
     class Meta:
@@ -80,7 +86,7 @@ class PatientDocumentSerializer(serializers.ModelSerializer):
         ]
 
 
-class CareTeamMemberSerializer(serializers.ModelSerializer):
+class CareTeamMemberSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     assigned_by_name = serializers.SerializerMethodField()
     ended_by_name = serializers.SerializerMethodField()
 

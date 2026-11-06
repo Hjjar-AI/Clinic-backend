@@ -1,10 +1,11 @@
+from core.serializers import StrictFieldsMixin
 # backend/apps/tasks/serializers.py
 from rest_framework import serializers
 from .models import UserTask
 from apps.accounts.models import User
 from django.utils import timezone
 
-class TaskSerializer(serializers.ModelSerializer):
+class TaskSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     assigned_to = serializers.StringRelatedField(read_only=True)
     assigned_to_id = serializers.PrimaryKeyRelatedField(

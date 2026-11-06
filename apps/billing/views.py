@@ -47,7 +47,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Invoice.objects.select_related('patient', 'visit')
+        qs = Invoice.objects.select_related('patient', 'visit').prefetch_related('lines')
         from core.access import accessible_invoices
         qs = qs.filter(pk__in=accessible_invoices(user).values('pk'))
 

@@ -50,6 +50,31 @@ def record_values(row, fields):
 
 
 class PatientRecordService:
+    @transaction.atomic
+    def select_primary(self, patient, record_id, actor, expected_version, reason):
+        patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        from core.access import require_patient_actor
+        actor = require_patient_actor(patient, actor, 'edit_patient')
+        check_mutation(patient, expected_version)
+        row = PatientIdentifier.objects.select_for_update().filter(
+            pk=parse_version(record_id), patient=patient, is_active=True, identifier_type='national_id').first()
+        if row is None:
+            raise ValidationError('اختر هوية وطنية نشطة من هذا الملف')
+        if patient.primary_identifier_id == row.pk:
+            return row, patient.version
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
+            raise ValidationError({'reason': ['سبب اختيار الهوية الأساسية مطلوب']})
+        previous, previous_id = patient.national_id, patient.primary_identifier_id
+        patient.primary_identifier = row
+        patient.identity_verification = 'reported'
+        stamp_verification(patient, None, prefix='identity_')
+        patient.version += 1
+        patient.save(update_fields=['primary_identifier', 'identity_verification', 'identity_verified_at', 'identity_verified_by', 'version', 'updated_at'])
+        PatientCorrection.objects.create(patient=patient, actor=actor, reason=reason.strip(), record_type='profile',
+            changes={'national_id': {'before': previous, 'after': row.value},
+                     'primary_identifier': {'before': previous_id, 'after': row.pk}})
+        return row, patient.version
+
     def list(self, patient, kind, actor):
         if kind not in RECORDS:
             raise ValidationError({'kind': ['نوع سجل غير صالح']})
@@ -61,6 +86,9 @@ class PatientRecordService:
         if kind not in RECORDS or not isinstance(data, dict):
             raise ValidationError('سجل غير صالح')
         patient = Patient.all_objects.select_for_update().get(pk=patient.pk)
+        from core.access import require_actor_permission
+        permission = _visit_action or ('edit_visit' if kind in CLINICAL_KINDS else 'edit_patient')
+        actor = require_actor_permission(actor, permission)
         if _visit_action is not None:
             allowed = {'delete_visit', 'edit_visit'} if retire else {'add_visit', 'edit_visit'}
             if kind != 'follow-ups' or _visit_action not in allowed:
@@ -140,6 +168,8 @@ class PatientRecordService:
             row.verification = 'reported'
         stamp_verification(row, actor, None if verification_changed else previous_verification)
         row.updated_by = actor
+        from .integrity import validate_links
+        validate_links(row)
         row.full_clean()
         row.save()
         for visit in linked_visits:
@@ -164,5 +194,5 @@ class PatientRecordService:
             if positive:
                 setattr(patient, 'allergy_status' if kind == 'allergies' else 'medication_status', 'recorded')
         patient.version += 1
-        patient.save(update_fields=['version', 'updated_at', 'allergy_status', 'medication_status', 'national_id', 'identity_verification', 'identity_verified_at', 'identity_verified_by', 'emergency_contact_name', 'emergency_contact_relation', 'emergency_contact_phone'])
+        patient.save(update_fields=['version', 'updated_at', 'allergy_status', 'medication_status', 'primary_identifier', 'identity_verification', 'identity_verified_at', 'identity_verified_by'])
         return row, patient.version

@@ -1,3 +1,4 @@
+from core.constraints import check_constraint
 from .choices import NotificationType
 from django.db import models
 from django.conf import settings
@@ -12,7 +13,7 @@ class Notification(TimeStampedModel):
     )
     title = models.CharField(max_length=200)
     message = models.TextField()
-    link = models.CharField(max_length=500, blank=True, null=True)
+    link = models.CharField(max_length=500, blank=True, default='')
     type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='info')
     is_read = models.BooleanField(default=False)
     dedupe_key = models.CharField(max_length=200, blank=True, null=True)
@@ -24,11 +25,14 @@ class Notification(TimeStampedModel):
             models.Index(fields=['created_at']),
         ]
         constraints = [
+            check_constraint(condition=models.Q(type__in=NotificationType.values), name='notifications_notification_type_valid'),
+            *[
             models.UniqueConstraint(
                 fields=['user', 'dedupe_key'],
                 condition=models.Q(dedupe_key__isnull=False),
                 name='unique_user_notification_dedupe_key',
             ),
+        ],
         ]
 
     def __str__(self):

@@ -30,6 +30,8 @@ def incomplete_query():
         if field == 'care_team':
             from .models import PatientCareTeam
             result |= ~Q(pk__in=PatientCareTeam.objects.effective_at().values('patient_id'))
+        elif field == 'national_id':
+            result |= Q(primary_identifier__isnull=True)
         elif field in ('dob_year', 'registration_date'):
             result |= Q(**{field + '__isnull': True})
         else:

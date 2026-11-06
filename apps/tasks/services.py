@@ -6,10 +6,20 @@ from django.utils import timezone
 from .models import UserTask
 from apps.accounts.models import User
 from core.mutation import check_mutation
+from core.access import require_actor_permission
 from core.lifecycle import enforce_transition, transition_reason
 from core.query_utils import apply_ordering
 
 class TaskService:
+    @staticmethod
+    def _lock_task(task, actor, expected_version):
+        task = UserTask.objects.select_for_update().get(pk=task.pk)
+        actor = require_actor_permission(actor, 'manage_tasks')
+        if not UserTask.objects.for_user(actor).filter(pk=task.pk).exists():
+            raise PermissionDenied('غير مصرح بالوصول إلى المهمة')
+        check_mutation(task, expected_version)
+        return task, actor
+
     def get_for_user(self, user, assigned_filter='', status_filter='', params=None):
         qs = UserTask.objects.for_user(user)
         if user.role == 'admin':
@@ -40,6 +50,7 @@ class TaskService:
 
     @transaction.atomic
     def create_task(self, user, data):
+        user = require_actor_permission(user, 'manage_tasks')
         assignee = data.get('assigned_to')
         assigned_to_id = getattr(assignee, 'id', assignee)
         if user.role != 'admin':
@@ -57,14 +68,15 @@ class TaskService:
             due_date=data.get('due_date'),
             status='open',
         )
+        if task.assigned_to_id and not User.objects.filter(pk=task.assigned_to_id, is_active=True).exists():
+            raise ValidationError({'assigned_to': ['المستخدم غير متاح']})
         task.full_clean()
         task.save()
         return task
 
     @transaction.atomic
     def update_task(self, task, data, expected_version=None, actor=None):
-        task = UserTask.objects.select_for_update().get(pk=task.pk)
-        check_mutation(task, expected_version)
+        task, actor = self._lock_task(task, actor, expected_version)
 
         if 'assigned_to' in data:
             if actor is None:
@@ -86,14 +98,15 @@ class TaskService:
         if reminder_changed:
             renew_reminder(task, 'reminder_sent')
         task.version += 1
+        if task.assigned_to_id and not User.objects.filter(pk=task.assigned_to_id, is_active=True).exists():
+            raise ValidationError({'assigned_to': ['المستخدم غير متاح']})
         task.full_clean()
         task.save()
         return task
 
     @transaction.atomic
     def transition_task(self, task, target_status, actor, expected_version=None, reason=''):
-        task = UserTask.objects.select_for_update().get(pk=task.pk)
-        check_mutation(task, expected_version)
+        task, actor = self._lock_task(task, actor, expected_version)
         changed = enforce_transition('task', task.status, target_status)
         if not changed:
             return task
@@ -133,10 +146,8 @@ class TaskService:
         return self.transition_task(task, 'open', actor, expected_version)
 
     @transaction.atomic
-    def delete_task(self, task, expected_version=None):
-        task = UserTask.objects.select_for_update().get(pk=task.pk)
-        from core.mutation import check_mutation
-        check_mutation(task, expected_version)
+    def delete_task(self, task, expected_version=None, *, actor):
+        task, actor = self._lock_task(task, actor, expected_version)
         if task.status not in {'completed', 'cancelled'}:
             raise ValidationError({'status': ['لا يمكن حذف مهمة نشطة؛ ألغها أولاً']})
         task.delete()
@@ -158,6 +169,9 @@ class TaskService:
             pk__in=order_list).order_by('pk').select_for_update())
         if len(tasks) != len(order_list):
             raise PermissionDenied('لا يمكنك إعادة ترتيب مهام لا تملك صلاحية الوصول إليها')
+        user = require_actor_permission(user, 'manage_tasks')
+        if UserTask.objects.for_user(user).filter(pk__in=order_list).count() != len(order_list):
+            raise PermissionDenied('غير مصرح بإعادة ترتيب المهام')
         positions = {task_id: position for position, task_id in enumerate(order_list)}
         for task in tasks:
             task.order = positions[task.pk]

@@ -47,7 +47,9 @@ class PatientStatisticsService(BaseStatisticsService):
     def get_marital_status_distribution(self, user):
         patients = self.get_accessible_patients(user)
         results = patients.values('marital_status').annotate(count=Count('id'))
-        return [(r['marital_status'] or 'غير محدد', r['count']) for r in results]
+        from apps.patients.choices import MaritalStatus
+        labels = dict(MaritalStatus.choices)
+        return [(labels.get(r['marital_status'], 'غير محدد'), r['count']) for r in results]
 
     def get_patients_by_doctor(self, user):
         from apps.patients.models import PatientCareTeam

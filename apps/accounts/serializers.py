@@ -1,3 +1,4 @@
+from core.serializers import StrictFieldsMixin
 # backend/apps/accounts/serializers.py
 from rest_framework import serializers
 from core.image_data import validate_embedded_image
@@ -5,7 +6,7 @@ from core.serializers import domain_validation
 from .models import User
 
 
-class UserSerializer(serializers.ModelSerializer):
+class UserSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     permissions = serializers.SerializerMethodField()
     # Item #11: align with MinimumLengthValidator (min_length=8 in settings).
     # The previous value of 6 let passwords through serializer validation that
@@ -49,13 +50,13 @@ class UserSerializer(serializers.ModelSerializer):
         return domain_validation(validate_preferences, value)
 
 
-class LoginSerializer(serializers.Serializer):
+class LoginSerializer(StrictFieldsMixin, serializers.Serializer):
     username = serializers.CharField(max_length=80)
     password = serializers.CharField(write_only=True, style={'input_type': 'password'})
     remember = serializers.BooleanField(required=False, default=False)
 
 
-class ChangePasswordSerializer(serializers.Serializer):
+class ChangePasswordSerializer(StrictFieldsMixin, serializers.Serializer):
     current_password = serializers.CharField(write_only=True, style={'input_type': 'password'})
     new_password = serializers.CharField(
         write_only=True,

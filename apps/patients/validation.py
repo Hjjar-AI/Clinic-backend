@@ -6,6 +6,8 @@ from core.normalization import (
     normalize_identifier, normalize_phone,
 )
 from .models import Patient
+from .choices import MaritalStatus
+from .projections import PROFILE_RECORD_FIELDS
 
 
 EDITABLE_FIELDS = {
@@ -38,9 +40,13 @@ def normalize_profile_data(data):
     if 'admission_date' in data:
         data.setdefault('registration_date', data.pop('admission_date'))
     for field in EDITABLE_FIELDS:
-        model_field = Patient._meta.get_field(field)
-        if isinstance(model_field, (CharField, TextField)) and field in data:
+        model_field = None if field in PROFILE_RECORD_FIELDS else Patient._meta.get_field(field)
+        if (field in PROFILE_RECORD_FIELDS or isinstance(model_field, (CharField, TextField))) and field in data:
             data[field] = '' if data[field] is None else data[field].strip() if isinstance(data[field], str) else data[field]
+    aliases = {'أعزب': 'single', 'عزباء': 'single', 'متزوج': 'married', 'متزوجة': 'married',
+               'مطلق': 'divorced', 'مطلقة': 'divorced', 'أرمل': 'widowed', 'أرملة': 'widowed'}
+    if 'marital_status' in data:
+        data['marital_status'] = aliases.get(data['marital_status'], data['marital_status'])
     return normalize_identity_data(data)
 
 
@@ -67,6 +73,12 @@ def validate_profile_data(data, is_edit=False, existing=None):
     dob_year = data.get('dob_year')
     if dob_year is not None and (type(dob_year) is not int or not (1900 <= dob_year <= timezone.localdate().year)):
         errors.append('سنة الميلاد غير صالحة')
+    limits = {'national_id': 100, 'emergency_contact_name': 150, 'emergency_contact_relation': 100, 'emergency_contact_phone': 20}
+    for name, limit in limits.items():
+        if name in data and (not isinstance(data[name], str) or len(data[name]) > limit):
+            errors.append('قيمة نصية غير صالحة أو طويلة جداً')
+    if data.get('marital_status') and data['marital_status'] not in MaritalStatus.values:
+        errors.append('حالة اجتماعية غير صالحة')
     emergency_name = data.get('emergency_contact_name', getattr(existing, 'emergency_contact_name', ''))
     if not emergency_name and any(data.get(key, getattr(existing, key, '')) for key in ('emergency_contact_relation', 'emergency_contact_phone')):
         errors.append('اسم جهة اتصال الطوارئ مطلوب عند تسجيل بيانات الاتصال')

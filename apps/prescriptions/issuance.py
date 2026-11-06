@@ -40,6 +40,12 @@ def record_document(visit, actor, kind, snapshot, pdf, signature='', stamp=''):
     revision = finalized_revision(visit)
     if snapshot.get('revision_id') != revision.pk:
         raise ValidationError({'visit': ['المستند لا يطابق النسخة المعتمدة']})
-    return IssuedDocument.objects.create(document_type=kind, revision=revision, issued_by=actor,
+    snapshot = {'schema_version': 1, **snapshot}
+    document = IssuedDocument(document_type=kind, revision=revision, issued_by=actor,
         snapshot=snapshot, checksum=hashlib.sha256(pdf).hexdigest(), pdf_data=pdf,
         signature_data=signature or '', stamp_data=stamp or '')
+    from apps.patients.integrity import validate_links
+    validate_links(document)
+    document.full_clean()
+    document.save()
+    return document

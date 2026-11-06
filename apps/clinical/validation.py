@@ -18,4 +18,9 @@ def validate_scale_definition(minimum, maximum, step, default, field_type='slide
 
 def validate_template_content(value):
     from core.json_schemas import narrative_schema
-    return narrative_schema(value, 'content', template=True)
+    import json
+    result = narrative_schema(value, 'content', template=True)
+    serialized = json.dumps(result).lower()
+    if any(fragment in serialized for fragment in ('<script', 'javascript:', '__proto__')):
+        raise ValidationError({'content': ['محتوى قالب غير آمن']})
+    return result

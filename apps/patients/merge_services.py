@@ -117,7 +117,8 @@ class PatientMergeService:
         target.version += 1
         target.save()
         source.merged_into = target
-        source.save(update_fields=['merged_into'])
+        source.primary_identifier = None
+        source.save(update_fields=['merged_into', 'primary_identifier'])
         source.soft_delete(actor, 'Merged into ' + target.patient_number)
         PatientMerge.objects.create(source=source, survivor=target, actor=actor, reason=reason.strip(), manifest=before)
         left, right = sorted([source.pk, target.pk])

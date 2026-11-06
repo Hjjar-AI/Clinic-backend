@@ -1,3 +1,4 @@
+from core.constraints import check_constraint
 from .choices import TaskStatus, TaskPriority
 import uuid
 from django.db import models
@@ -26,7 +27,7 @@ class UserTask(TimeStampedModel):
         related_name='assigned_tasks',
     )
     title = models.CharField(max_length=200)
-    description = models.TextField(blank=True, null=True)
+    description = models.TextField(blank=True, default='')
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='low')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
     status_reason = models.CharField(max_length=500, blank=True, default='')
@@ -52,6 +53,9 @@ class UserTask(TimeStampedModel):
             models.Index(fields=['due_date']),
         ]
         constraints = [
+            check_constraint(condition=models.Q(priority__in=TaskPriority.values), name='tasks_usertask_priority_valid'),
+            check_constraint(condition=models.Q(status__in=TaskStatus.values), name='tasks_usertask_status_valid'),
+            *[
             check_constraint(condition=models.Q(version__gte=1, status__in=['open', 'in_progress', 'completed', 'cancelled']), name='usertask_version_status_valid'),
             check_constraint(
                 condition=(
@@ -75,6 +79,7 @@ class UserTask(TimeStampedModel):
                 ),
                 name='task_terminal_timestamps_consistent',
             ),
+        ],
         ]
 
     def __str__(self):

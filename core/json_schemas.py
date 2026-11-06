@@ -29,7 +29,7 @@ def bounded_text(value, maximum, field):
 
 def narrative_schema(value, field, *, template=False):
     allowed = {'schema_version', 'mse', 'formulation', 'risk_notes', 'plan_details', 'extensions'}
-    allowed |= {'treatment_text', 'doctor_notes'} if template else {'applied_template', 'instruction_acknowledgement'}
+    allowed |= {'treatment_text', 'doctor_notes'} if template else {'applied_template', 'instruction_acknowledgement', 'goals'}
     object_schema(value, allowed, field, maximum=100_000 if template else 200_000)
     if type(value.get('schema_version', 1)) is not int or value.get('schema_version', 1) != 1:
         raise ValidationError({field: ['إصدار بيانات غير مدعوم']})
@@ -47,6 +47,21 @@ def narrative_schema(value, field, *, template=False):
                 or any(not isinstance(key, str) or not re.fullmatch(r'[a-z][a-z0-9_.-]{0,79}', key)
                        for key in extensions)):
             raise ValidationError({field: ['امتدادات غير صالحة']})
+    if not template and 'goals' in value:
+        goals = value['goals']
+        if not isinstance(goals, list) or len(goals) > 100:
+            raise ValidationError({field: ['قائمة أهداف غير صالحة']})
+        from core.numeric_validation import finite_number
+        for goal in goals:
+            object_schema(goal, {'title', 'percentage'}, field)
+            bounded_text(goal.get('title', ''), 2000, field)
+            percentage = goal.get('percentage')
+            if percentage is not None:
+                try:
+                    if not 0 <= finite_number(percentage) <= 100:
+                        raise ValueError()
+                except ValueError:
+                    raise ValidationError({field: ['نسبة هدف غير صالحة']})
     if not template and 'applied_template' in value:
         applied = object_schema(value['applied_template'], {'id', 'name', 'updated_at', 'content'}, field)
         if type(applied.get('id')) is not int or applied['id'] < 1:

@@ -1,3 +1,4 @@
+from core.serializers import StrictFieldsMixin
 from rest_framework import serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -13,10 +14,12 @@ from core.mutation import request_version
 def record_serializer(kind):
     model, fields = RECORDS[kind]
     metadata = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'is_active', 'retired_at', 'retirement_reason']
-    metadata += [name for name in ['verified_at', 'verified_by', 'completed_at', 'completed_by']
+    if kind == 'identifiers':
+        metadata.append('is_primary')
+    metadata += [name for name in ['verified_at', 'verified_by', 'outcome_at', 'outcome_by', 'completed_revision']
                  if any(field.name == name for field in model._meta.fields)]
     meta = type('Meta', (), {'model': model, 'fields': metadata + fields, 'read_only_fields': metadata})
-    return type('PatientRecordSerializer', (serializers.ModelSerializer,), {'Meta': meta})
+    return type('PatientRecordSerializer', (StrictFieldsMixin, serializers.ModelSerializer), {'Meta': meta})
 
 
 class PatientRecordsMixin:
@@ -40,8 +43,15 @@ class PatientRecordsMixin:
         data = request.data.get('fields', {})
         if not isinstance(data, dict):
             raise ValidationError({'fields': ['يلزم كائن حقول']})
-        if any(key not in RECORDS[kind][1] for key in data) or request.data.get('operation', 'save') not in {'save', 'retire'}:
+        operation = request.data.get('operation', 'save')
+        if any(key not in RECORDS[kind][1] for key in data) or operation not in {'save', 'retire', 'select_primary'}:
             raise ValidationError('حقول أو عملية غير صالحة')
+        if operation == 'select_primary':
+            if kind != 'identifiers' or data or not request.data.get('record_id'):
+                raise ValidationError('عملية اختيار الهوية الأساسية غير صالحة')
+            row, version = service.select_primary(patient, request.data['record_id'], request.user,
+                request_version(request), request.data.get('reason', ''))
+            return Response({'data': {'record': serializer(row).data, 'version': version}}, headers={'X-Resource-Version': str(version)})
         if request.data.get('operation') == 'retire' and not request.data.get('record_id'):
             raise ValidationError('يلزم تحديد السجل')
         validated = serializer(data=data, partial=bool(request.data.get('record_id')))

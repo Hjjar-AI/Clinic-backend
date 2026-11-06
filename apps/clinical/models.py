@@ -1,3 +1,4 @@
+from core.constraints import archive_constraint, check_constraint
 from .choices import ScaleFieldType
 from django.db import models
 from core.constraints import check_constraint
@@ -12,7 +13,10 @@ class DiagnosisOption(SoftDeleteModel):
     order = models.PositiveIntegerField(default=0)
 
     class Meta:
-        constraints = [check_constraint(condition=models.Q(version__gte=1), name='diagnosisoption_version_positive')]
+        constraints = [
+            archive_constraint('clinical_diagnosisoption_archive_valid'),
+            *[check_constraint(condition=models.Q(version__gte=1), name='diagnosisoption_version_positive')],
+        ]
         ordering = ['order', 'code', 'id']
 
     def __str__(self):
@@ -30,8 +34,11 @@ class MedicationOption(SoftDeleteModel):
 
     class Meta:
         constraints = [
+            archive_constraint('clinical_medicationoption_archive_valid'),
+            *[
             check_constraint(condition=models.Q(version__gte=1), name='medicationoption_version_positive'),
             models.UniqueConstraint(Lower(Trim('generic_english')), Lower(Trim('dosage')), Lower(Trim('brand_english')), name='medication_identity_unique'),
+        ],
         ]
         ordering = ['order', 'generic_english', 'id']
 
@@ -58,7 +65,10 @@ class ClinicalScale(SoftDeleteModel, TimeStampedModel):
     description = models.TextField(blank=True, default='')
 
     class Meta:
-        constraints = [check_constraint(condition=models.Q(version__gte=1), name='clinicalscale_version_positive')]
+        constraints = [
+            archive_constraint('clinical_clinicalscale_archive_valid'),
+            *[check_constraint(condition=models.Q(version__gte=1), name='clinicalscale_version_positive')],
+        ]
         ordering = ['name', 'id']
 
     def __str__(self):
@@ -93,6 +103,9 @@ class ScaleField(SoftDeleteModel, TimeStampedModel):
     class Meta:
         ordering = ['order', 'id']
         constraints = [
+            archive_constraint('clinical_scalefield_archive_valid'),
+            check_constraint(condition=models.Q(field_type__in=ScaleFieldType.values), name='clinical_scalefield_field_type_valid'),
+            *[
             check_constraint(condition=models.Q(version__gte=1), name='scalefield_version_positive'),
             check_constraint(
                 condition=models.Q(max_val__gt=models.F('min_val')),
@@ -113,6 +126,7 @@ class ScaleField(SoftDeleteModel, TimeStampedModel):
                 ),
                 name='scale_field_default_in_range',
             ),
+        ],
         ]
 
 
@@ -129,3 +143,8 @@ class ClinicalNoteTemplate(SoftDeleteModel, TimeStampedModel):
 
     def __str__(self):
         return self.name
+
+    class Meta:
+        constraints = [
+            archive_constraint('clinical_clinicalnotetemplate_archive_valid'),
+        ]

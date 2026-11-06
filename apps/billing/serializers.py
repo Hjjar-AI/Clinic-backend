@@ -1,13 +1,34 @@
+from core.serializers import StrictFieldsMixin
 # backend/apps/billing/serializers.py
 from rest_framework import serializers
 from .models import Invoice
 from apps.patients.models import Patient
 from apps.visits.models import Visit
 from django.utils import timezone
+from decimal import Decimal
+from .models import InvoiceLine
+from .money import MAX_QUANTITY
 
-class InvoiceSerializer(serializers.ModelSerializer):
-    lines = serializers.ListField(child=serializers.DictField(), required=False, max_length=200, write_only=True)
-    line_items = serializers.SerializerMethodField()
+
+class InvoiceLineInputSerializer(StrictFieldsMixin, serializers.Serializer):
+    description = serializers.CharField(max_length=300)
+    quantity = serializers.DecimalField(max_digits=8, decimal_places=2, min_value=Decimal('0.01'), max_value=MAX_QUANTITY, coerce_to_string=True)
+    unit_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0'), coerce_to_string=True)
+
+
+class InvoiceLineSerializer(StrictFieldsMixin, serializers.ModelSerializer):
+    quantity = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True)
+    unit_price = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True)
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True)
+
+    class Meta:
+        model = InvoiceLine
+        fields = ['id', 'description', 'quantity', 'unit_price', 'amount', 'order']
+        read_only_fields = fields
+
+class InvoiceSerializer(StrictFieldsMixin, serializers.ModelSerializer):
+    lines = InvoiceLineInputSerializer(many=True, required=False, write_only=True, allow_empty=False, max_length=200)
+    line_items = InvoiceLineSerializer(source='lines', many=True, read_only=True)
     is_overdue = serializers.SerializerMethodField()
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient = serializers.PrimaryKeyRelatedField(read_only=True)
@@ -36,6 +57,3 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
     def get_is_overdue(self, obj):
         return bool(obj.status == 'issued' and obj.due_date and obj.due_date < timezone.localdate())
-
-    def get_line_items(self, obj):
-        return list(obj.lines.values('id', 'description', 'quantity', 'unit_price', 'amount'))

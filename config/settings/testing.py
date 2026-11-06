@@ -22,6 +22,7 @@ CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'
                        'LOCATION': 'clinic-test-suite'}}
 MEDIA_ROOT = TEST_WORKSPACE / 'media'
 BACKUP_DIR = TEST_WORKSPACE / 'backups'
+OPERATION_LOCK_DIR = TEST_WORKSPACE / 'locks'
 STATIC_ROOT = TEST_WORKSPACE / 'static'
 STORAGES = {'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
             'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'}}

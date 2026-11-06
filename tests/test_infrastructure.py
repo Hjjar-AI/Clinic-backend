@@ -43,7 +43,10 @@ class InfrastructureTests(ClinicTestCase):
         self.assertEqual(response.status_code, 201)
         log = AuditLog.objects.get(entity_type='Patient', entity_id=response.json()['data']['id'], action='create')
         self.assertEqual(log.user_id, self.admin.pk)
-        self.assertTrue(log.details['changes']['national_id']['to'].startswith('[protected:'))
+        self.assertTrue(log.details['changes']['phone']['to'].startswith('[protected:'))
+        identity_log = AuditLog.objects.get(entity_type='Patient', entity_id=log.entity_id, action='update')
+        self.assertTrue(identity_log.details['changes']['national_id']['to'].startswith('[protected:'))
+        self.assertNotIn('1234567890', str(identity_log.details))
         self.assertNotIn('1234567890', str(log.details))
 
     def test_csv_export_neutralizes_formula_prefixes(self):
@@ -54,6 +57,7 @@ class InfrastructureTests(ClinicTestCase):
         self.assertEqual(csv_cell('Synthetic'), 'Synthetic')
 
     def test_task_reminders_deduplicate_and_ignore_completed_tasks(self):
+        self.grant(self.doctor, 'manage_tasks')
         service = TaskService()
         pending = service.create_task(self.doctor, {'title': 'Synthetic reminder', 'due_date': timezone.localdate()})
         completed = service.create_task(self.doctor, {'title': 'Completed', 'due_date': timezone.localdate()})
@@ -68,8 +72,8 @@ class InfrastructureTests(ClinicTestCase):
     def test_cancelled_appointments_do_not_send_reminders(self):
         service = AppointmentService()
         row = service.create_appointment({'patient': self.patient, 'doctor': self.doctor,
-            'appointment_date': timezone.localdate() + timedelta(days=1), 'appointment_time': '10:00'})
-        service.cancel(row, row.version, 'Synthetic cancellation')
+            'appointment_date': timezone.localdate() + timedelta(days=1), 'appointment_time': '10:00'}, actor=self.admin)
+        service.cancel(row, row.version, 'Synthetic cancellation', actor=self.admin)
         call_command('send_appointment_reminders', stdout=io.StringIO())
         self.assertFalse(Notification.objects.filter(dedupe_key__contains=f':{row.pk}:').exists())
 

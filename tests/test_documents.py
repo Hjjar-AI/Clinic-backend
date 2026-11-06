@@ -32,7 +32,7 @@ class DocumentWorkflowTests(ClinicTestCase):
         service = PrescriptionService()
         visit = self.visit_for(status='final')
         preview = service.create_preview(visit, self.doctor.pk)
-        PatientService().update_patient(self.patient, {'occupation': 'Synthetic'}, self.doctor, expected_version=1)
+        PatientService().update_patient(self.patient, {'occupation': 'Synthetic', 'correction_reason': 'Synthetic correction'}, self.doctor, expected_version=1)
         visit.refresh_from_db()
         with self.assertRaises(ConflictError):
             service.get_preview(preview['preview_token'], self.doctor.pk, visit)
@@ -50,7 +50,7 @@ class DocumentWorkflowTests(ClinicTestCase):
         preview = self.api.get(f'/api/v1/prescription/visit/{visit.pk}/').json()['data']
         pdf = b'%PDF-synthetic-http'
         payload = {'visit_id': visit.pk, 'preview_token': preview['preview_token'], 'signature': SIGNATURE}
-        with patch('apps.prescriptions.services.render_pdf_from_html', return_value=pdf):
+        with self.captureOnCommitCallbacks(execute=True), patch('apps.prescriptions.services.render_pdf_from_html', return_value=pdf):
             response = self.write('post', '/api/v1/prescription/generate/', payload)
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response['Content-Type'], 'application/pdf')

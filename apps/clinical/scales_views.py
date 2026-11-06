@@ -74,8 +74,11 @@ class ScaleViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='add-field')
     def add_field(self, request, pk=None):
         scale = self.get_object()
-        serializer = ScaleFieldSerializer(data=request.data)
+        version = request_version(request)
+        data = request.data.copy()
+        data.pop('version', None)
+        serializer = ScaleFieldSerializer(data=data)
         serializer.is_valid(raise_exception=True)
-        field = self.service.add_field(scale, serializer.validated_data, request_version(request), actor=request.user)
+        field = self.service.add_field(scale, serializer.validated_data, version, actor=request.user)
         scale.refresh_from_db(fields=['version'])
         return Response(ScaleFieldSerializer(field).data, status=status.HTTP_201_CREATED, headers={'X-Resource-Version': str(scale.version)})

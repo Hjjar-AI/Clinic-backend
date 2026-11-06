@@ -10,6 +10,8 @@ from apps.visits.scale_validation import normalize_scale_response
 from apps.prescriptions.issuance import finalized_revision, record_document
 from core.exceptions import ConflictError
 from .base import ClinicTestCase
+from .test_documents import SIGNATURE
+from apps.prescriptions.services import PrescriptionService
 
 
 class VisitWorkflowTests(ClinicTestCase):
@@ -58,17 +60,19 @@ class VisitWorkflowTests(ClinicTestCase):
         with self.assertRaises(ValidationError):
             revision.delete()
 
-    def test_followup_date_validation_and_completed_sync(self):
+    def test_followup_date_validation_and_canonical_outcome(self):
         today = timezone.localdate()
         with self.assertRaises(ValidationError):
-            self.visit_for(follow_up_date=today - timedelta(days=1))
-        visit = self.visit_for(follow_up_date=today + timedelta(days=7))
+            self.visit_for(follow_up_input={'due_date': today - timedelta(days=1)})
+        visit = self.visit_for(follow_up_input={'due_date': today + timedelta(days=7)})
         row = self.patient.patientfollowup_records.get(source_visit=visit)
         self.assertEqual(row.status, 'pending')
-        VisitService().complete_follow_up(visit, self.doctor, 1)
+        self.patient.refresh_from_db()
+        from apps.patients.record_services import PatientRecordService
+        PatientRecordService().save(self.patient, 'follow-ups', {'status': 'completed', 'outcome_reason': 'Synthetic completion'}, self.doctor, self.patient.version, row.pk, reason='Synthetic completion')
         row.refresh_from_db()
         self.assertEqual(row.status, 'completed')
-        self.assertEqual(row.completed_by_id, self.doctor.pk)
+        self.assertEqual(row.outcome_by_id, self.doctor.pk)
 
     def test_unsigned_or_stale_document_issuance_rejected(self):
         draft = self.visit_for()
@@ -77,21 +81,21 @@ class VisitWorkflowTests(ClinicTestCase):
         visit = self.visit_for(status='final')
         revision = finalized_revision(visit)
         with self.assertRaises(ConflictError):
-            record_document(visit, self.doctor, 'prescription', {'visit_version': 0, 'revision_id': revision.pk}, b'%PDF-synthetic')
+            record_document(visit, self.doctor, 'prescription', {**PrescriptionService().build_snapshot(visit), 'visit_version': 0}, b'%PDF-synthetic', signature=SIGNATURE)
         with self.assertRaises(ValidationError):
-            record_document(visit, self.doctor, 'prescription', {'visit_version': 1, 'revision_id': 0}, b'%PDF-synthetic')
+            record_document(visit, self.doctor, 'prescription', {**PrescriptionService().build_snapshot(visit), 'revision_id': 0}, b'%PDF-synthetic', signature=SIGNATURE)
 
     def test_issued_pdf_bytes_checksum_and_snapshot_retained(self):
         import hashlib
         visit = self.visit_for(status='final')
         pdf = b'%PDF-synthetic-suite'
-        snapshot = {'visit_version': visit.version, 'revision_id': finalized_revision(visit).pk}
-        document = record_document(visit, self.doctor, 'prescription', snapshot, pdf)
+        snapshot = {'schema_version': 1, **PrescriptionService().build_snapshot(visit)}
+        document = record_document(visit, self.doctor, 'prescription', snapshot, pdf, signature=SIGNATURE)
         self.assertEqual(bytes(document.pdf_data), pdf)
         self.assertEqual(document.checksum, hashlib.sha256(pdf).hexdigest())
         self.assertEqual(document.snapshot, snapshot)
         with self.assertRaises(PermissionDenied):
-            record_document(visit, self.receptionist, 'prescription', snapshot, pdf)
+            record_document(visit, self.receptionist, 'prescription', snapshot, pdf, signature=SIGNATURE)
 
     def test_pseudonymization_does_not_erase_signed_identity(self):
         from apps.patients.services import PatientService
@@ -107,18 +111,18 @@ class VisitWorkflowTests(ClinicTestCase):
 class CatalogScaleTests(ClinicTestCase):
     def test_medication_identity_is_case_and_space_insensitive(self):
         service = MedicationService()
-        service.create_medication(generic_english='Synthetic', dosage='10mg', brand_english='Brand')
+        service.create_medication(generic_english='Synthetic', dosage='10mg', brand_english='Brand', actor=self.admin)
         with self.assertRaises(ValidationError):
-            service.create_medication(generic_english=' synthetic ', dosage='10mg', brand_english='brand')
+            service.create_medication(generic_english=' synthetic ', dosage='10mg', brand_english='brand', actor=self.admin)
 
     def test_catalog_updates_require_version_and_protect_metadata(self):
         service = DiagnosisService()
-        row = service.create_diagnosis(code='SYN', english_name='Synthetic', arabic_name='تجريبي')
+        row = service.create_diagnosis(code='SYN', english_name='Synthetic', arabic_name='تجريبي', actor=self.admin)
         with self.assertRaises(ConflictError):
-            service.update_diagnosis(row.pk, expected_version=2, english_name='Changed')
+            service.update_diagnosis(row.pk, expected_version=2, english_name='Changed', actor=self.admin)
         with self.assertRaises(ValidationError):
-            service.update_diagnosis(row.pk, expected_version=1, is_active=False)
-        updated = service.update_diagnosis(row.pk, expected_version=1, english_name='Changed')
+            service.update_diagnosis(row.pk, expected_version=1, is_active=False, actor=self.admin)
+        updated = service.update_diagnosis(row.pk, expected_version=1, english_name='Changed', actor=self.admin)
         self.assertEqual(updated.version, 2)
 
     def test_scale_rejects_nonfinite_range_and_off_step_default(self):

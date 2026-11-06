@@ -38,7 +38,7 @@ class ConcurrentMutationTests(ClinicTransactionTestCase):
     def test_same_doctor_overlapping_creations_commit_only_one_booking(self):
         patient_id, doctor_id = self.patient.pk, self.doctor.pk
         def operation(index):
-            return AppointmentService().create_appointment({'patient': Patient.objects.get(pk=patient_id), 'doctor': User.objects.get(pk=doctor_id), 'appointment_date': timezone.localdate() + timedelta(days=1), 'appointment_time': '10:00', 'duration_minutes': 30}).pk
+            return AppointmentService().create_appointment({'patient': Patient.objects.get(pk=patient_id), 'doctor': User.objects.get(pk=doctor_id), 'appointment_date': timezone.localdate() + timedelta(days=1), 'appointment_time': '10:00', 'duration_minutes': 30}, actor=self.admin).pk
         results = self.run_pair(operation)
         self.assertEqual([state for state, _ in results].count('ok'), 1)
         self.assertEqual(Appointment.objects.count(), 1)
@@ -46,7 +46,7 @@ class ConcurrentMutationTests(ClinicTransactionTestCase):
     def test_same_opening_patient_version_cannot_commit_two_profile_edits(self):
         patient_id, actor_id = self.patient.pk, self.admin.pk
         def operation(index):
-            return PatientService().update_patient(Patient.objects.get(pk=patient_id), {'occupation': f'Synthetic {index}'}, User.objects.get(pk=actor_id), 1).version
+            return PatientService().update_patient(Patient.objects.get(pk=patient_id), {'occupation': f'Synthetic {index}', 'correction_reason': 'Synthetic concurrent correction'}, User.objects.get(pk=actor_id), 1).version
         results = self.run_pair(operation)
         self.assertEqual([state for state, _ in results].count('ok'), 1)
         self.patient.refresh_from_db(); self.assertEqual(self.patient.version, 2)

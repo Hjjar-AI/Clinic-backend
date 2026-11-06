@@ -361,7 +361,7 @@ class MergeHTTPTests(PatientHTTPFixtures):
     def test_target_changes_invalidate_preview_without_partial_merge(self):
         target = self.patient_for()
         preview = self.preview(target)
-        changed = self.write('patch', self.url(patient=target), {'occupation': 'New value', 'version': 1})
+        changed = self.write('patch', self.url(patient=target), {'occupation': 'New value', 'version': 1, 'correction_reason': 'Synthetic correction'})
         self.status(changed, 200)
         self.status(self.merge(preview, target_version=2), 409)
         self.assertFalse(PatientMerge.objects.exists())
@@ -376,7 +376,7 @@ class MergeHTTPTests(PatientHTTPFixtures):
 
     def test_preview_is_bound_to_the_requesting_admin(self):
         preview = self.preview(self.patient_for())
-        other_admin = UserService().create_user('other_merge_admin', PASSWORD, 'Synthetic admin', 'admin')
+        other_admin = UserService().create_user('other_merge_admin', PASSWORD, 'Synthetic admin', 'admin', actor=self.admin)
         other_admin.force_password_change = False
         other_admin.save(update_fields=['force_password_change'])
         self.api.force_login(other_admin)

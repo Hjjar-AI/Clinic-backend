@@ -17,7 +17,7 @@ from .base import ClinicTestCase
 class AppointmentTests(ClinicTestCase):
     def appointment(self, **changes):
         return AppointmentService().create_appointment({'patient': self.patient, 'doctor': self.doctor,
-            'appointment_date': timezone.localdate(), 'appointment_time': '10:00', 'duration_minutes': 30, **changes})
+            'appointment_date': timezone.localdate(), 'appointment_time': '10:00', 'duration_minutes': 30, **changes}, actor=self.admin)
 
     def test_overlaps_rejected_and_adjacent_slot_allowed(self):
         self.appointment()
@@ -35,33 +35,33 @@ class AppointmentTests(ClinicTestCase):
         service = AppointmentService()
         one = self.appointment()
         with self.assertRaises(ValidationError):
-            service.cancel(one, 1)
-        one = service.cancel(one, 1, 'Patient cancelled')
+            service.cancel(one, 1, actor=self.admin)
+        one = service.cancel(one, 1, 'Patient cancelled', actor=self.admin)
         self.appointment()
         with self.assertRaises(ValidationError):
-            service.transition(one, 'scheduled', one.version)
+            service.transition(one, 'scheduled', one.version, actor=self.admin)
 
     def test_completed_appointment_cannot_move_or_archive(self):
         service = AppointmentService()
         row = self.appointment()
-        row = service.transition(row, 'arrived', row.version)
-        row = service.complete(row, row.version)
+        row = service.transition(row, 'arrived', row.version, actor=self.admin)
+        row = service.complete(row, row.version, actor=self.admin)
         with self.assertRaises(ValidationError):
-            service.update_appointment(row, {'appointment_time': '12:00'}, row.version)
+            service.update_appointment(row, {'appointment_time': '12:00'}, row.version, actor=self.admin)
         with self.assertRaises(ValidationError):
-            service.archive(row, row.version)
+            service.archive(row, row.version, actor=self.admin)
 
     def test_schedule_update_preserves_associations_and_resets_reminders(self):
         service = AppointmentService()
         row = self.appointment()
         row.reminder_sent = row.reminder_sent_hour = True
         row.save()
-        updated = service.update_appointment(row, {'patient': self.patient, 'doctor': self.doctor, 'appointment_time': '12:00'}, 1)
+        updated = service.update_appointment(row, {'patient': self.patient, 'doctor': self.doctor, 'appointment_time': '12:00'}, 1, actor=self.admin)
         self.assertFalse(updated.reminder_sent)
         self.assertFalse(updated.reminder_sent_hour)
         self.assertEqual(updated.version, 2)
         with self.assertRaises(ConflictError):
-            service.update_appointment(updated, {'notes': 'stale'}, 1)
+            service.update_appointment(updated, {'notes': 'stale'}, 1, actor=self.admin)
 
     def test_calendar_includes_only_requested_day_and_scope(self):
         self.appointment()
@@ -79,11 +79,35 @@ class AppointmentTests(ClinicTestCase):
 class BillingTests(ClinicTestCase):
     def invoice(self, **changes):
         return BillingService().create_invoice({'patient': self.patient,
-            'lines': [{'description': 'Synthetic service', 'quantity': 1, 'unit_price': '0.10'}], 'tax': '0.20', **changes})
+            'lines': [{'description': 'Synthetic service', 'quantity': 1, 'unit_price': '0.10'}], 'tax': '0.20', **changes}, actor=self.admin)
 
     def test_fractional_total_and_full_discount_satisfy_database_constraints(self):
         self.assertEqual(self.invoice().final_amount, Decimal('0.30'))
         self.assertEqual(self.invoice(discount='0.30').final_amount, Decimal('0.00'))
+
+    def test_fractional_line_rounding_uses_exact_half_up_arithmetic(self):
+        from decimal import ROUND_HALF_UP
+        for quantity in ('0.01', '0.15', '1.15', '2.85', '3.33'):
+            for price in ('0.05', '0.10', '0.50', '1.10', '2.50'):
+                with self.subTest(quantity=quantity, price=price):
+                    invoice = self.invoice(lines=[{'description': 'Synthetic fractional line', 'quantity': quantity, 'unit_price': price}])
+                    expected = (Decimal(quantity) * Decimal(price)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    line = invoice.lines.get()
+                    self.assertEqual(line.amount, expected)
+                    self.assertEqual(invoice.total_amount, expected)
+                    line.amount += Decimal('0.01')
+                    with self.assertRaises(ValidationError):
+                        line.full_clean()
+
+    def test_header_edits_preserve_existing_invoice_lines(self):
+        service = BillingService()
+        invoice = self.invoice(lines=[{'description': 'First', 'quantity': '2.00', 'unit_price': '1.25'}, {'description': 'Second', 'quantity': '1.00', 'unit_price': '3.00'}])
+        before = list(invoice.lines.values())
+        updated = service.update_invoice(invoice, {'notes': 'Synthetic header edit', 'total_amount': '5.50'}, invoice.version, actor=self.admin)
+        self.assertEqual(list(updated.lines.values()), before)
+        with self.assertRaises(ValidationError):
+            service.update_invoice(updated, {'total_amount': '6.00'}, updated.version, actor=self.admin)
+        self.assertEqual(list(updated.lines.values()), before)
 
     def test_nonfinite_overflow_fractional_cents_and_excess_discount(self):
         for changes in ({'tax': 'NaN'}, {'tax': 'Infinity'}, {'tax': '0.001'}, {'tax': '100000000'}, {'discount': '0.31'}, {'currency': 'BADCODE'}):
@@ -107,9 +131,9 @@ class BillingTests(ClinicTestCase):
         self.assertEqual(row.paid_by_id, self.admin.pk)
         self.assertIsNotNone(row.paid_at)
         with self.assertRaises(ValidationError):
-            service.update_invoice(row, {'notes': 'Changed'}, row.version)
+            service.update_invoice(row, {'notes': 'Changed'}, row.version, actor=self.admin)
         with self.assertRaises(ValidationError):
-            service.delete_invoice(row, row.version)
+            service.delete_invoice(row, row.version, actor=self.admin)
 
     def test_mismatched_visit_or_archived_patient_rejected(self):
         other = self.patient_for()
@@ -128,6 +152,7 @@ class BillingTests(ClinicTestCase):
 
 class TaskNotificationTests(ClinicTestCase):
     def test_nonadmin_assignment_and_scope(self):
+        self.grant(self.doctor, 'manage_tasks')
         service = TaskService()
         row = service.create_task(self.doctor, {'title': 'Synthetic task'})
         self.assertEqual(row.assigned_to_id, self.doctor.pk)
@@ -136,29 +161,32 @@ class TaskNotificationTests(ClinicTestCase):
         self.assertFalse(service.get_for_user(self.other_doctor).filter(pk=row.pk).exists())
 
     def test_completion_reopen_and_active_deletion_guards(self):
+        self.grant(self.doctor, 'manage_tasks')
         service = TaskService()
         row = service.create_task(self.doctor, {'title': 'Synthetic task'})
         with self.assertRaises(ValidationError):
-            service.delete_task(row, row.version)
+            service.delete_task(row, row.version, actor=self.admin)
         row = service.complete_task(row, self.doctor, row.version)
         self.assertEqual(row.completed_by_id, self.doctor.pk)
         with self.assertRaises(ValidationError):
-            service.update_task(row, {'title': 'Changed'}, row.version)
+            service.update_task(row, {'title': 'Changed'}, row.version, actor=self.admin)
         row = service.activate_task(row, self.doctor, row.version)
         self.assertIsNone(row.completed_at)
         self.assertIsNone(row.completed_by_id)
 
     def test_task_update_protected_fields_and_stale_version(self):
+        self.grant(self.doctor, 'manage_tasks')
         service = TaskService()
         row = service.create_task(self.doctor, {'title': 'Synthetic task'})
-        changed = service.update_task(row, {'status': 'completed', 'user': self.other_doctor, 'order': 99}, 1)
+        changed = service.update_task(row, {'status': 'completed', 'user': self.other_doctor, 'order': 99}, 1, actor=self.admin)
         self.assertEqual(changed.status, 'open')
         self.assertEqual(changed.user_id, self.doctor.pk)
         self.assertNotEqual(changed.order, 99)
         with self.assertRaises(ConflictError):
-            service.update_task(changed, {'title': 'Stale'}, 1)
+            service.update_task(changed, {'title': 'Stale'}, 1, actor=self.admin)
 
     def test_reorder_validates_duplicates_and_scope(self):
+        self.grant(self.doctor, 'manage_tasks')
         service = TaskService()
         one = service.create_task(self.doctor, {'title': 'One'})
         two = service.create_task(self.doctor, {'title': 'Two'})

@@ -83,5 +83,12 @@ class InvoiceLine(models.Model):
         ordering = ['order', 'pk']
         constraints = [
             check_constraint(condition=models.Q(quantity__gt=0, quantity__lte=Decimal('999999.99'), unit_price__gte=0, amount__gte=0), name='invoice_line_amounts_valid'),
-            check_constraint(condition=models.Q(amount=Round(models.F('quantity') * models.F('unit_price'), precision=2)), name='invoice_line_amount_matches'),
         ]
+
+    def clean(self):
+        super().clean()
+        # SQLite multiplies decimal columns as floats; enforce exact half-up
+        # arithmetic in Python rather than a backend-dependent SQL ROUND check.
+        if self.quantity is not None and self.unit_price is not None and self.amount is not None:
+            from apps.patients.integrity import validate_links
+            validate_links(self)

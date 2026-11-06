@@ -28,7 +28,7 @@ class ClinicalOwnershipRegressions(ClinicTestCase):
     def test_unchanged_national_id_does_not_retire_other_country_identifiers(self):
         patient = self.patient_for(national_id='1234567890')
         foreign = PatientIdentifier.objects.create(patient=patient, identifier_type='national_id', value='1234567890', issuing_country='SY', created_by=self.admin)
-        PatientService().update_patient(patient, {'occupation': 'Synthetic teacher', 'national_id': patient.national_id}, self.admin, patient.version)
+        PatientService().update_patient(patient, {'occupation': 'Synthetic teacher', 'national_id': patient.national_id, 'correction_reason': 'Synthetic occupation correction'}, self.admin, patient.version)
         foreign.refresh_from_db()
         self.assertTrue(foreign.is_active)
         self.assertEqual(PatientIdentifier.objects.filter(patient=patient, is_active=True).count(), 2)
@@ -53,25 +53,30 @@ class ClinicalOwnershipRegressions(ClinicTestCase):
         patient.refresh_from_db()
         self.assertEqual(patient.important_notes, '')
 
-    def test_followup_repeat_is_noop_and_different_terminal_outcome_is_rejected(self):
-        visit = self.visit_for(follow_up_date=timezone.localdate() + timedelta(days=1))
-        visit = VisitService().complete_follow_up(visit, self.doctor, visit.version, 'completed')
-        state = (visit.version, visit.follow_up_completed_at, visit.follow_up_completed_by_id)
-        repeated = VisitService().complete_follow_up(visit, self.doctor, visit.version, 'completed')
-        self.assertEqual((repeated.version, repeated.follow_up_completed_at, repeated.follow_up_completed_by_id), state)
+    def test_followup_repeat_retains_outcome_stamps_and_different_terminal_outcome_is_rejected(self):
+        visit = self.visit_for(follow_up_input={'due_date': timezone.localdate() + timedelta(days=1)})
+        self.patient.refresh_from_db()
+        records = PatientRecordService()
+        fields = {'status': 'completed', 'outcome_reason': 'Synthetic completion'}
+        row, version = records.save(self.patient, 'follow-ups', fields, self.doctor, self.patient.version, visit.follow_up_id, reason='Synthetic completion')
+        state = (row.outcome_at, row.outcome_by_id)
+        repeated, version = records.save(self.patient, 'follow-ups', fields, self.doctor, version, row.pk, reason='Synthetic completion')
+        self.assertEqual((repeated.outcome_at, repeated.outcome_by_id), state)
         with self.assertRaises(ValidationError):
-            VisitService().complete_follow_up(repeated, self.doctor, repeated.version, 'missed')
+            records.save(self.patient, 'follow-ups', {'status': 'missed'}, self.doctor, version, row.pk, reason='Synthetic different outcome')
 
     def test_rescheduled_followup_retains_terminal_occurrence_and_clears_evidence(self):
-        visit = self.visit_for(follow_up_date=timezone.localdate() + timedelta(days=1))
-        visit = VisitService().complete_follow_up(visit, self.doctor, visit.version, 'completed')
-        VisitService().update_visit(visit, {'follow_up_date': timezone.localdate() + timedelta(days=2)}, self.doctor, visit.version)
+        visit = self.visit_for(follow_up_input={'due_date': timezone.localdate() + timedelta(days=1)})
+        self.patient.refresh_from_db()
+        PatientRecordService().save(self.patient, 'follow-ups', {'status': 'completed', 'outcome_reason': 'Synthetic completion'}, self.doctor, self.patient.version, visit.follow_up_id, reason='Synthetic completion')
+        visit.refresh_from_db()
+        visit = VisitService().update_visit(visit, {'follow_up_input': {'due_date': timezone.localdate() + timedelta(days=2), 'reason': 'Synthetic new occurrence'}}, self.doctor, visit.version)
         rows = PatientFollowUp.objects.filter(source_visit=visit)
-        current = rows.get(is_active=True)
+        current = rows.get(pk=visit.follow_up_id)
         self.assertEqual(current.status, 'pending')
         self.assertIsNone(current.completed_visit_id)
         self.assertEqual(current.outcome_reason, '')
-        self.assertEqual(rows.filter(is_active=False, status='completed').count(), 1)
+        self.assertEqual(rows.filter(status='completed').count(), 1)
 
     def test_unapproved_visit_cannot_be_attached_as_completed_followup_evidence(self):
         visit = self.visit_for()
@@ -94,7 +99,7 @@ class ScaleAndApprovedRiskRegressions(ClinicTestCase):
         scale = ClinicalScale.objects.create(name='Synthetic hundred-question scale')
         ScaleField.objects.bulk_create([ScaleField(scale=scale, label=f'Synthetic {index}') for index in range(100)])
         with self.assertRaises(ValidationError):
-            ScaleService().add_field(scale, {'label': 'Question 101'}, scale.version)
+            ScaleService().add_field(scale, {'label': 'Question 101'}, scale.version, actor=self.admin)
         scale.refresh_from_db()
         self.assertEqual(scale.version, 1)
         self.assertEqual(scale.fields.count(), 100)
@@ -111,7 +116,7 @@ class ScaleAndApprovedRiskRegressions(ClinicTestCase):
         scale = ClinicalScale.objects.create(name='Synthetic snapshot')
         field = ScaleField.objects.create(scale=scale, label='Original label', min_val=0, max_val=10, step=1)
         normalized = normalize_scale_response({'scale_id': scale.pk, 'responses': {str(field.pk): 7}})
-        scale.is_active = False; scale.save(update_fields=['is_active'])
+        scale.soft_delete(self.admin, 'Synthetic retirement')
         with self.assertRaises(ValidationError):
             normalize_scale_response({'scale_id': scale.pk, 'responses': {str(field.pk): 7}})
         restored = normalize_scale_response({'scale_id': scale.pk, 'responses': {str(field.pk): 8}}, normalized['responses']['__definition'], 'Original name')
@@ -124,10 +129,10 @@ class ReportsAndOccurrenceRegressions(ClinicTestCase):
     def test_paid_totals_keep_separate_currencies_and_exclude_unpaid_invoices(self):
         service = BillingService()
         for currency, amount in [('SYP', '12.50'), ('USD', '3.25'), ('SYP', '2.50')]:
-            row = service.create_invoice({'patient': self.patient, 'currency': currency, 'total_amount': amount})
+            row = service.create_invoice({'patient': self.patient, 'currency': currency, 'total_amount': amount}, actor=self.admin)
             row = service.transition(row, 'issued', self.admin, row.version)
             service.transition(row, 'paid', self.admin, row.version, payment_method='cash')
-        service.create_invoice({'patient': self.patient, 'currency': 'USD', 'total_amount': '99.00'})
+        service.create_invoice({'patient': self.patient, 'currency': 'USD', 'total_amount': '99.00'}, actor=self.admin)
         report = StatisticsService().get_reconciliation()['invoices']
         self.assertEqual({key: Decimal(value) for key, value in report['paid_by_currency'].items()}, {'SYP': Decimal('15.00'), 'USD': Decimal('3.25')})
         self.assertNotIn('paid_amount', report)
@@ -144,6 +149,7 @@ class ReportsAndOccurrenceRegressions(ClinicTestCase):
         self.assertEqual(rows[self.other_doctor.pk]['visit_count'], 0)
 
     def test_task_reopen_creates_new_reminder_occurrence_even_on_same_due_date(self):
+        self.grant(self.doctor, 'manage_tasks')
         service = TaskService(); row = service.create_task(self.doctor, {'title': 'Synthetic reminder', 'due_date': timezone.localdate()})
         generation = row.reminder_generation
         row = service.complete_task(row, self.doctor, row.version)
@@ -152,24 +158,24 @@ class ReportsAndOccurrenceRegressions(ClinicTestCase):
         self.assertFalse(row.reminder_sent)
 
     def test_appointment_reopen_refreshes_occurrence_and_rechecks_clinician_eligibility(self):
-        service = AppointmentService(); row = service.create_appointment({'patient': self.patient, 'doctor': self.doctor, 'appointment_date': timezone.localdate() + timedelta(days=1), 'appointment_time': '10:00'})
-        row = service.cancel(row, row.version, 'Synthetic cancellation'); generation = row.reminder_generation
-        row = service.transition(row, 'scheduled', row.version)
+        service = AppointmentService(); row = service.create_appointment({'patient': self.patient, 'doctor': self.doctor, 'appointment_date': timezone.localdate() + timedelta(days=1), 'appointment_time': '10:00'}, actor=self.admin)
+        row = service.cancel(row, row.version, 'Synthetic cancellation', actor=self.admin); generation = row.reminder_generation
+        row = service.transition(row, 'scheduled', row.version, actor=self.admin)
         self.assertNotEqual(row.reminder_generation, generation)
-        row = service.cancel(row, row.version, 'Synthetic cancellation')
+        row = service.cancel(row, row.version, 'Synthetic cancellation', actor=self.admin)
         self.doctor.is_active = False; self.doctor.save(update_fields=['is_active'])
         with self.assertRaises(ValidationError):
-            service.transition(row, 'scheduled', row.version)
+            service.transition(row, 'scheduled', row.version, actor=self.admin)
         row.refresh_from_db(); self.assertEqual(row.status, 'cancelled')
 
     def test_configured_appointment_duration_is_used_when_omitted(self):
         with self.settings(DEFAULT_APPOINTMENT_DURATION=45):
-            row = AppointmentService().create_appointment({'patient': self.patient, 'doctor': self.doctor, 'appointment_date': timezone.localdate() + timedelta(days=1), 'appointment_time': '11:00'})
+            row = AppointmentService().create_appointment({'patient': self.patient, 'doctor': self.doctor, 'appointment_date': timezone.localdate() + timedelta(days=1), 'appointment_time': '11:00'}, actor=self.admin)
         self.assertEqual(row.duration_minutes, 45)
 
     def test_stale_catalog_preview_cannot_replace_current_inventory(self):
         service = OptionsImportService(); digest = service.inventory_digest('diagnosis')
         DiagnosisOption.objects.create(code='KEEP', english_name='Synthetic existing', arabic_name='اصطناعي')
         with self.assertRaises(ConflictError):
-            service.import_diagnoses(io.BytesIO(b'code,english,arabic\nNEW,Synthetic new,Synthetic\n'), 'replace', expected_inventory=digest)
+            service.import_diagnoses(io.BytesIO(b'code,english,arabic\nNEW,Synthetic new,Synthetic\n'), 'replace', expected_inventory=digest, actor=self.admin)
         self.assertEqual(list(DiagnosisOption.objects.values_list('code', flat=True)), ['KEEP'])

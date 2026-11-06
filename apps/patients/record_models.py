@@ -42,7 +42,7 @@ class PatientIdentifier(PatientRecord):
         indexes = [models.Index(fields=['identifier_type', 'value'])]
         constraints = [
             retirement_constraint('patients_patientidentifier_retirement_valid'),
-            verification_constraint('patients_patientidentifier_verification_valid', ''),
+            verification_constraint('patients_patientidentifier_verification_stamps_valid', ''),
             check_constraint(condition=models.Q(identifier_type__in=IdentifierType.values), name='patients_patientidentifier_identifier_type_valid'),
             check_constraint(condition=models.Q(verification__in=[item[0] for item in VERIFICATION]), name='patients_patientidentifier_verification_valid'),
             models.UniqueConstraint(fields=['patient', 'identifier_type', 'value', 'issuer', 'issuing_country'], condition=Q(is_active=True), name='unique_patient_identifier'),
@@ -80,7 +80,7 @@ class PatientRepresentative(PatientRecord):
     class Meta:
         constraints = [
             retirement_constraint('patients_patientrepresentative_retirement_valid'),
-            verification_constraint('patients_patientrepresentative_verification_valid', ''),
+            verification_constraint('patients_patientrepresentative_verification_stamps_valid', ''),
             check_constraint(condition=models.Q(authority_scope__in=AuthorityScope.values), name='patients_patientrepresentative_authority_scope_valid'),
             check_constraint(condition=models.Q(verification__in=[item[0] for item in VERIFICATION]), name='patients_patientrepresentative_verification_valid'),
             check_constraint(condition=Q(valid_from__isnull=True) | Q(valid_until__isnull=True) | Q(valid_until__gte=models.F('valid_from')), name='representative_dates_valid'),

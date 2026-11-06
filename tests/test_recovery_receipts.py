@@ -31,7 +31,7 @@ class RecoveryReceiptTests(ClinicTransactionTestCase):
 
     def test_restored_admin_can_replay_receipt_after_original_initiator_was_removed(self):
         backup = BackupCreatorService().create_full_backup().getvalue()
-        initiator = UserService().create_user('synthetic_later_admin', PASSWORD, 'Synthetic later admin', 'admin')
+        initiator = UserService().create_user('synthetic_later_admin', PASSWORD, 'Synthetic later admin', 'admin', actor=self.admin)
         initiator.is_superuser = True; initiator.force_password_change = False; initiator.save()
         self.login_as(initiator); token = self.preview(backup)
         extra = self.patient_for(first_name='Synthetic extra inventory')

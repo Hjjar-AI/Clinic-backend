@@ -75,7 +75,7 @@ class VisitService:
                     raise ValidationError({key: ['قائمة غير صالحة أو كبيرة جداً']})
                 result[key] = value
         if 'clinical_data' in data:
-            data['clinical_data'] = clinical_object(data['clinical_data'])
+            data['clinical_data'] = clinical_object(data['clinical_data'], command=True)
         for field in ('signed_by', 'signed_by_id', 'date_signed', 'signed_at'):
             if field in data:
                 raise ValidationError({field: ['تحدد بيانات التوقيع بواسطة النظام']})

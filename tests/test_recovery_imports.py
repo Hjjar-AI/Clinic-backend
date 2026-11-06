@@ -38,14 +38,14 @@ class ImportTests(ClinicTestCase):
         self.assertEqual(Patient.objects.count(), count)
         result = service.import_patients(io.BytesIO(data), self.doctor.pk, self.admin.pk)
         self.assertEqual(result['added'], 1)
-        self.assertIsNone(Patient.objects.get(national_id='1234567890').dob_year)
+        self.assertIsNone(Patient.objects.get(primary_identifier__value='1234567890').dob_year)
 
     def test_duplicate_import_keeps_identifier_with_warning(self):
         self.patient_for(national_id='1234567890')
         result = BulkImportService().import_patients(io.BytesIO(patient_csv()), self.doctor.pk, self.admin.pk)
         self.assertEqual(result['added'], 1)
         self.assertTrue(result['warnings'])
-        self.assertEqual(Patient.objects.filter(national_id='1234567890').count(), 2)
+        self.assertEqual(Patient.objects.filter(primary_identifier__value='1234567890').count(), 2)
 
     def test_csv_duplicate_headers_and_invalid_encoding_rejected(self):
         for data in (b'a,a\n1,2\n', b'a,b\n1\n', b'', b'\xff\xfe\x80'):
@@ -82,7 +82,7 @@ class ImportTests(ClinicTestCase):
         # Public diagnosis imports use three positional columns.
         data = 'code,english,arabic\nNEW,Synthetic,تجريبي\n,Missing,ناقص\n'.encode()
         with self.assertRaises(ValidationError):
-            OptionsImportService().import_diagnoses(io.BytesIO(data), 'replace')
+            OptionsImportService().import_diagnoses(io.BytesIO(data), 'replace', actor=self.admin)
         row.refresh_from_db()
         self.assertTrue(row.is_active)
         self.assertEqual(DiagnosisOption.objects.count(), 1)

@@ -135,7 +135,7 @@ class VisitSerializer(StrictFieldsMixin, serializers.ModelSerializer):
 
     def validate_clinical_data(self, value):
         from .input_validation import clinical_object
-        return clinical_object(value)
+        return clinical_object(value, command=True)
 
     def create(self, validated_data):
         from .services import VisitService

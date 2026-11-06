@@ -93,7 +93,7 @@ class DurableBoundaryTests(ClinicTransactionTestCase):
 
     def test_expired_operation_key_is_not_reused_as_new_mutation(self):
         self.write('post', '/api/v1/tasks/', {'title': 'Synthetic expired'}, 'synthetic-expired-key')
-        IdempotencyOperation.objects.filter(key='synthetic-expired-key').update(expires_at=timezone.now() - timedelta(seconds=1))
+        IdempotencyOperation.objects.filter(key='synthetic-expired-key').update(created_at=timezone.now() - timedelta(days=31), expires_at=timezone.now() - timedelta(seconds=1))
         result = self.write('post', '/api/v1/tasks/', {'title': 'Synthetic expired'}, 'synthetic-expired-key')
         self.assertEqual(result.status_code, 410)
         self.assertEqual(result.json()['error']['code'], 'operation_expired')

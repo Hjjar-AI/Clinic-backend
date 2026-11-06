@@ -66,10 +66,11 @@ class PatientTests(ClinicTestCase):
 
     def test_historical_author_keeps_access_after_team_removal_and_archive(self):
         self.visit_for()
-        member = PatientCareTeam.objects.get(patient=self.patient, user=self.doctor)
-        member.ended_at = timezone.now()
-        member.save()
-        PatientService().soft_delete_patient(self.patient, self.admin, 1)
+        service = PatientService()
+        self.patient.refresh_from_db()
+        service.remove_care_team_member(self.patient, self.doctor.pk, self.patient.version, self.admin, 'Synthetic reassignment')
+        self.patient.refresh_from_db()
+        service.soft_delete_patient(self.patient, self.admin, self.patient.version)
         self.assertFalse(Patient.objects.filter(pk=self.patient.pk).exists())
         self.assertTrue(accessible_patients(self.doctor, True).filter(pk=self.patient.pk).exists())
 
@@ -85,7 +86,7 @@ class PatientTests(ClinicTestCase):
 
     def test_only_admin_archives_and_restore_checks_version(self):
         service = PatientService()
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(PermissionDenied):
             service.soft_delete_patient(self.patient, self.doctor, 1)
         service.soft_delete_patient(self.patient, self.admin, 1)
         self.patient.refresh_from_db()
@@ -146,7 +147,7 @@ class LongitudinalRecordTests(ClinicTestCase):
         service = PatientRecordService()
         row, version = service.save(self.patient, 'follow-ups', {'title': 'Review', 'due_date': timezone.localdate()}, self.doctor, 1)
         row, version = service.save(self.patient, 'follow-ups', {'status': 'completed', 'outcome_reason': 'Reviewed'}, self.doctor, version, row.pk, reason='Review completed')
-        self.assertEqual(row.completed_by_id, self.doctor.pk)
+        self.assertEqual(row.outcome_by_id, self.doctor.pk)
         with self.assertRaises(ValidationError):
             service.save(self.patient, 'follow-ups', {'status': 'pending'}, self.doctor, version, row.pk, reason='Reopen')
 

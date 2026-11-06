@@ -14,7 +14,12 @@ def text(value, field, maximum):
     return value
 
 
-def clinical_object(value):
+def clinical_object(value, *, command=False):
+    if command and isinstance(value, dict) and isinstance(value.get('instruction_acknowledgement'), dict):
+        value = {**value, 'instruction_acknowledgement': {
+            key: item for key, item in value['instruction_acknowledgement'].items()
+            if key not in {'recorded_by_id', 'recorded_at'}
+        }}
     from core.json_schemas import narrative_schema
     return narrative_schema(value, 'clinical_data')
 

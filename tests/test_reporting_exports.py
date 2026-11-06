@@ -33,7 +33,7 @@ class ReportingTests(ClinicTestCase):
     def test_reconciliation_revenue_counts_only_paid_invoices(self):
         service = BillingService()
         for status, amount in [('draft', '90.00'), ('issued', '70.00'), ('paid', '12.50'), ('cancelled', '80.00')]:
-            invoice = service.create_invoice({'patient': self.patient, 'total_amount': amount})
+            invoice = service.create_invoice({'patient': self.patient, 'total_amount': amount}, actor=self.admin)
             if status in {'issued', 'paid'}:
                 invoice = service.transition(invoice, 'issued', self.admin, invoice.version)
             if status == 'paid':
@@ -49,8 +49,8 @@ class ReportingTests(ClinicTestCase):
         service = AppointmentService()
         for hour in ('10:00', '11:00'):
             row = service.create_appointment({'patient': self.patient, 'doctor': self.doctor,
-                'appointment_date': timezone.localdate(), 'appointment_time': hour, 'duration_minutes': 30})
-        service.cancel(row, row.version, 'Synthetic cancellation')
+                'appointment_date': timezone.localdate(), 'appointment_time': hour, 'duration_minutes': 30}, actor=self.admin)
+        service.cancel(row, row.version, 'Synthetic cancellation', actor=self.admin)
         stats = StatisticsService()
         self.assertEqual(stats.get_total_appointments(self.doctor), 1)
         self.assertEqual(stats.get_appointments_today(self.doctor), 1)

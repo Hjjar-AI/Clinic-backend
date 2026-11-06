@@ -107,7 +107,7 @@ class VersionScopeAPITests(ClinicTestCase):
         response = self.write('post', '/api/v1/patients/', {'first_name': 'Synthetic', 'surname': 'Suite'})
         self.assertEqual(response.status_code, 201)
         identifier = response.json()['data']['id']
-        response = self.write('patch', f'/api/v1/patients/{identifier}/', {'occupation': 'Teacher', 'version': 1})
+        response = self.write('patch', f'/api/v1/patients/{identifier}/', {'occupation': 'Teacher', 'version': 1, 'correction_reason': 'Synthetic correction'})
         self.assertEqual(response.status_code, 200)
         response = self.write('patch', f'/api/v1/patients/{identifier}/', {'occupation': 'Stale', 'version': 1})
         self.assertEqual(response.status_code, 409)
@@ -123,7 +123,7 @@ class VersionScopeAPITests(ClinicTestCase):
                 self.assertIn('version', result.json()['error']['errors'])
 
     def test_if_match_only_update_accepted(self):
-        result = self.write('patch', f'/api/v1/patients/{self.patient.pk}/', {'occupation': 'Teacher'}, HTTP_IF_MATCH='"1"')
+        result = self.write('patch', f'/api/v1/patients/{self.patient.pk}/', {'occupation': 'Teacher', 'correction_reason': 'Synthetic correction'}, HTTP_IF_MATCH='"1"')
         self.assertEqual(result.status_code, 200)
         self.patient.refresh_from_db()
         self.assertEqual(self.patient.version, 2)
@@ -146,6 +146,23 @@ class VersionScopeAPITests(ClinicTestCase):
         self.assertEqual(result.json()['data']['version'], 2)
         result = self.write('post', f'/api/v1/patients/{self.patient.pk}/records/', {'kind': 'contacts', 'fields': {'name': 'Stale'}, 'version': 1})
         self.assertEqual(result.status_code, 409)
+
+    def test_scale_question_command_separates_parent_version_from_strict_fields(self):
+        from apps.clinical.models import ClinicalScale
+        scale = ClinicalScale.objects.create(name='Synthetic parent-version scale')
+        url = f'/api/v1/scales/{scale.pk}/add-field/'
+        for version in (None, True, 1.5):
+            with self.subTest(version=version):
+                result = self.write('post', url, {'label': 'Synthetic question', 'version': version})
+                self.assertEqual(result.status_code, 400, result.content)
+        result = self.write('post', url, {'label': 'Synthetic question', 'version': 1, 'unexpected': 'value'})
+        self.assertEqual(result.status_code, 400, result.content)
+        result = self.write('post', url, {'label': 'Synthetic question', 'version': 1})
+        self.assertEqual(result.status_code, 201, result.content)
+        self.assertEqual(result['X-Resource-Version'], '2')
+        result = self.write('post', url, {'label': 'Stale question', 'version': 1})
+        self.assertEqual(result.status_code, 409, result.content)
+        self.assertEqual(scale.fields.count(), 1)
 
     def test_invalid_sort_and_cursor_are_structured_errors(self):
         for params in ({'sort_by': 'password'}, {'cursor': 'invalid-cursor'}):

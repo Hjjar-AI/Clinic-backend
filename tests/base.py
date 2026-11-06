@@ -5,6 +5,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from apps.accounts.services import UserService
+from apps.accounts.models import User
 from apps.patients.services import PatientService
 from apps.visits.services import VisitService
 
@@ -15,14 +16,15 @@ class ClinicFixtures:
     @classmethod
     def setUpTestData(cls):
         service = UserService()
-        cls.admin = service.create_user('suite_admin', PASSWORD, 'Suite Admin', 'admin')
+        cls.admin = User.objects.create_superuser('suite_admin', PASSWORD, full_name='Suite Admin', role='admin')
+        service._apply_role_group(cls.admin, 'admin')
         cls.admin.is_superuser = True
         cls.admin.is_staff = True
         cls.admin.force_password_change = False
         cls.admin.save()
-        cls.doctor = service.create_user('suite_doctor', PASSWORD, 'Suite Doctor', 'doctor')
-        cls.other_doctor = service.create_user('suite_other', PASSWORD, 'Other Doctor', 'doctor')
-        cls.receptionist = service.create_user('suite_reception', PASSWORD, 'Suite Reception', 'receptionist')
+        cls.doctor = service.create_user('suite_doctor', PASSWORD, 'Suite Doctor', 'doctor', actor=cls.admin)
+        cls.other_doctor = service.create_user('suite_other', PASSWORD, 'Other Doctor', 'doctor', actor=cls.admin)
+        cls.receptionist = service.create_user('suite_reception', PASSWORD, 'Suite Reception', 'receptionist', actor=cls.admin)
         for user in (cls.doctor, cls.other_doctor, cls.receptionist):
             user.force_password_change = False
             user.save(update_fields=['force_password_change'])
@@ -41,6 +43,12 @@ class ClinicFixtures:
         session = self.api.session
         session['login_time'] = timezone.now().isoformat()
         session.save()
+
+    def grant(self, user, *codenames):
+        from django.contrib.auth.models import Permission
+        user.user_permissions.add(*Permission.objects.filter(codename__in=codenames))
+        user.clear_permission_cache()
+        return user
 
     def patient_for(self, actor=None, **changes):
         return PatientService().create_patient({'first_name': 'مريض', 'surname': 'اصطناعي', **changes}, actor or self.admin)

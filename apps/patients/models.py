@@ -74,7 +74,7 @@ class Patient(SoftDeleteModel, TimeStampedModel):
         ]
         constraints = [
             archive_constraint('patients_patient_archive_valid'),
-            verification_constraint('patients_patient_verification_valid', 'identity_'),
+            verification_constraint('patients_patient_verification_stamps_valid', 'identity_'),
             check_constraint(condition=models.Q(identity_verification__in=[item[0] for item in VERIFICATION]), name='patients_patient_identity_verification_valid'),
             check_constraint(condition=models.Q(preferred_contact_channel__in=[*ContactChannel.values, '']), name='patients_patient_preferred_contact_channel_valid'),
             check_constraint(condition=models.Q(allergy_status__in=SummaryStatus.values), name='patients_patient_allergy_status_valid'),
@@ -197,7 +197,7 @@ class PatientDocument(SoftDeleteModel, TimeStampedModel, StoredFileMetadata):
     class Meta:
         constraints = [
             archive_constraint('patients_patientdocument_archive_valid'),
-            verification_constraint('patients_patientdocument_verification_valid', ''),
+            verification_constraint('patients_patientdocument_verification_stamps_valid', ''),
             check_constraint(condition=models.Q(verification__in=[item[0] for item in VERIFICATION]), name='patients_patientdocument_verification_valid'),
         ]
 

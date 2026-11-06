@@ -20,6 +20,7 @@ settings.REST_FRAMEWORK = {**settings.REST_FRAMEWORK, 'DEFAULT_THROTTLE_RATES': 
 django.setup()
 from django.core.management import call_command
 from apps.accounts.services import UserService
+from apps.accounts.models import User
 from apps.patients.services import PatientService
 from apps.notifications.services import NotificationService
 from tests.base import PASSWORD
@@ -29,7 +30,11 @@ if __name__ == '__main__':
     call_command('migrate', run_syncdb=True, verbosity=0)
     users = {}
     for role in ('admin', 'doctor', 'receptionist'):
-        user = UserService().create_user(f'browser_{role}', PASSWORD, f'Synthetic {role}', role)
+        if role == 'admin':
+            user = User.objects.create_superuser('browser_admin', PASSWORD, full_name='Synthetic admin', role='admin')
+            UserService()._apply_role_group(user, role)
+        else:
+            user = UserService().create_user(f'browser_{role}', PASSWORD, f'Synthetic {role}', role, actor=users['admin'])
         user.force_password_change = False
         if role == 'admin':
             user.is_superuser = True
@@ -39,7 +44,7 @@ if __name__ == '__main__':
     PatientService().create_patient({'first_name': 'اختبار', 'surname': 'المتصفح'}, users['doctor'])
     # Each viewport owns unread notices so read/delete checks do not share state.
     for viewport in ('desktop', 'tablet', 'mobile'):
-        user = UserService().create_user(f'browser_panel_{viewport}', PASSWORD, 'Synthetic panel user', 'admin')
+        user = UserService().create_user(f'browser_panel_{viewport}', PASSWORD, 'Synthetic panel user', 'admin', actor=users['admin'])
         user.force_password_change = False
         user.save()
         for index in range(2):

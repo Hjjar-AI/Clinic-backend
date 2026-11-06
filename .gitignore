@@ -26,3 +26,11 @@ bin/
 .coverage*
 /htmlcov/
 /.test-artifacts/
+
+# Local reusable verification tools
+/tests/tools/
+
+# Clinic runtime storage
+/media/
+/backups/
+/staticfiles/

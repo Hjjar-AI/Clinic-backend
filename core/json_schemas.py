@@ -79,7 +79,9 @@ def narrative_schema(value, field, *, template=False):
             explained = parse_datetime(ack.get('explained_at', ''))
         except (TypeError, ValueError):
             explained = None
-        if explained is None or timezone.is_naive(explained) or ack.get('recipient') not in {'patient', 'representative', 'both'}:
+        if (explained is None or timezone.is_naive(explained)
+                or not isinstance(ack.get('recipient'), str)
+                or ack['recipient'] not in {'patient', 'representative', 'both'}):
             raise ValidationError({field: ['وقت أو متلقي شرح التعليمات غير صالح']})
         if type(ack.get('clarification_needed')) not in (type(None), bool):
             raise ValidationError({field: ['حالة التوضيح غير صالحة']})

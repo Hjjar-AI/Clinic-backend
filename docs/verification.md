@@ -12,7 +12,7 @@ python -B -m coverage run --source=apps,core --omit='*/migrations/*' tests/run.p
 python -B -m coverage report --omit='*/migrations/*'
 ```
 
-Local reusable probe scripts may be kept in ignored `tests/tools/`; they supplement the suites and record their controlled boundaries explicitly. The backend helper runs from the backend root with `python -B tests/tools/standalone_model_probe.py`.
+Local reusable probe scripts may be kept in ignored `tests/tools/`; they supplement the suites and record their controlled boundaries explicitly. The backend helper runs from the backend root with `python -B tests/tools/standalone_model_probe.py`. The locally saved Linux x64 `tests/tools/prepare_runtime.py` restores Python 3.12.16 (verified archive checksum), existing project pins and PDF inspection tools under ignored `tests/tools/runtime`; it does not open a database. Retained browser PDFs/logs are in frontend `tests/tools/results`, with the inventory/case-evidence audit there. These local tools are ignored rather than distributed project dependencies.
 
 Runner fixes isolated settings/refuses non-memory DB; testing skips clinic .env/migration modules, creates model schema in memory and uses synthetic secrets/hashers/local cache/temp media/backups/static. Optional coverage tooling does not change runtime requirements. Focused modules may be supplied to manage.py test. Never substitute a development clinic database.
 

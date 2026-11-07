@@ -1,15 +1,15 @@
 # MyClinic backend
 
-Django/DRF API **5019**, `/api/v1/`; [Vue frontend](../frontend/README.md) **5173**. Target: modern Windows x64/Linux, Python 3.10–3.12 (3.12 recommended).
+Django/DRF API **5019**, [Vue UI](../frontend/README.md) **5173**. Local Windows/Linux launcher starts both servers, opens the browser and stops both with Ctrl+C. Run from either folder:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements/sqlite.txt
-python manage.py check_runtime --render-pdf
-python manage.py serve --host 127.0.0.1 --port 5019
+./start.sh                 # Linux
+./start.sh --no-browser    # optional
+./start.sh check           # prerequisites; no DB/schema check
 ```
 
-Windows: create with `py -3.12 -m venv .venv`; use `.venv\Scripts\python.exe`. Install [native libraries](docs/setup.md#native-libraries-by-os), configure private `.env`, and prepare schema/accounts deliberately before serving. `serve` performs checks, never migrations/seeding.
+Windows: double-click `start.cmd`, or run `start.cmd check`. Launcher settings live in **backend/.env**: ports, browser, optional Python/Node paths; the frontend proxy follows automatically.
+
+First use: Python 3.10–3.12 (3.12 recommended), Node `^22.18.0 || >=24.12.0`, pnpm and [native libraries](docs/setup.md#native-libraries-by-os). `./start.sh configure` (`start.cmd configure`) creates private `.env`/separate signing keys only when absent. Install backend requirements/frontend dependencies and prepare the intended schema/accounts once: [setup](docs/setup.md#local-launcher). Daily startup performs no installation, migrations or seeding.
 
 [Rules](AGENTS.md) · [Remaining](docs/workCurrent.md) · [Evidence](docs/doneCurrent.md) · [Contracts](docs/contracts.md) · [Setup](docs/setup.md) · [Operations](docs/operations.md) · [Verification](docs/verification.md)

@@ -60,6 +60,29 @@ class AuthenticationAPITests(ClinicTransactionTestCase):
         self.assertEqual(result.status_code, 403)
         self.assertNotIn('sessionid', api.cookies)
 
+    def test_custom_launcher_origin_can_login_with_csrf(self):
+        origin = 'http://127.0.0.1:5175'
+        with self.settings(CSRF_TRUSTED_ORIGINS=[origin]):
+            api, token = self.csrf_client()
+            result = api.post('/api/v1/auth/login/', {'username': self.doctor.username, 'password': PASSWORD},
+                format='json', HTTP_X_CSRFTOKEN=token, HTTP_ORIGIN=origin)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()['data']['user']['id'], self.doctor.pk)
+
+    def test_launcher_trusted_origin_still_rejects_other_origins_and_missing_tokens(self):
+        origin = 'http://127.0.0.1:5175'
+        with self.settings(CSRF_TRUSTED_ORIGINS=[origin]):
+            for claimed, include_token in (('http://untrusted.invalid', True), (origin, False)):
+                with self.subTest(origin=claimed, token=include_token):
+                    api, token = self.csrf_client()
+                    headers = {'HTTP_ORIGIN': claimed}
+                    if include_token:
+                        headers['HTTP_X_CSRFTOKEN'] = token
+                    result = api.post('/api/v1/auth/login/', {'username': self.doctor.username, 'password': PASSWORD},
+                        format='json', **headers)
+                    self.assertEqual(result.status_code, 403)
+                    self.assertNotIn('sessionid', api.cookies)
+
     def test_failed_login_attempts_persist_and_lock_account(self):
         api, token = self.csrf_client()
         with self.settings(MAX_LOGIN_ATTEMPTS=2):

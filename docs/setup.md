@@ -2,6 +2,35 @@
 
 [Entry commands](../README.md) · [Operations](operations.md) · [Verification](verification.md). Use Python 3.10–3.12 (3.12 recommended); Windows 10/11 x64/Linux. Windows 7/Python 3.8 unsupported; macOS unverified.
 
+## Local launcher
+
+From backend or frontend: **`./start.sh`** (Linux), **`start.cmd`** (Windows/double-click). One terminal owns both servers; Ctrl+C stops their processes. `--no-browser` suppresses opening the UI; `check` verifies prerequisites/ports/native PDF without DB access. This is local development only; production remains below.
+
+First-time environment/dependencies, from backend:
+
+```bash
+./start.sh configure
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements/sqlite.txt
+```
+
+Windows: `start.cmd configure`, `py -3.12 -m venv .venv`, then `.venv\Scripts\python.exe -m pip install -r requirements/sqlite.txt`. Choose the requirements file matching your DB. In frontend, run `pnpm install --frozen-lockfile` once. Install native libraries below; prepare the intended fresh schema/accounts explicitly if needed. The launcher never initializes/upgrades a database.
+
+Only backend `.env` is needed for launcher configuration:
+
+```dotenv
+CLINIC_BACKEND_PORT=5019
+CLINIC_FRONTEND_PORT=5173
+CLINIC_OPEN_BROWSER=true
+# CLINIC_PYTHON="/path/to/app/environment/bin/python"
+# CLINIC_NODE="/path/to/node"
+```
+
+Default Python: backend `.venv`, `venv`, then wrapper interpreter. Paths may contain spaces; launcher/network values are literal (no variable expansion). Shell overrides `.env`. Both proxy target and loopback hosts/CORS/CSRF origins follow selected ports; token checks remain required. Other `.env` values keep Django/python-dotenv behavior. Use `CSRF_TRUSTED_ORIGINS` for explicit additional origins.
+
+A missing `.env` is created with separate random keys; existing files/keys remain byte-for-byte unchanged. Missing tools/native libraries or occupied ports yield a remedy. Startup uses Waitress plus Vite directly with strict ports, never pnpm installation/builds. `check`/TCP readiness do not certify database/schema readiness. [Verification limits](doneCurrent.md).
+
 ## Configuration
 
 Copy [.env.example](../.env.example) only if `.env` is absent. Defaults: [base](../config/settings/base.py), [database](../config/settings/database.py). `manage.py` loads `.env`; shell/`--settings` override selection; WSGI defaults production. Restart after environment changes. DB selection never initializes/moves data.
@@ -37,7 +66,7 @@ Use forward slashes; directory lists use `;` on Windows. DLL handles remain aliv
 
 ## Schema and startup
 
-Application migrations were deleted by request; package markers remain. Fresh-schema preparation needs explicit scope; old DB/full-backup compatibility is absent. Never initialize clinic storage for verification.
+Application migrations were deleted by request; package markers remain. Fresh-schema preparation needs explicit scope; old DB/full-backup compatibility is absent. For an intended new empty database, `python manage.py bootstrap` generates schema/default accounts; the launcher never runs it. Never initialize clinic storage for verification.
 
 `bootstrap`/`runserver_auto` perform migrations. Bootstrap `--with-demo-data` seeds, `--with-frontend` installs/builds, `--clean` deletes SQLite/custom migrations. `seed_db` changes defaults/accounts/catalogs/tasks; generated passwords print once and require rotation. These are deliberate operations, not diagnostics.
 

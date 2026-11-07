@@ -18,6 +18,8 @@ Five subprocess SIGKILL checkpoints: invoice before/after commit; full restore a
 
 Ignored `tests/tools/` stores helpers/logs/runtimes. `prepare_runtime.py` restores checksum-verified Linux x64 Python 3.12.16/existing pins/PDF tools; `standalone_model_probe.py` supplements suites. Local interpreter: `tests/tools/runtime/python/bin/python3.12`.
 
+Launcher-only: `python -B -m unittest tests.test_launcher`; related auth/CSRF: `python -B manage.py test tests.test_launcher tests.test_api --settings=config.settings.testing --noinput`. Ignored `tests/tools/launcher_process_probe.py` exercises real Linux sockets/process groups with controlled servers; it never starts clinic services or reads clinic `.env`/data. Native Windows requires its own check.
+
 ## PDF inspection
 
 ```bash

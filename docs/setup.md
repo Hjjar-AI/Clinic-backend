@@ -1,26 +1,31 @@
 # Setup and hosting
 
-Local entry commands are in [README](../README.md); [operations](operations.md) covers data-changing maintenance. `manage.py` loads `.env` before settings selection (development fallback); shell/`--settings` override it; isolated testing skips clinic `.env`. WSGI defaults production. Restart for environment changes; DB selection does not initialize schema or move data.
+[Entry commands](../README.md) · [Operations](operations.md) · [Verification](verification.md). Use Python 3.10–3.12 (3.12 recommended); Windows 10/11 x64/Linux. Windows 7/Python 3.8 unsupported; macOS unverified.
 
-## Dependencies and environment
+## Configuration
 
-Python 3.10–3.12 (3.12 recommended) on modern Windows x64 or Linux for pinned Django 5.0.6/DRF 3.15.1. Windows 7/Python 3.8 are outside this target. `requirements/{sqlite,postgresql,mysql,mariadb}.txt` include shared pins plus selected driver; `cache-{memcached,redis}.txt` adds only client. SQLite is built in, PostgreSQL uses psycopg, MySQL/MariaDB mysqlclient needs client headers if no wheel. External/cache servers and WSGI driver are separate. Other installed Django backends do not imply schema/locking compatibility.
+Copy [.env.example](../.env.example) only if `.env` is absent. Defaults: [base](../config/settings/base.py), [database](../config/settings/database.py). `manage.py` loads `.env`; shell/`--settings` override selection; WSGI defaults production. Restart after environment changes. DB selection never initializes/moves data.
 
-Native PDF/MIME libraries require the OS-specific setup below. WeasyPrint is the PDF renderer; both bundled Cairo/Inter fonts must resolve together from frontend `public/static/fonts`, `dist/static/fonts` or `dist/fonts`, or `PDF_FONT_DIR` from the process environment/`.env`. Missing assets fail rendering; [inspection](verification.md#pdf-inspection).
+- Separate private `DJANGO_SECRET_KEY`/`BACKUP_HMAC_KEY`; retain backup signing keys.
+- `requirements/{sqlite,postgresql,mysql,mariadb}.txt` includes shared pins/driver; `cache-{redis,memcached}.txt` adds clients. Install servers separately; mysqlclient may need native headers.
+- Set DB engine/name/credentials/SSL/options and cache backend/location explicitly. SQLite defaults `data/clinic.db`; production requires external DB/shared cache. MySQL/MariaDB needs InnoDB, utf8mb4 and strict mode.
+- `TIME_ZONE=Asia/Damascus`; business dates are clinic-local. Match credentialed CORS/session/CSRF origins to frontend hostname/port.
+- Ignored runtime paths: `.env`, `data/`, `media/`, `backups/`, `staticfiles/`. Clinical media is API-protected even in DEBUG.
+- Both Cairo/Inter fonts must resolve together from frontend public/dist fonts or `PDF_FONT_DIR`.
 
-### Native libraries by OS
+## Native libraries by OS
 
-The same application uses Portalocker 4.3.0, Waitress 3.0.2, python-magic 0.4.27 and WeasyPrint 70.0 on both OS profiles. Windows installs Portalocker's `win32` extra automatically through the requirements marker and uses its Win32 backend for both blocking shared and exclusive locks; shared locks must never fall back to an unlocked/exclusive-only substitute. PostgreSQL retains session advisory locking. Other profiles require every participating worker/job to use the same lock file on storage supporting shared/exclusive locks; validate network filesystem behavior before using multiple hosts.
+Portalocker/Waitress/python-magic/WeasyPrint support the same service source. PostgreSQL uses session advisory gates; other DBs require a common shared/exclusive-capable `OPERATION_LOCK_DIR` across all workers/jobs. Windows installs Portalocker's `win32` extra. Local locks do not certify network filesystems.
 
-On Debian/Ubuntu, install system Pango/Fontconfig/libmagic libraries using the package manager (package names vary by release), for example `libpango-1.0-0`, `libpangoft2-1.0-0`, `libfontconfig1`, `libmagic1` and `shared-mime-info`. On macOS, existing Homebrew/MacPorts equivalents remain applicable; macOS execution is not verified here. Python wheels do not replace native libraries.
+Debian/Ubuntu native examples: `libpango-1.0-0`, `libpangoft2-1.0-0`, `libfontconfig1`, `libmagic1`, `shared-mime-info`; names vary by release. Wheels do not replace native libraries.
 
-On Windows x64 install matching native libraries with [MSYS2 UCRT64](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows). In its UCRT64 shell:
+Windows: install matching x64 [MSYS2 UCRT64 libraries](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows):
 
 ```bash
 pacman -S mingw-w64-ucrt-x86_64-pango mingw-w64-ucrt-x86_64-file
 ```
 
-The [file package](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-file) provides both `libmagic-1.dll` and `magic.mgc`. Set these in the backend process environment or private `.env`, adjusting your installation path:
+Private environment/`.env`, adjusted to installation:
 
 ```dotenv
 CLINIC_DLL_DIRECTORIES=C:/msys64/ucrt64/bin
@@ -28,80 +33,24 @@ WEASYPRINT_DLL_DIRECTORIES=C:/msys64/ucrt64/bin
 LIBMAGIC_DATABASE=C:/msys64/ucrt64/share/misc/magic.mgc
 ```
 
-Directory lists use the OS path separator (`;` on Windows). Use forward slashes in `.env` paths to avoid backslash escape surprises. Configured DLL directories are registered before native imports and added to the process PATH for libmagic discovery; DLL handles remain alive. An explicit MIME database uses one detector per thread. Keep matching 64-bit Python/native libraries and restart after environment changes. Font overrides use `PDF_FONT_DIR=C:/Clinic/fonts`; both required font files must be present together.
+Use forward slashes; directory lists use `;` on Windows. DLL handles remain alive; explicit MIME databases are thread-local. Optional `PDF_FONT_DIR` must contain both fonts. `python manage.py check_runtime --render-pdf` checks locks/MIME/fonts/PDF/timezones without DB access, migrations or retained PDF files.
 
-After installing/configuring dependencies, run `python manage.py check_runtime --render-pdf` with the selected environment Python. It checks actual local shared/exclusive locks, Waitress availability, MIME detection, native PDF/fonts and time-zone data; the optional PDF is synthetic and retained only in memory. It makes no database queries, migrations or clinic-data writes. Local lock checks do not certify a network filesystem, nor does a synthetic PDF certify Arabic layout/physical printing. `python manage.py serve` runs these dependency checks (without PDF rendering), then Django's source checks before accepting traffic.
+## Schema and startup
 
-`config/settings/base.py`, `database.py` and `.env.example` own defaults. Copy example only when `.env` is absent; never overwrite private values. Generate separate secrets privately and retain original backup signing keys.
+Application migrations were deleted by request; package markers remain. Fresh-schema preparation needs explicit scope; old DB/full-backup compatibility is absent. Never initialize clinic storage for verification.
 
-| Variables | Source default / purpose |
-| --- | --- |
-| `DJANGO_SECRET_KEY`, `BACKUP_HMAC_KEY` | Empty; required when environment debug is false. Keep separate keys; retain backup keys needed for existing archives. |
-| `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS` | `false`, empty; comma-separated production hosts, no wildcard. |
-| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173`; exact credentialed origins. |
-| `DATABASE_ENGINE` | Defaults SQLite; aliases `sqlite/sqlite3`, `postgres/postgresql`, `mysql/maria/mariadb`, or an installed full Django backend path. |
-| `DATABASE_NAME` | SQLite: backend-relative/absolute path, `:memory:` or `file:` URI; blank defaults `data/clinic.db`. External DB: blank defaults `clinic`. |
-| `DATABASE_USER/PASSWORD/HOST/PORT`, `DATABASE_CONN_MAX_AGE` | External credentials/server, default max age `600`; SQLite ignores them. |
-| `DATABASE_TIMEOUT` | SQLite seconds, default `20`; foreign keys native, WAL initialization only on Django 5.1+. |
-| `DATABASE_SSLMODE`, `DATABASE_SSL_CA`, `DATABASE_OPTIONS` | Optional PostgreSQL SSL mode/CA or MySQL CA; JSON object overrides driver options. MySQL/MariaDB defaults utf8mb4/strict mode; use InnoDB. |
-| `CACHE_BACKEND`, `CACHE_LOCATION` | Unset backend means development LocMemCache `unique-snowflake`; Blank location defaults to local-memory name, Redis URL or Memcached address according to backend. Production needs shared cache/driver, e.g. PyMemcacheCache or RedisCache. |
-| `TIME_ZONE` | `Asia/Damascus`; aware timestamps, clinic-local business dates. |
-| `SESSION_COOKIE_AGE`, `SESSION_COOKIE_SECURE` | `10800` seconds, `false` in base; session HttpOnly/SameSite Lax, CSRF readable by client. Production forces secure cookies. |
-| `MAX_LOGIN_ATTEMPTS`, `LOGIN_LOCKOUT_MINUTES` | `10`, `15`; durable lockout. |
-| `CLINIC_NAME/ADDRESS/PHONE` | `عيادة الإتزان` / empty / empty; UI/PDF identity defaults. |
-| `DEFAULT_PRESCRIPTION_INSTRUCTION` | `حسب تعليمات الطبيب` |
-| `ALLOW_DEMO_DATA`, `AUTO_SEED` | Both `false`; production forces false. `AUTO_SEED` is declared/reserved, not automatic startup seeding. |
-| `DEMO_PATIENTS_COUNT`, `DEMO_VISITS_PER_PATIENT` | `10`, `3`; bounded service validation still applies. |
-| `WORK_START_HOUR/MINUTE`, `WORK_END_HOUR/MINUTE` | `8/0`, `23/30`; scheduling bounds. |
-| `DEFAULT_APPOINTMENT_DURATION`, `MAX_APPOINTMENTS_PER_VIEW` | `30` minutes, `500` rows. |
-| `MAX_BULK_IMPORT_SIZE`, `MAX_ATTACHMENT_SIZE`, `MAX_CONTENT_LENGTH` | `200`, `10`, `210` MB; last bounds both file/data memory limits. Proxy upload limit must accommodate it. |
-| `SCHEDULER_INTERVAL_HOURS`, `BACKUP_CHECK_INTERVAL_HOURS` | `2`, `6`; scheduler caps reminder polling at half its shortest hour window and independently limits automatic backup cadence to the latter setting. Direct `auto_backup` creates a backup on every invocation. |
-| `BACKUP_SAFETY_DAYS`, `BACKUP_WEEKLY_DAYS`, `BACKUP_MONTHLY_DAYS` | `30`, `90`, `365`; [retention](operations.md#retention).  |
-| `NOTIFICATION_READ_RETENTION_DAYS`, `NOTIFICATION_UNREAD_RETENTION_DAYS` | `90`, `365` |
-| `ADMIN_PASSWORD`, `DOCTOR_PASSWORD`, `RECEPTIONIST_PASSWORD` | Optional seed inputs; blank generates random password printed once. |
-
-| Storage/config | Contract |
-| --- | --- |
-| MEDIA_ROOT / MEDIA_URL | `backend/media/`, `/media/`; clinical bytes only through authorized API downloads in DEBUG and production. |
-| Static/templates | `staticfiles/`, `/static/`, existing sibling `frontend/dist/`; templates in backend and existing frontend bundle. Authorized collectstatic gathers existing assets. |
-| OPERATION_LOCK_DIR | For non-PostgreSQL production, explicitly configure common shared/exclusive-capable lock storage across every worker/job. Development defaults to BACKUP_DIR. PostgreSQL uses DB session advisory gates. |
-| PDF_FONT_DIR | Optional directory containing both bundled Cairo/Inter font files; parsed from environment. |
-| CLINIC_DLL_DIRECTORIES / WEASYPRINT_DLL_DIRECTORIES | Windows native library directories, separated by `;`; required for installations whose DLLs are outside normal discovery paths. |
-| LIBMAGIC_DATABASE | Optional explicit `magic.mgc` file, normally needed for the MSYS2 Windows installation; detectors remain thread-local. |
-| Runtime directories | Ignored `.env`, `data/`, `media/`, `backups/`, `staticfiles/`; protect backups/fonts/keys and patient data. Creating folders is not schema initialization. |
-
-Application migration scripts were removed at the user’s request; empty package markers remain. The current canonical-record model source requires separately authorized fresh schema preparation. No replacement migrations or project database changes were made by the model redesign; existing database/old full-backup compatibility is not provided. Schema work needs explicit authorization. `bootstrap`/`runserver_auto` prepare migrations; bootstrap `--with-demo-data` seeds, `--with-frontend` installs/builds, `--clean` deletes SQLite/custom migrations and needs destructive scope. Deliberate `seed_db` creates/updates role defaults/users/catalogs/tasks; passwords print once and new users require rotation. Default seed usernames admin/doctor1/receptionist1 are not fixed passwords. Never invoke these helpers only to fix a folder/check source.
+`bootstrap`/`runserver_auto` perform migrations. Bootstrap `--with-demo-data` seeds, `--with-frontend` installs/builds, `--clean` deletes SQLite/custom migrations. `seed_db` changes defaults/accounts/catalogs/tasks; generated passwords print once and require rotation. These are deliberate operations, not diagnostics.
 
 ## Production
 
-All processes/jobs explicitly use `DJANGO_SETTINGS_MODULE=config.settings.production`, environment debug false, allowed hosts, external DB/shared cache, HTTPS and secure cookies. Production rejects empty hosts/SQLite/LocMemCache and non-PostgreSQL without explicitly configured common lock storage. OS portability does not remove these concurrency/deployment requirements. Disable demo/auto-seed; keep credentials in protected environment. Shared cache is required for cross-worker preview/state, even though cache generations are durable DB state.
-
-Apply authorized fresh schema before starting changed models, including canonical primary identifiers, follow-up outcome/completion-revision fields, notification references, receipt/cache fields and lifecycle constraints. Authorized assets: frontend frozen install/build then backend collectstatic; collecting first misses new assets. Current Vite output has source maps/minification disabled; choose release policy under build scope.
-
-Cross-platform loopback service command (Waitress is included in requirements):
+Use `DJANGO_SETTINGS_MODULE=config.settings.production`, debug/demo/auto-seed off, explicit hosts, external DB/shared cache, HTTPS/secure cookies and protected secrets. Non-PostgreSQL requires explicit shared lock storage. Production rejects SQLite/LocMemCache. Shared cache carries cross-worker previews/state; DB-backed generations alone do not replace it.
 
 ```bash
 python manage.py serve --settings=config.settings.production --host 127.0.0.1 --port 5019 --threads 8
 ```
 
-On Linux, use a deployment-owned systemd unit; on Windows, use a service supervisor configured to launch the virtual-environment Python and the same `manage.py serve` command. Set backend working directory, private environment, production settings, restart behavior and DB/cache dependencies explicitly. Eight threads is an example, not measured capacity. Waitress does not terminate HTTPS; put it behind the deployment HTTPS proxy and retain secure cookies. DB/cache servers may run on another host; a cross-platform client does not install those servers. Monitor the service and restart deliberately.
+Configure systemd or a Windows service supervisor with the intended interpreter, backend working directory/environment, restart policy and dependencies. Waitress checks runtime/source, never migrates/seeds or terminates HTTPS; eight threads is an example, not capacity evidence.
 
-Nginx HTTPS location essentials (configured certificates/server name/upstream required):
+Proxy HTTPS to 5019 with Host/real-IP/forwarded headers; allow uploads at least 210 MB (e.g. 220M), serve collected `/static/`, deny direct `/media/`. Django serves existing frontend index after API/admin routes; direct SPA hosting needs explicit API/admin proxy and history fallback. Never turn unknown API errors into SPA success.
 
-```nginx
-client_max_body_size 220M;
-location /static/ { alias /srv/myclinic/backend/staticfiles/; expires 30d; }
-location /media/ { return 403; }
-location / {
-    proxy_pass http://127.0.0.1:5019;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_redirect off;
-}
-```
-
-Redirect port 80 to HTTPS, validate/reload Nginx and check login/CSRF/assets/protected downloads on actual topology. Django final fallback serves existing frontend index; API/admin precede it. Direct SPA hosting instead needs `try_files` plus explicit API/admin proxy and static route; unknown API errors must not become SPA success.
-
-Monitor individual production timers: reminders hourly (task offset five minutes), daily backup/retention and daily completed-operation cleanup. Development scheduler is not production orchestration. Update with last-good code/config and authenticated off-site backup, approved schema/assets, restart and [release checks](verification.md#release-checks); rollback may require deliberate compatible data recovery. No deployment action is implied by these examples.
+Authorized asset order: frontend frozen install/build, then collectstatic. Existing Vite output includes sourcemaps and disables JS/CSS minification. Use individual scheduled jobs, not the development scheduler. Keep last-good code/config and authenticated off-site backups; schema/assets/deploy/rollback require their own scope. [Release procedure](verification.md#release-checks).

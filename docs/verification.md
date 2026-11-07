@@ -1,57 +1,34 @@
 # Verification
 
-Explicit test authorization is required to inspect/work/run suites; builds/schema work are separate. Use synthetic isolated storage; never substitute a clinic database. [Recorded evidence](doneCurrent.md), [remaining checks](workCurrent.md), [frontend verification](../../frontend/docs/verification.md).
+[Results/limits](doneCurrent.md) · [Remaining](workCurrent.md) · [Frontend](../../frontend/docs/verification.md). Explicit test authorization required; builds/schema work separate. Synthetic storage only.
 
 ## Isolated commands
 
 ```bash
 python -B tests/run.py
-python -B tests/run_postgres.py  # owned temporary cluster; needs PostgreSQL binaries + psycopg
-python -B manage.py test tests --settings=config.settings.testing --noinput
-python -B -m coverage run --source=apps,core --omit='*/migrations/*' tests/run.py
-python -B -m coverage report --omit='*/migrations/*'
+python -B tests/run_postgres.py
+python -B tests/run_postgres.py tests.test_billing_concurrency tests.test_worker_termination
 ```
 
-Local reusable probe scripts may be kept in ignored `tests/tools/`; they supplement the suites and record their controlled boundaries explicitly. The backend helper runs from the backend root with `python -B tests/tools/standalone_model_probe.py`. The locally saved Linux x64 `tests/tools/prepare_runtime.py` restores Python 3.12.16 (verified archive checksum), existing project pins and PDF inspection tools under ignored `tests/tools/runtime`; it does not open a database. Retained browser PDFs/logs are in frontend `tests/tools/results`, with the inventory/case-evidence audit there. These local tools are ignored rather than distributed project dependencies.
+SQLite runner skips clinic `.env`/migration modules and uses memory DB/temp storage. PostgreSQL runner owns a disposable private Unix-socket cluster, disables TCP and rejects unowned DB/settings; requires installed binaries/psycopg. Neither touches clinic storage or migration files.
 
-Runner fixes isolated settings/refuses non-memory DB; testing skips clinic .env/migration modules, creates model schema in memory and uses synthetic secrets/hashers/local cache/temp media/backups/static. Optional coverage tooling does not change runtime requirements. Focused modules may be supplied to manage.py test. Never substitute a development clinic database.
+Suites cover auth/CSRF/grants/scope, strict versions/lifecycle, patient registers/history/merge, signing/exact documents, billing/tasks/reminders, import/export and authenticated recovery. PostgreSQL adds actual overlap/stale-writer/payment/receipt/cache races; waiters must reach a DB lock before release. Cache checks use local memory and DB generations, including publication across commit.
 
-| Existing coverage / ownership | Interpretation |
-| --- | --- |
-| Core/API/accounts | Strict versions/lifecycle/constraints/normalization, actual session+CSRF/lockout/revocation/grants, envelopes/pagination/idempotency/failure reuse, real renderer empty-response bytes and throttles. |
-| Patient HTTP | All register kinds/parent versions/reasons/history/provenance/verification, actor/scope/clinical permission, team revocation, document MIME/checksum/archive/download, duplicate/merge digest/versions/signed retention. |
-| Visit/document services | Draft/sign/amend/lock, immutable revisions/exact issuance, preview stale/actor binding and renderer failure. |
-| Operations/tasks/notification HTTP | Scheduling intervals/rebooking/reminders, exact fractional-line rounding/header-edit preservation, decimal billing, task assignment/lifecycle/reorder/replay/null dates/refresh and scoped notification actions. |
-| Catalog/import/recovery/report | Identity/version/retirement/scales and strict parent-version question commands, CSV/XLSX/formula protection/preview/scope/transactional replacement, full signed ZIP/media/time precision/relogin, scoped periods/revenue/audit/cache rollback. |
-| Browser fixture | `tests/browser_server.py` owns only temporary localhost 5018 and synthetic accounts/storage; used by frontend 5174 tests. Cleanup/fixture quotas do not establish production capacity. |
+Five subprocess SIGKILL checkpoints: invoice before/after commit; full restore after media/before DB commit/after commit. Assert rollback versus exact/bounded replay, lock release, interrupted-key blocking and safety-copy DB/media repair before reconciliation. POSIX only; not every failure/topology.
 
-SQLite verifies sequential behavior/rollback. `run_postgres.py` creates an unprivileged private Unix-socket cluster with TCP disabled, rejects replacement settings and removes its storage; no existing database or migration files are accessed. Its three simultaneous-writer cases exercise appointment overlap and patient/task opening-version races. SQLite explicitly skips them. Transaction-boundary tests exercise real receipt/mutation rollback, permission changes, cache rollback, receipt expiry, interrupted recovery reconciliation and streaming cleanup. Recovery receipt tests exercise restored-admin HTTP replay and pre-media failure. Anonymous denial and explicit-grant matrices cover 14 endpoint families. These checks do not certify arbitrary worker termination or every DB/cache profile.
+Ignored `tests/tools/` stores helpers/logs/runtimes. `prepare_runtime.py` restores checksum-verified Linux x64 Python 3.12.16/existing pins/PDF tools; `standalone_model_probe.py` supplements suites. Local interpreter: `tests/tools/runtime/python/bin/python3.12`.
 
 ## PDF inspection
 
 ```bash
-# From frontend, retain browser PDFs:
+# Frontend: retain actual browser downloads
 CLINIC_PDF_ARTIFACT_DIR=/tmp/clinic-browser-pdfs pnpm test:e2e
-# From backend, optional isolated inspection tooling:
+# Backend: requires PyMuPDF/fontTools; no DB access
 python -B tests/pdf_appearance.py --output /tmp/clinic-pdf-review --downloads /tmp/clinic-browser-pdfs
 ```
 
-Inspector prohibits database access, requires optional PyMuPDF/fontTools; without downloads it explicitly skips browser-artifact check. Checks cover the five legacy A4 templates plus A6 blank/custom preprinted prescriptions: physical dimensions/multipage/nonblank/page bounds/Arabic glyphs/embedded fonts/text mapping/row retention/repeated headers/complete decimals/referral closing. Chromium Type3 font resources are valid inspected embedding. Paper regressions cover complete medication/instruction tails, per-sheet summary/body pairing, measured offsets, stationery exclusion, field overflow, continuation identification/numbering, repeat issuance and patient-free calibration geometry (including an exact 50 mm ruler). Browser regressions cover actual PDF frames, separate downloads, print dispatch without new issuance, per-account remembered settings and session cleanup. History regressions verify unchanged saved bytes/checksums and document counts, current access after team revocation, pagination, old copies during amendment and handout snapshot ownership. A4 handout checks retain every medicine/instruction tail and enforce left-to-right Latin doses; empty prescriptions remain explicit. Native print dialogs/physical paper feed remain manual checks. Use `--kinds prescription,preprinted` to inspect a paper-only browser artifact directory. Manual first/second/final PNG review checked joining/readability/pagination of exercised samples; not every input/printer.
-
-Renderer resolves bundled Cairo/Inter together; font config/bidi isolation/numeric cells/flowing visit containers were corrected. Existing issued bytes remain unchanged. Other recorded corrections: full backup timestamp microseconds, visit unknowns/clean saves, native button events/input step, PNG signature output and invoice currency. Latest inspection dates/runtimes stay only in completed record; temporary artifacts are not durable evidence.
+Checks: dimensions/pagination/bounds, Arabic glyphs/both embedded fonts, complete rows/decimals/instructions, repeated identity/headers, A6/custom offsets, overflow rejection and 50 mm calibration ruler. No downloads means explicit artifact-check skip. Saved-byte/history/handout invariants have API/browser cases; native dialogs/physical printing remain manual.
 
 ## Release checks
 
-Record build/tester/timezone/browser/DB profile/results; use clean and authorized production-like synthetic environments. Critical workflow:
-
-1. Login/identity/grants, forced password/session expiry/revocation and cross-role API denial.
-2. Unknown/year-only patient/search/duplicate warning, register corrections/team scope/protected files/history and optional preview-bound merge.
-3. Appointment availability/overlap/version/lifecycle/reschedule, active-clinician eligibility and scoped future shortcut.
-4. Draft → sign → reject direct edits → reasoned amendment → re-sign → lock; approved-risk visibility retained during amendment.
-5. Signed prescription/referral, actual current signature/version/Arabic PDF/exact issued bytes and working-export labels.
-6. Fractional invoice issue/pay/rejected material edits; labelled currency reconciliation agrees with paid-only source.
-7. Filtered scoped CSV/XLSX/PDF/Word, text-cell protections and generation metadata.
-8. Authentic full backup/digest/member inventory; preview/consent/safety restore/relogin/exact records/media, catalog-only separation and interrupted-receipt reconciliation.
-9. Stale writes, uncertain disconnect/retry without duplicates, empty archive/replay bodies through proxy, reminder stop/reopen occurrences and final frontend matrix.
-
-Verify demo disabled, intended roles, sufficient backup space and no unexplained API failures. Hidden UI is not API authorization evidence. Release requires passing critical steps or recorded owner-approved exceptions; source completion alone is insufficient. Production bundles, MySQL/MariaDB, Redis/Memcached, arbitrary worker failures, other engines/accessibility and physical printing remain open. Supported pinned runtime and disposable PostgreSQL results are recorded in completed.
+Durable procedure, not an active deployment task. Use authorized synthetic topology; record runtime/browser/DB/timezone/results. Exercise login/revocation/cross-role denial; unknown/year-only patient/register/team/merge; appointment overlap/version/lifecycle; draft/sign/amend/re-sign/lock; signed Arabic documents/exact bytes; fractional billing/paid reconciliation; scoped formula-safe exports; authenticated backup/preview/restore/relogin/DB+media reconciliation; stale/disconnected retries without duplicates and reminder occurrence lifecycle. Verify demo off, intended grants, backup space and no unexplained API failures. Require passing critical workflows or recorded owner-approved exceptions.

@@ -1,67 +1,52 @@
-# Operations and troubleshooting
+# Operations
 
-Use the intended activated interpreter/production settings; data-changing commands need intended authorization. Do not use clinic inventory to verify source. [Setup](setup.md), [contracts](contracts.md), [verification](verification.md).
+Use the intended interpreter/settings; data-changing commands need authorization. [Setup](setup.md) · [Contracts](contracts.md) · [Evidence](doneCurrent.md).
 
 ## Recovery
 
-Full ZIP format 3 carries managed app/auth/history/archived inventory, complete IDs/timestamps and media, signed manifest/member hashes/sizes plus backup JSON/signature. JSON carries logical records without bytes; full recovery rejects missing/mismatched references, unsafe paths, unsupported schema, malformed counts or authentication. This fresh-model format rejects earlier full-backup formats; retaining an HMAC key does not make an old schema compatible. Validation uses the authenticated inventory for primary ownership, same-patient links, signed/completion evidence, invoice totals and issued-byte checksums. Preserve installation HMAC key; never hand-edit envelopes or bypass previews.
+Full ZIP **format 3** authenticates inventory/media with HMAC, member hashes/sizes and relationship validation; JSON alone has no media. Retain signing keys. Reject earlier formats, unsafe paths, corrupt counts/checksums or invalid relationships.
 
-| API `/api/v1/backup/` POST | Contract |
+| POST `/api/v1/backup/` | Contract |
 | --- | --- |
-| Base | `backup_type=full/json`, manage-backup permission; file with SHA256/type headers. |
-| `restore/preview/` | Multipart backup_file and string restore_patients/diagnoses/medications booleans; counts/media/scope and token bound to actor/file digest/selection, 30 minutes. |
-| `restore/execute/` | Authorized admin, same preview/file/scope, `confirm_clear=true`, phrase `RESTORE CLINIC` and explicit UI consent. Patient recovery requires all related scope; empty scope rejected. |
+| Base | `backup_type=full/json`, manage-backup grant; SHA256/type download headers. |
+| `restore/preview/` | Multipart file/scope booleans; 30-minute token binds actor/digest/selection. |
+| `restore/execute/` | Authorized admin, same file/token/scope, `confirm_clear=true`, phrase `RESTORE CLINIC`, explicit consent. Patient recovery requires full related scope. |
 
-Full restore replaces app/auth inventory/media, retains signed revisions/exact documents, writes automatic safety archive, revokes sessions and requires relogin. Catalog-only recovery merges selected catalogs without replacing patients/users/history. Cache generations and installation-local recovery receipts remain outside replacement inventory; restored admin may replay only bounded safety-copy success receipt with the same key/payload, never rerun completed recovery.
+Full restore replaces app/auth and restores referenced media (unrelated files retained), preserves signed evidence, creates safety ZIP, revokes sessions and requires relogin. Catalog recovery only merges selected catalogs. Installation-local recovery receipts/cache generations stay outside replacement inventory; completed recovery replays only its bounded safety-copy receipt under current restored-admin authorization.
 
-Operation gate drains earlier HTTP readers/writers and participating jobs before exclusive snapshot/restore/catalog work. PostgreSQL coordinates worker/host session advisory locks; other profiles require common shared/exclusive-capable OPERATION_LOCK_DIR. Protected streams are buffered within gate; external DB/storage writers must be quiesced. Postcommit failure preserves committed media/receipt; precommit rollback compensates files. Actual external topology/worker termination remains unverified.
+The operation gate drains participating HTTP/jobs before exclusive backup/restore/catalog work; buffer protected streams inside it. Quiesce external writers. PostgreSQL session locks coordinate hosts; other DBs need shared/exclusive-capable common lock storage.
 
-Interrupted receipt blocks further restore. Reconcile database **and** media from safety archive, then explicitly acknowledge:
+Caught precommit failures compensate files; SIGKILL cannot. PostgreSQL rolls back uncommitted inventory/releases locks, but replaced media can remain. A processing/interrupted receipt blocks further restore. Repair **both DB and media** from the safety archive before acknowledging:
 
 ```bash
 python manage.py reconcile_recovery --key KEY --reason 'verified reconciliation' --confirm-inventory-and-media
 ```
 
-This acknowledges operator verification; it does not repair data/files. Use a new preview/key afterward. No dedicated restore CLI; rehearse actual preview/execute/relogin/inventory checks in authorized staging.
+Acknowledgment repairs nothing; use a fresh preview/key afterward. Postcommit failure retains committed media/receipt. [Verified checkpoints and limits](verification.md).
 
 ## Retention
 
-Automatic backup uses unique `clinic_backup_...zip` and atomic publication, enforcing restore size/member/expansion limits. `cleanup_backups --dry-run [--dir PATH]` previews policy: all first 30 days, newest ISO-week 30–90, newest month 90–365, newest year afterward; settings configure windows. Safety-before-restore archives are outside that pattern and need explicit capacity/retention policy. Keep authenticated encrypted/access-controlled off-site copies/signing keys; same-filesystem safety copy does not survive host loss. Sync deletion can propagate loss; choose remote retention deliberately.
+`cleanup_backups --dry-run [--dir PATH]`: retain all first 30 days, newest ISO-week through 90, newest month through 365, then newest year; settings override. Safety-before-restore copies need separate retention/capacity policy. Automatic backups publish unique ZIPs atomically within size/member/expansion bounds. Keep authenticated, protected off-site copies/keys; same-disk copies cannot survive host loss.
 
-## Jobs and system tools
+## Jobs and tools
 
-Use Linux systemd timers/cron or Windows Task Scheduler to launch the same individual management commands. Configure the virtual-environment Python executable, backend working directory and production environment explicitly; Windows services/tasks may have a different PATH from your interactive terminal. Set a non-overlap policy for each scheduled job, retain the shared operation gate, and protect job output. `run_scheduler` remains development-only. The cross-platform server does not start jobs, migrations or seeding automatically.
+Use systemd/cron or Windows Task Scheduler with explicit interpreter/cwd/production environment, non-overlap and protected output. Suggested cadence: hourly reminders (tasks +5 minutes), daily backup/retention/receipt cleanup. `run_scheduler` is development-only.
 
-| Command / endpoint | Current behavior |
+| Command / API | Purpose |
 | --- | --- |
-| check_runtime [--render-pdf] | Database-free native/runtime diagnosis; optional synthetic in-memory PDF. No migrations, seeding or clinic records. |
-| serve [--host HOST --port 5019 --threads 8] | Waitress on Windows/Linux; dependency/source checks before listening, no schema changes. |
-| send_appointment_reminders | Local scheduled/confirmed day/hour windows, up to 60-minute late-hour grace, actual date/time text; occurrence UUID dedupe, terminal bookings excluded. |
-| send_task_reminders | Open/in-progress due-window actions, assignee/owner delivery, stable occurrence retries; terminal actions stop reminders. |
-| run_scheduler | Development loop; poll no slower than half hour-reminder window/minimum 60s, independent BACKUP_CHECK_INTERVAL_HOURS backup cadence; one job failure does not stop others. |
-| cleanup_operations | Completed ordinary/recovery receipts expire after 30 days; interrupted ones retained. Do not reuse an old key after retry window. |
-| reconcile_media --older-than-hours 24 | Report missing references/old orphan uploads; `--delete` only with explicit removal scope. |
-| reset_admin_password --username NAME [--qr] | Locked intended-field/version update, one generated private password, rotation cleared and sessions revoked; optional QR. |
-| system/health[/full]/ | Database health/full maintenance metadata; verify actual response envelope and alert non-200. |
-| system/cache/clear/ POST | Manage-settings application invalidation preserves preview/operation records; avoid global raw cache.clear. |
-| audit-logs/ GET | Actor/IP/action/entity scope; avoid exporting patient descriptions in diagnostics. |
+| `check_runtime [--render-pdf]` / `serve` | DB-free native diagnosis / checked Waitress server; no migrations/seeding. |
+| `send_appointment_reminders` | Scheduled/confirmed local day/hour windows, 60-minute late grace; stable occurrence dedupe. |
+| `send_task_reminders` | Open/in-progress due tasks; terminal tasks stop delivery. |
+| `run_scheduler` | Poll within half hour-window, minimum 60s; separate backup cadence; failures isolated. |
+| `cleanup_operations` | 30-day completed receipts; retain interrupted ones, never reuse expired keys. |
+| `reconcile_media --older-than-hours 24` | Missing/orphan report; `--delete` requires removal scope. |
+| `reset_admin_password --username NAME [--qr]` | Locked versioned reset, private one-time password, rotation cleared/sessions revoked. |
+| `system/health[/full]/` | DB/maintenance health; alert on non-200. |
+| `system/cache/clear/` POST | Grant-protected application invalidation; preserves previews/receipts. |
+| `audit-logs/` GET | Scoped actor/action history; do not log/export patient values as diagnostics. |
 
-Medication spreadsheet import is content-only: five mapped fields, existing controlled classification retained, new drugs uncontrolled, imported content active. Status/controlled columns are not full round-trip recovery. Preview binds file/map/policy/current content/version inventory; intervening edits reject both merge and replacement.
+Medication spreadsheet import is content-only: five mapped fields; preserve existing controlled status, new drugs uncontrolled, imported content active. Preview binds file/map/policy/current inventory; intervening edits reject merge/replacement.
 
 ## Troubleshooting
 
-| Symptom | Check / correction |
-| --- | --- |
-| Startup keys/hosts/DB/cache denial | Separate private keys, production hosts/profile/driver/shared cache and explicit settings; retained backup key is needed for old archives. |
-| SQLite missing path/table/schema | Correct parent/ownership and actual selected connection; new schema needs authorization. Do not bootstrap/reseed/delete migrations blindly. |
-| CheckConstraint TypeError | Verify source/interpreter; native factory supports Django 5.0 check versus 5.1+ condition. Do not change versions to hide pinned-runtime failure. |
-| MIME/PDF import failure or 503 | Distinguish Python magic package/native libmagic; run `python manage.py check_runtime --render-pdf`; check Pango/Fontconfig, both deployed fonts and sanitized renderer logs. Windows also needs DLL directories and the libmagic database; [setup](setup.md#native-libraries-by-os). |
-| Request waits/cache stale | Check exclusive gate/interrupted receipt and DB/shared cache configuration. Generation is DB-backed; use authorized app invalidation. |
-| Login/CSRF/CORS | Match hostname/5019/proxy/exact origin, bootstrap CSRF/config/credentials; inspect lockout/revocation/forced password. Recovery uses authorized reset command. |
-| Route/static reload 404 | Existing frontend bundle/collected static, history/API/admin routing; dev proxy is not production/preview. |
-| Stale write/preview or uncertain transport | Refresh opening resource/parent, retain draft/key/payload, re-preview changed content/scope. Empty 204/205/304 must survive proxy/replay. |
-| Duplicate ID/archive/merge | IDs are unchanged/nonblocking; scoped review/optional merge. Preserve retained history; merged source restore blocked; avoid raw lifecycle SQL. |
-| Backup validation/interruption | Original key/schema/manifest/count/reference checks and safety receipt; do not remove authentication or assume partial success. |
-| Port/runtime disagreement | Identify existing port owner before stopping; compare configured interpreter/DB, not historical passing results. Source/jsdom/SQLite do not prove browser/PDF/concurrency. |
-
-Monitor sanitized service logs/health/fresh backups, audit dependencies and rehearse recovery. Never expose credentials/patient values or open storage merely for source verification.
+Check actual interpreter/port owner/settings first. PDF/MIME failures: native libraries, both fonts, DLL/database paths and `check_runtime --render-pdf`. Auth failures: exact hostname/CORS/CSRF, session revocation/password rotation. Stale writes: retain draft/key/payload, refresh opening version and re-preview changed content. Stale cache/waits: gate/receipt/shared-cache configuration, never raw `cache.clear`. Missing schema/assets: explicit setup scope, never bootstrap clinic storage merely to diagnose. Monitor sanitized logs, health and recoverable backups.

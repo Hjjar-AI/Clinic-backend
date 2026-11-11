@@ -34,14 +34,14 @@ Use systemd/cron or Windows Task Scheduler with explicit interpreter/cwd/product
 
 | Command / API | Purpose |
 | --- | --- |
-| `check_runtime [--render-pdf]` / `serve` | DB-free native diagnosis / checked Waitress server; no migrations/seeding. |
+| `check_runtime [--render-pdf]` / `serve` | DB-free native diagnosis / Waitress with source and DB feature checks. Neither migrates/seeds; startup does not certify schema/login readiness. |
 | `send_appointment_reminders` | Scheduled/confirmed local day/hour windows, 60-minute late grace; stable occurrence dedupe. |
 | `send_task_reminders` | Open/in-progress due tasks; terminal tasks stop delivery. |
 | `run_scheduler` | Poll within half hour-window, minimum 60s; separate backup cadence; failures isolated. |
 | `cleanup_operations` | 30-day completed receipts; retain interrupted ones, never reuse expired keys. |
 | `reconcile_media --older-than-hours 24` | Missing/orphan report; `--delete` requires removal scope. |
 | `reset_admin_password --username NAME [--qr]` | Locked versioned reset, private one-time password, rotation cleared/sessions revoked. |
-| `system/health[/full]/` | DB/maintenance health; alert on non-200. |
+| `system/health[/full]/` | Inspect `data.status`/`data.database` as well as HTTP status: degraded DB health can still return HTTP 200. `full/` also reports maintenance. |
 | `system/cache/clear/` POST | Grant-protected application invalidation; preserves previews/receipts. |
 | `audit-logs/` GET | Scoped actor/action history; do not log/export patient values as diagnostics. |
 

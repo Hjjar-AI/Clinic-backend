@@ -1,6 +1,6 @@
 # Verification
 
-[Results/limits](doneCurrent.md) · [Remaining](workCurrent.md) · [Frontend](../../frontend/docs/verification.md). Explicit test authorization required; builds/schema work separate. Synthetic storage only.
+[Results/limits](doneCurrent.md) · [Remaining](workCurrent.md) · [Frontend](../../frontend/docs/verification.md). Explicit suite authorization is required; builds/schema work have separate scope. Suites/probes use synthetic storage; the explicitly requested fresh local setup is a separate operation. Record the actual interpreter/dependency profile and do not carry historical passes forward to new pins.
 
 ## Isolated commands
 
@@ -16,9 +16,11 @@ Suites cover auth/CSRF/grants/scope, strict versions/lifecycle, patient register
 
 Five subprocess SIGKILL checkpoints: invoice before/after commit; full restore after media/before DB commit/after commit. Assert rollback versus exact/bounded replay, lock release, interrupted-key blocking and safety-copy DB/media repair before reconciliation. POSIX only; not every failure/topology.
 
-Ignored `tests/tools/` stores helpers/logs/runtimes. `prepare_runtime.py` restores checksum-verified Linux x64 Python 3.12.16/existing pins/PDF tools; `standalone_model_probe.py` supplements suites. Local interpreter: `tests/tools/runtime/python/bin/python3.12`.
+Ignored `tests/tools/` retains historical helpers/logs/runtimes, including `prepare_runtime.py`, `standalone_model_probe.py` and `runtime/python/bin/python3.12`. That Python 3.12.16 environment belongs to the earlier dependency profile; do not assume it matches current requirements. Select/record the intended interpreter explicitly. Retained tools supplement, not replace, authorized suites.
 
 Launcher-only: `python -B -m unittest tests.test_launcher`; related auth/CSRF: `python -B manage.py test tests.test_launcher tests.test_api --settings=config.settings.testing --noinput`. Ignored `tests/tools/launcher_process_probe.py` exercises real Linux sockets/process groups with controlled servers; it never starts clinic services or reads clinic `.env`/data. Native Windows requires its own check.
+
+`start.sh check` and `manage.py check_runtime --render-pdf` are database-free prerequisite checks. A listening socket or `SELECT 1` health response does not prove current tables/columns or successful login. Test authenticated behavior only within the authorized storage/account scope.
 
 ## PDF inspection
 

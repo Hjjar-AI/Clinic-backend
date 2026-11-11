@@ -10,6 +10,6 @@ Django/DRF API **5019**, [Vue UI](../frontend/README.md) **5173**. Local Windows
 
 Windows: double-click `start.cmd`, or run `start.cmd check`. Launcher settings live in **backend/.env**: ports, browser, optional Python/Node paths; the frontend proxy follows automatically.
 
-First use: Python 3.10–3.12 (3.12 recommended), Node `^22.18.0 || >=24.12.0`, pnpm and [native libraries](docs/setup.md#native-libraries-by-os). `./start.sh configure` (`start.cmd configure`) creates private `.env`/separate signing keys only when absent. Install backend requirements/frontend dependencies and prepare the intended schema/accounts once: [setup](docs/setup.md#local-launcher). Daily startup performs no installation, migrations or seeding.
+First use: Python 3.12–3.14 (3.14 recommended), Node `^22.18.0 || >=24.12.0`, pnpm and [native libraries](docs/setup.md#native-libraries-by-os). `./start.sh configure` (`start.cmd configure`) creates private `.env`/separate signing keys only when absent. Install backend requirements/frontend dependencies and prepare the intended schema/accounts once: [setup](docs/setup.md#local-launcher). Daily startup performs no installation, migrations or seeding.
 
 [Rules](AGENTS.md) · [Remaining](docs/workCurrent.md) · [Evidence](docs/doneCurrent.md) · [Contracts](docs/contracts.md) · [Setup](docs/setup.md) · [Operations](docs/operations.md) · [Verification](docs/verification.md)

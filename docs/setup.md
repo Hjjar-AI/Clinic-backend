@@ -1,6 +1,8 @@
 # Setup and hosting
 
-[Entry commands](../README.md) · [Operations](operations.md) · [Verification](verification.md). Use Python 3.10–3.12 (3.12 recommended); Windows 10/11 x64/Linux. Windows 7/Python 3.8 unsupported; macOS unverified.
+[Entry commands](../README.md) · [Operations](operations.md) · [Verification](verification.md). Current dependencies target Python 3.12–3.14 (3.14 recommended), Django 6.1.2 and DRF 3.18.3; Windows 10/11 x64/Linux. Python 3.10/3.11 are no longer supported by this dependency profile. Windows 7/Python 3.8 unsupported; macOS unverified.
+
+Linux Python 3.14.4 has focused runtime and real launcher/HTTP/shutdown verification. Other interpreter/platform combinations and broader clinical regressions have not been reverified on the updated pins; see [evidence and limits](doneCurrent.md#python-314-compatibility-and-launch-2026-11-11).
 
 ## Local launcher
 
@@ -10,12 +12,12 @@ First-time environment/dependencies, from backend:
 
 ```bash
 ./start.sh configure
-python3.12 -m venv .venv
+python3.14 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements/sqlite.txt
 ```
 
-Windows: `start.cmd configure`, `py -3.12 -m venv .venv`, then `.venv\Scripts\python.exe -m pip install -r requirements/sqlite.txt`. Choose the requirements file matching your DB. In frontend, run `pnpm install --frozen-lockfile` once. Install native libraries below; prepare the intended fresh schema/accounts explicitly if needed. The launcher never initializes/upgrades a database.
+Windows: `start.cmd configure`, `py -3.14 -m venv .venv`, then `.venv\Scripts\python.exe -m pip install -r requirements/sqlite.txt`. Choose the requirements file matching your DB. In frontend, run `pnpm install --frozen-lockfile` once. Install native libraries below; prepare the intended fresh schema/accounts explicitly if needed. The launcher never initializes/upgrades a database.
 
 Only backend `.env` is needed for launcher configuration:
 
@@ -28,6 +30,8 @@ CLINIC_OPEN_BROWSER=true
 ```
 
 Default Python: backend `.venv`, `venv`, then wrapper interpreter. Paths may contain spaces; launcher/network values are literal (no variable expansion). Shell overrides `.env`. Both proxy target and loopback hosts/CORS/CSRF origins follow selected ports; token checks remain required. Other `.env` values keep Django/python-dotenv behavior. Use `CSRF_TRUSTED_ORIGINS` for explicit additional origins.
+
+For an environment activated by a shell alias, set `CLINIC_PYTHON` to that environment's Python executable, not the alias name. Set `CLINIC_NODE` to the Node executable when Node is available only through an interactive shell's version manager. These machine-specific paths belong in private `.env`, not `.env.example`. The interpreter must still meet the supported Python range and use the project's pinned requirements; an activated environment alone does not establish compatibility.
 
 A missing `.env` is created with separate random keys; existing files/keys remain byte-for-byte unchanged. Missing tools/native libraries or occupied ports yield a remedy. Startup uses Waitress plus Vite directly with strict ports, never pnpm installation/builds. `check`/TCP readiness do not certify database/schema readiness. [Verification limits](doneCurrent.md).
 

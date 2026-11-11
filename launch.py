@@ -154,7 +154,13 @@ def checked_output(command, *, cwd, env):
 def require_free_port(port):
     try:
         with socket.socket() as listener:
+            # Match POSIX servers: recent HTTP connections may leave TIME_WAIT
+            # sockets after shutdown, without another listener owning the port.
+            if os.name != 'nt':
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind((HOST, port))
+    except PermissionError:
+        raise LaunchError(f'Permission denied binding {HOST}:{port}. Allow local server sockets in your execution environment.') from None
     except OSError:
         raise LaunchError(f'Port {port} is unavailable. Stop its existing owner or change the port in .env.') from None
 
@@ -163,11 +169,11 @@ def preflight(config):
     version = checked_output([config.python, '-B', '-c',
         'import json,sys; print(json.dumps(list(sys.version_info[:2])))'], cwd=config.root, env=config.env)
     try:
-        supported = (3, 10) <= tuple(json.loads(version)) <= (3, 12)
+        supported = (3, 12) <= tuple(json.loads(version)) <= (3, 14)
     except (TypeError, ValueError):
         supported = False
     if not supported:
-        raise LaunchError('Use Python 3.10–3.12 (3.12 recommended); set CLINIC_PYTHON to the app environment.')
+        raise LaunchError('Use Python 3.12–3.14 (3.14 recommended); set CLINIC_PYTHON to the app environment.')
     modules = checked_output([config.python, '-B', '-c',
         "import importlib.util,json; print(json.dumps([name for name in "
         "('django','dotenv','rest_framework','waitress','portalocker') if importlib.util.find_spec(name) is None]))"],

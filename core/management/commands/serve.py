@@ -1,3 +1,4 @@
+from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.core.wsgi import get_wsgi_application
@@ -17,6 +18,15 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if not 1 <= options['port'] <= 65535 or not 1 <= options['threads'] <= 128:
             raise CommandError('Port must be 1–65535; threads must be 1–128.')
+        database = settings.DATABASES['default']
+        if database['ENGINE'] == 'django.db.backends.sqlite3':
+            name = str(database['NAME'])
+            if name != ':memory:' and not name.startswith('file:') and not Path(name).is_file():
+                raise CommandError(
+                    'Configured SQLite database file is missing. Check DATABASE_NAME in backend .env '
+                    'and any shell override. Locate the existing database or explicitly authorize '
+                    'fresh database setup. Startup never creates or seeds clinic storage.'
+                )
         failures = [name for name, passed, _ in runtime_report() if not passed]
         if failures:
             raise CommandError('Runtime checks failed: ' + ', '.join(failures) + '. Run python manage.py check_runtime.')

@@ -70,7 +70,9 @@ Use forward slashes; directory lists use `;` on Windows. DLL handles remain aliv
 
 ## Schema and startup
 
-Application migrations were deleted by request; package markers remain. Fresh-schema preparation needs explicit scope; old DB/full-backup compatibility is absent. For an intended new empty database, `python manage.py bootstrap` generates schema/default accounts; the launcher never runs it. Never initialize clinic storage for verification.
+Versioned application migrations were deleted by request; package markers remain. Authorized local `bootstrap` generates ignored application migration files when absent. Fresh-schema preparation needs explicit scope; old DB/full-backup compatibility is absent. For an intended new empty database, `python manage.py bootstrap` generates schema/default accounts; the launcher never runs it. Never initialize clinic storage for verification.
+
+For normal SQLite file paths, `serve` refuses startup when the configured file is missing. Check `DATABASE_NAME` and shell overrides, then locate the intended existing storage or explicitly arrange fresh setup. Creating an empty directory/file alone does not prepare the application schema.
 
 `bootstrap`/`runserver_auto` perform migrations. Bootstrap `--with-demo-data` seeds, `--with-frontend` installs/builds, `--clean` deletes SQLite/custom migrations. `seed_db` changes defaults/accounts/catalogs/tasks; generated passwords print once and require rotation. These are deliberate operations, not diagnostics.
 

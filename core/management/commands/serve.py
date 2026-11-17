@@ -35,5 +35,9 @@ class Command(BaseCommand):
         self.stdout.write(f'Waitress listening on {options["host"]}:{options["port"]}')
         if settings.DEBUG:
             self.stdout.write(self.style.WARNING('Development settings are active; production requires explicit production settings.'))
+        proxy_options = {}
+        if getattr(settings, 'TRUST_PROXY_HTTPS', False):
+            proxy_options = {'trusted_proxy': settings.CLINIC_TRUSTED_PROXY,
+                'trusted_proxy_count': 1, 'trusted_proxy_headers': {'x-forwarded-proto'}}
         serve(get_wsgi_application(), host=options['host'], port=options['port'], threads=options['threads'],
-              max_request_body_size=settings.MAX_REQUEST_BODY_SIZE, expose_tracebacks=False)
+              max_request_body_size=settings.MAX_REQUEST_BODY_SIZE, expose_tracebacks=False, **proxy_options)

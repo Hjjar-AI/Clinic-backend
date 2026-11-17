@@ -52,6 +52,12 @@ MAX_REQUEST_BODY_SIZE = int(os.environ.get('MAX_CONTENT_LENGTH', 210)) * 1024 * 
 FILE_UPLOAD_MAX_MEMORY_SIZE = 2621440
 DATA_UPLOAD_MAX_MEMORY_SIZE = 2621440
 CSRF_FAILURE_VIEW = 'core.errors.csrf_failure'
+TRUST_PROXY_HTTPS = os.environ.get('TRUST_PROXY_HTTPS', 'false').lower() == 'true'
+CLINIC_TRUSTED_PROXY = os.environ.get('CLINIC_TRUSTED_PROXY', '').strip()
+if TRUST_PROXY_HTTPS:
+    if not CLINIC_TRUSTED_PROXY or CLINIC_TRUSTED_PROXY == '*':
+        raise RuntimeError('HTTPS proxy trust requires an explicit CLINIC_TRUSTED_PROXY address')
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # ---------------------------------------------------------------------
 # Scheduler & backup retention
@@ -147,12 +153,14 @@ WHITENOISE_USE_FINDERS = True
 WHITENOISE_AUTOREFRESH = True
 ROOT_URLCONF = 'config.urls'
 
+FRONTEND_DIST = Path(os.environ.get('FRONTEND_DIST', str(BASE_DIR.parent / 'frontend' / 'dist'))).expanduser()
+
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         'DIRS': [
             BASE_DIR / 'templates',
-            Path(os.environ.get('FRONTEND_DIST', str(BASE_DIR.parent / 'frontend' / 'dist'))),
+            FRONTEND_DIST,
         ],
         'APP_DIRS': True,
         'OPTIONS': {
@@ -193,7 +201,7 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
-    Path(os.environ.get('FRONTEND_DIST', str(BASE_DIR.parent / 'frontend' / 'dist'))),
+    FRONTEND_DIST,
 ]
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'

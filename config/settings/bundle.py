@@ -18,6 +18,9 @@ BACKUP_DIR = _data / 'backups'
 STATIC_ROOT = _data / 'staticfiles'
 if getattr(sys, 'frozen', False):
     _resources = Path(sys._MEIPASS) / 'resources'
-    TEMPLATES[0]['DIRS'] = [_resources / 'templates', _resources / 'frontend']
-    STATICFILES_DIRS = [_resources / 'frontend']
+    FRONTEND_DIST = Path(os.environ['FRONTEND_DIST']).expanduser() if os.environ.get('FRONTEND_DIST') else _resources / 'frontend'
+    TEMPLATES[0]['DIRS'] = [_resources / 'templates', FRONTEND_DIST]
+    STATICFILES_DIRS = [FRONTEND_DIST]
+    # Serve immutable packaged assets directly, without development finders.
+    WHITENOISE_ROOT = FRONTEND_DIST
     PDF_FONT_DIR = _resources / 'frontend' / 'static' / 'fonts'

@@ -1,0 +1,89 @@
+name: Windows and Linux bundles
+
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_ref:
+        description: Exact frontend commit SHA to package with this backend revision
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: Build and smoke-check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: backend
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: Hjjar-AI/Clinic-frontend
+          ref: ${{ inputs.frontend_ref }}
+          path: frontend
+          token: ${{ secrets.CLINIC_REPOSITORY_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.21.0'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '12.10.1'
+          package_json_file: frontend/package.json
+      - uses: ./backend/.github/actions/native-dependencies
+      - name: Install runtime and packaging tools
+        run: python -m pip install -r backend/requirements/postgresql.txt -r backend/requirements/cache-redis.txt PyInstaller==6.22.0 tzdata
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: pnpm test
+        working-directory: frontend
+      - run: pnpm run build
+        working-directory: frontend
+      - name: Backend regression gate
+        working-directory: backend
+        run: python -B tests/run.py
+      - name: PostgreSQL regression gate
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y postgresql
+          cd backend
+          python -B tests/run_postgres.py
+      - name: Build executable folder
+        run: python -B backend/scripts/build_bundle.py --frontend frontend --output release
+      - name: Smoke-check frozen runtime away from source
+        shell: bash
+        run: |
+          executable="$GITHUB_WORKSPACE/release/Clinic/Clinic"
+          if [ "$RUNNER_OS" = "Windows" ]; then executable="$executable.exe"; fi
+          python -B backend/scripts/runtime_smoke.py --executable "$executable"
+      - name: Archive and checksum
+        shell: python
+        run: |
+          import hashlib
+          from pathlib import Path
+          import shutil
+          import platform
+          name = 'Clinic-' + platform.system() + '-x64'
+          archive = Path(shutil.make_archive(name, 'zip' if platform.system() == 'Windows' else 'gztar', 'release', 'Clinic'))
+          Path(str(archive) + '.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Clinic-${{ runner.os }}-x64-${{ github.run_id }}
+          path: |
+            Clinic-*.zip
+            Clinic-*.tar.gz
+            Clinic-*.sha256
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,32 @@
+name: Clinic native dependencies
+description: Install PDF and MIME libraries on Linux or Windows x64 runners
+runs:
+  using: composite
+  steps:
+    - name: Linux PDF and MIME libraries
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libfontconfig1 libmagic1 shared-mime-info
+    - name: Windows PDF and MIME libraries
+      if: runner.os == 'Windows'
+      id: msys2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          mingw-w64-ucrt-x86_64-pango
+          mingw-w64-ucrt-x86_64-file
+    - name: Locate Windows native resources
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+      run: |
+        $nativeRoot = Join-Path $env:MSYS2_LOCATION 'ucrt64'
+        "CLINIC_NATIVE_ROOT=$nativeRoot" >> $env:GITHUB_ENV
+        "CLINIC_DLL_DIRECTORIES=$nativeRoot/bin" >> $env:GITHUB_ENV
+        "WEASYPRINT_DLL_DIRECTORIES=$nativeRoot/bin" >> $env:GITHUB_ENV
+        "LIBMAGIC_DATABASE=$nativeRoot/share/misc/magic.mgc" >> $env:GITHUB_ENV

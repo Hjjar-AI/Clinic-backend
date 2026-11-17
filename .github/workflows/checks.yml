@@ -1,0 +1,75 @@
+name: Backend checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sqlite:
+    name: SQLite and runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: backend
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: Hjjar-AI/Clinic-frontend
+          ref: ${{ vars.CLINIC_FRONTEND_REF || 'main' }}
+          path: frontend
+          token: ${{ secrets.CLINIC_REPOSITORY_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: ./backend/.github/actions/native-dependencies
+      - run: python -m pip install -r backend/requirements/sqlite.txt
+      - name: Native locks, MIME, fonts and synthetic PDF
+        working-directory: backend
+        run: python -B manage.py check_runtime --render-pdf --settings=config.settings.testing
+      - name: Start, HTTP access checks and shutdown (disposable runtime)
+        run: python -B backend/scripts/runtime_smoke.py
+      - name: Isolated SQLite suite
+        working-directory: backend
+        run: python -B tests/run.py
+
+  postgres:
+    name: PostgreSQL concurrency and failure recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: backend
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: Hjjar-AI/Clinic-frontend
+          ref: ${{ vars.CLINIC_FRONTEND_REF || 'main' }}
+          path: frontend
+          token: ${{ secrets.CLINIC_REPOSITORY_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: ./backend/.github/actions/native-dependencies
+      - name: Install disposable-cluster tooling
+        run: sudo apt-get install -y postgresql
+      - run: python -m pip install -r backend/requirements/postgresql.txt
+      - name: Owned PostgreSQL suite (Unix socket, no clinic storage)
+        working-directory: backend
+        run: python -B tests/run_postgres.py

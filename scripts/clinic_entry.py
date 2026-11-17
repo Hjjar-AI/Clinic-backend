@@ -22,6 +22,8 @@ def main():
     parser.add_argument('--port', type=int, default=5019)
     parser.add_argument('--open-browser', action='store_true')
     args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error('Port must be 1–65535.')
     native_environment()
     if args.command in ('check', 'smoke-server'):
         os.environ['DJANGO_SETTINGS_MODULE'] = 'config.settings.bundle_check'

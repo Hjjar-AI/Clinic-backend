@@ -1,6 +1,7 @@
 """Build an allowlisted, one-folder executable from two checked-out repositories."""
 import argparse
 from importlib import metadata
+from importlib.util import find_spec
 import json
 import os
 from pathlib import Path
@@ -29,16 +30,25 @@ def main():
         parser.error('Output must be a new directory; existing files are never replaced.')
     if platform.machine().lower() not in ('amd64', 'x86_64'):
         parser.error('The initial release recipe supports x64 only.')
+    for module in ('PyInstaller', 'psycopg', 'psycopg_binary', 'redis', 'tzdata'):
+        if find_spec(module) is None:
+            parser.error(f'Missing build/runtime dependency: {module}; install the workflow tooling first.')
     with TemporaryDirectory(prefix='clinic-package-') as workspace:
         stage = Path(workspace) / 'source'
         stage.mkdir()
-        ignored = shutil.ignore_patterns('migrations', 'tests', '__pycache__', '*.pyc', '.env', '*.db')
+        def ignored(directory, names):
+            return [name for name in names if name.startswith('.') or name in ('migrations', 'tests', '__pycache__')
+                    or (not (Path(directory) / name).is_dir() and not name.endswith('.py'))]
         for name in ('apps', 'core', 'config'):
             shutil.copytree(root / name, stage / name, ignore=ignored)
         shutil.copy2(root / 'scripts' / 'clinic_entry.py', stage / 'clinic_entry.py')
         resources = stage / 'resources'
         shutil.copytree(root / 'templates', resources / 'templates')
         shutil.copytree(frontend / 'dist', resources / 'frontend')
+        # Build outputs are public assets; reject accidentally copied configuration.
+        if any(path.name.startswith('.env') or path.suffix in ('.db', '.sqlite', '.sqlite3')
+               for path in resources.rglob('*')):
+            parser.error('Unexpected private configuration/database file in release resources.')
         shutil.copy2(root / 'docs' / 'bundles.md', resources / 'BUNDLE.md')
         manifest = {
             'backend_commit': revision(root), 'frontend_commit': revision(frontend),
@@ -77,7 +87,7 @@ def main():
         spec.write_text('''from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 hidden = MODULES
 datas = [(RESOURCES, 'resources')]
-for package in ('rest_framework', 'corsheaders', 'whitenoise', 'phonenumber_field', 'weasyprint', 'psycopg', 'redis', 'tzdata'):
+for package in ('rest_framework', 'corsheaders', 'whitenoise', 'phonenumber_field', 'weasyprint', 'magic', 'psycopg', 'redis', 'tzdata'):
     hidden += collect_submodules(package)
     datas += collect_data_files(package)
 for distribution in ('waitress', 'python-magic', 'weasyprint', 'tzdata'):

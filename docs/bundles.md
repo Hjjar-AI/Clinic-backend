@@ -25,7 +25,7 @@ Windows packages include MSYS2 UCRT64 DLLs, MIME/fontconfig resources and suppli
 
 ## Building and downloading
 
-In the backend repository, choose **Actions → Windows and Linux bundles → Run workflow**, select the backend revision and supply the exact 40-character frontend commit SHA. A private sibling repository requires the read-only `CLINIC_REPOSITORY_TOKEN` secret described in [automation](automation.md). Download the two artifacts after both platform jobs pass; each contains an archive and SHA-256 checksum. The manifest records both source commits and installed build/runtime dependency versions. Artifacts expire after 30 days; the workflow does not publish a GitHub Release or deploy anything.
+In the backend repository, choose **Actions → Windows and Linux bundles → Run workflow**, select the backend revision and supply the exact 40-character frontend commit SHA. Both repositories are public, so no custom checkout secret is needed. Download the two artifacts after both platform jobs pass; each contains an archive and SHA-256 checksum. The manifest records both source commits and installed build/runtime dependency versions. Artifacts expire after 30 days; the workflow does not publish a GitHub Release or deploy anything.
 
 The workflow runs frontend tests/build and the backend SQLite suite on both platforms, plus the owned PostgreSQL suite on Linux, before packaging. Native checks and frozen smoke checks must pass before upload. CI-only PyInstaller/tzdata tooling is installed on the runner without editing application requirements/lockfiles. Native packages and some existing optional requirements are not fully locked, so manifests provide provenance rather than byte-for-byte reproducibility.
 

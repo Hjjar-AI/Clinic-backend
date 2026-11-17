@@ -21,6 +21,14 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-2022]
     steps:
+      - name: Require an immutable frontend revision
+        shell: python
+        env:
+          FRONTEND_REF: ${{ inputs.frontend_ref }}
+        run: |
+          import os, re
+          if not re.fullmatch(r'[0-9a-fA-F]{40}', os.environ['FRONTEND_REF']):
+              raise SystemExit('frontend_ref must be an exact 40-character commit SHA')
       - uses: actions/checkout@v6
         with:
           path: backend
@@ -30,7 +38,6 @@ jobs:
           repository: Hjjar-AI/Clinic-frontend
           ref: ${{ inputs.frontend_ref }}
           path: frontend
-          token: ${{ secrets.CLINIC_REPOSITORY_TOKEN || github.token }}
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
@@ -47,7 +54,12 @@ jobs:
         run: python -m pip install -r backend/requirements/postgresql.txt -r backend/requirements/cache-redis.txt PyInstaller==6.22.3 tzdata
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-      - run: pnpm test
+      - run: pnpm test:unit
+        working-directory: frontend
+      - name: Component regression gate
+        env:
+          CLINIC_VITEST_CACHE: ${{ runner.temp }}/clinic-vitest-cache
+        run: node node_modules/vitest/vitest.mjs run --configLoader runner --cache=false --fsModuleCachePath "${{ runner.temp }}/clinic-vitest-modules"
         working-directory: frontend
       - run: pnpm run build
         working-directory: frontend

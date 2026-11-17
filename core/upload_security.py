@@ -1,7 +1,6 @@
 from core.native_dependencies import detect_mime
 import zipfile
 import olefile
-import io
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
@@ -33,22 +32,24 @@ def validate_mime(file, allowed_mime_types=None):
 
 def detect_macros(file):
     file.seek(0)
-    data = file.read()
+    signature = file.read(4)
     file.seek(0)
-    if data[:4] == b'PK\x03\x04':  # ZIP-based (xlsx, docx)
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                for name in zf.namelist():
-                    if 'vbaProject.bin' in name:
+    try:
+        if signature == b'PK\x03\x04':
+            try:
+                with zipfile.ZipFile(file) as zf:
+                    if any('vbaProject.bin' in name for name in zf.namelist()):
                         raise ValidationError('Macros detected in file')
-        except zipfile.BadZipFile:
-            pass
-    elif olefile.isOleFile(io.BytesIO(data)):
-        ole = olefile.OleFileIO(io.BytesIO(data))
-        if ole.exists('VBAProject') or ole.exists('_VBA_PROJECT'):
-            ole.close()
-            raise ValidationError('Macros detected in file')
-        ole.close()
+            except zipfile.BadZipFile:
+                pass
+        elif olefile.isOleFile(file):
+            file.seek(0)
+            with olefile.OleFileIO(file) as ole:
+                if ole.exists('VBAProject') or ole.exists('_VBA_PROJECT'):
+                    raise ValidationError('Macros detected in file')
+    finally:
+        file.seek(0)
+
 
 def validate_upload(file):
     if file.size > settings.MAX_ATTACHMENT_SIZE:

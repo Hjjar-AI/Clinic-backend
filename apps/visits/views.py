@@ -58,71 +58,12 @@ class VisitViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Visit.objects.select_related(
-            'patient', 'author', 'signed_by', 'supervisor', 'follow_up',
-        ).prefetch_related(
-            'visit_diagnoses__diagnosis',
-            'visit_medications__medication',
-            'scale_responses',
-        )
-        from core.access import accessible_visits
-        qs = qs.filter(pk__in=accessible_visits(user).values('pk'))
-
-        status_param = self.request.query_params.get('status')
-        if status_param:
-            qs = qs.filter(status=status_param)
-        clinical_status = self.request.query_params.get('clinical_status')
-        if clinical_status:
-            qs = qs.filter(clinical_status=clinical_status)
-
-        date_from = self.request.query_params.get('date_from')
-        if date_from:
-            try:
-                date_from_parsed = datetime.strptime(date_from, '%Y-%m-%d').date()
-                qs = qs.filter(visit_date__gte=date_from_parsed)
-            except ValueError:
-                raise ValidationError({'date_from': ['صيغة التاريخ يجب أن تكون YYYY-MM-DD']})
-
-        date_to = self.request.query_params.get('date_to')
-        if date_to:
-            try:
-                date_to_parsed = datetime.strptime(date_to, '%Y-%m-%d').date()
-                qs = qs.filter(visit_date__lte=date_to_parsed)
-            except ValueError:
-                raise ValidationError({'date_to': ['صيغة التاريخ يجب أن تكون YYYY-MM-DD']})
-
-        patient_pk = self.kwargs.get('patient_pk')
-        if patient_pk:
-            qs = qs.filter(patient_id=patient_pk)
-        search = self.request.query_params.get('search', '').strip()
-        if search:
-            qs = qs.filter(
-                Q(patient__first_name__icontains=search)
-                | Q(patient__surname__icontains=search)
-                | Q(main_complaints__icontains=search)
-            )
-        return apply_ordering(qs, self.request.query_params, {
-            'date': 'visit_date', 'status': 'status', 'clinical_status': 'clinical_status',
-            'patient': 'patient__surname',
-            'created_at': 'created_at', 'updated_at': 'updated_at',
-        }, default='-visit_date')
+        from .selectors import list_queryset
+        return list_queryset(self.request.user, self.request.query_params, self.kwargs)
 
     def _paginate_queryset(self, qs, request):
-        # F7: interceptor rewrites `limit` -> `per_page`; read `per_page` first.
-        raw_limit = request.query_params.get('per_page') or request.query_params.get('limit', 20)
-        try:
-            limit = int(raw_limit)
-            limit = max(1, min(limit, 200))
-        except (ValueError, TypeError):
-            limit = 20
-        try:
-            offset = max(0, int(request.query_params.get('offset', 0)))
-        except (ValueError, TypeError):
-            offset = 0
-        total = qs.count()
-        items = list(qs[offset:offset + limit])
-        return items, total, limit, offset
+        from core.collections import offset_page
+        return offset_page(qs, request.query_params)
 
     def _check_patient_access(self, patient):
         from core.access import accessible_patients
@@ -224,7 +165,7 @@ class VisitViewSet(viewsets.ModelViewSet):
             deleted_at__isnull=True,
         )
         if request.method == 'DELETE':
-            VisitAttachmentService().soft_delete_attachment(attachment, self._required_version(request))
+            VisitAttachmentService().soft_delete_attachment(attachment, self._required_version(request), actor=request.user)
             log_action(request.user.id, 'archive', 'VisitAttachment', attachment.id, {
                 'summary': f'Archived visit attachment {attachment.original_filename}',
                 'visit_id': visit.id,
@@ -247,12 +188,11 @@ class VisitViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def revisions(self, request, pk=None):
         visit = self.get_object()
-        return Response({'data': list(visit.revisions.order_by('number').values(
-            'id', 'number', 'snapshot', 'signer_id', 'signed_at', 'reason'))})
+        from .selectors import revision_history
+        return Response({'data': revision_history(visit, request.query_params)}, headers={'Cache-Control': 'no-store'})
 
     @action(detail=True, methods=['get'], url_path='issued-documents')
     def issued_documents(self, request, pk=None):
         visit = self.get_object()
-        from apps.prescriptions.models import IssuedDocument
-        return Response({'data': list(IssuedDocument.objects.filter(revision__visit=visit).values(
-            'id', 'document_type', 'revision_id', 'issued_by_id', 'issued_at', 'checksum', 'snapshot'))})
+        from .selectors import issued_documents
+        return Response({'data': issued_documents(visit, request.user, request.query_params)}, headers={'Cache-Control': 'no-store'})

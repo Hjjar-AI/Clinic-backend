@@ -145,7 +145,7 @@ class PrescriptionService:
         from django.core.exceptions import PermissionDenied
         from core.access import require_actor_permission, accessible_visits
         from core.signals import log_action
-        from .issuance import record_document
+        from .issuance import record_document, IssuedPdf
         actor = require_actor_permission(actor, 'export_pdf')
         if actor.role not in {'admin', 'doctor'} or not actor.has_perm('edit_visit'):
             raise PermissionDenied('إصدار المستندات مخصص للطبيب المخول')
@@ -161,13 +161,13 @@ class PrescriptionService:
         if not isinstance(pdf, bytes) or not pdf:
             return None
         with transaction.atomic():
-            record_document(current, actor, 'prescription', snapshot, pdf, signature, stamp)
+            document = record_document(current, actor, 'prescription', snapshot, pdf, signature, stamp)
             log_action(actor.pk, 'generate_prescription', 'Visit', current.pk, {
                 'summary': f'Generated prescription from visit version {current.version}',
                 'visit_version': current.version, 'template_version': snapshot['template_version'],
             })
             transaction.on_commit(lambda: self.discard_preview(preview_token), robust=True)
-        return pdf
+        return IssuedPdf(pdf, document)
 
     def discard_preview(self, token):
         if token:

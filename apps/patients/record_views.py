@@ -38,10 +38,11 @@ class PatientRecordsMixin:
             # Bound response size; use explicit offset for older records.
             try:
                 offset = max(0, int(request.query_params.get('offset', 0)))
+                limit = max(1, min(int(request.query_params.get('per_page', 100)), 200))
             except (TypeError, ValueError):
                 raise ValidationError('إزاحة غير صالحة')
-            return Response({'data': {'items': serializer(rows[offset:offset + 100], many=True).data,
-                'total': rows.count(), 'version': patient.version}})
+            return Response({'data': {'items': serializer(rows[offset:offset + limit], many=True).data,
+                'total': rows.count(), 'version': patient.version, 'offset': offset, 'limit': limit}})
         data = request.data.get('fields', {})
         if not isinstance(data, dict):
             raise ValidationError({'fields': ['يلزم كائن حقول']})
@@ -73,12 +74,13 @@ class PatientRecordsMixin:
             rows = rows.exclude(record_type__in=CLINICAL_KINDS | {'clinical-profile'})
         try:
             offset = max(0, int(request.query_params.get('offset', 0)))
+            limit = max(1, min(int(request.query_params.get('per_page', 100)), 200))
         except (TypeError, ValueError):
             raise ValidationError('إزاحة غير صالحة')
         return Response({'data': {'items': [{'id': row.pk, 'actor': row.actor.full_name or row.actor.username,
             'reason': row.reason, 'record_type': row.record_type, 'record_id': row.record_id, 'patient_number': row.patient.patient_number,
-            'changes': row.changes, 'created_at': row.created_at} for row in rows[offset:offset + 100]],
-            'total': rows.count(), 'merges': [{'id': event.pk, 'source': event.source.patient_number,
+            'changes': row.changes, 'created_at': row.created_at} for row in rows[offset:offset + limit]],
+            'total': rows.count(), 'offset': offset, 'limit': limit, 'merges': [{'id': event.pk, 'source': event.source.patient_number,
                 'survivor': event.survivor.patient_number, 'actor': event.actor.full_name or event.actor.username,
                 'reason': event.reason, 'created_at': event.created_at} for event in merges[:100]]}})
 

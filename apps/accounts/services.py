@@ -39,6 +39,8 @@ class AuthService:
                 user.save(update_fields=['failed_login_attempts', 'locked_until', 'last_login'])
                 login(request, user)
                 request.session['login_time'] = timezone.now().isoformat()
+                from core.session_activity import mark_activity
+                mark_activity(request)
                 request.session.set_expiry(86400 * 30 if remember else 0)
         # Failed-attempt bookkeeping must commit before raising the API error.
         if failure:

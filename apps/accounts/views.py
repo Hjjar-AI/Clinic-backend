@@ -1,3 +1,4 @@
+from core.session_activity import activity_payload
 from core.mutation import request_version
 # backend/apps/accounts/views.py
 from rest_framework import viewsets, status, permissions
@@ -31,7 +32,7 @@ class AuthViewSet(viewsets.GenericViewSet):
 
     def get_permissions(self):
         # Explicit URL mappings do not apply @action permission overrides.
-        if self.action in {'me', 'logout', 'change_password'}:
+        if self.action in {'me', 'logout', 'change_password', 'activity'}:
             return [permissions.IsAuthenticated()]
         return [permissions.AllowAny()]
 
@@ -50,7 +51,13 @@ class AuthViewSet(viewsets.GenericViewSet):
         data['unread_count'] = self.notification_service.get_for_user(
             user.id, unread_only=True
         ).count()
-        return Response({'data': {'user': data}, 'message': 'Login successful'})
+        return Response({'data': {'user': data, 'session': activity_payload(request)}, 'message': 'Login successful'})
+
+    @action(detail=False, methods=['post'])
+    @method_decorator(csrf_protect)
+    def activity(self, request):
+        from core.session_activity import mark_activity
+        return Response({'data': mark_activity(request)})
 
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def logout(self, request):
@@ -65,7 +72,7 @@ class AuthViewSet(viewsets.GenericViewSet):
         data['unread_count'] = self.notification_service.get_for_user(
             user.id, unread_only=True
         ).count()
-        return Response({'data': {'user': data}})
+        return Response({'data': {'user': data, 'session': activity_payload(request)}})
 
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def change_password(self, request):
@@ -96,21 +103,8 @@ class UserViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        search = self.request.query_params.get('search', '').strip()
-        if search:
-            qs = qs.filter(Q(username__icontains=search) | Q(full_name__icontains=search))
-        role = self.request.query_params.get('role')
-        if role:
-            if role not in dict(User.ROLE_CHOICES):
-                raise ValidationError({'role': ['الدور غير صالح']})
-            qs = qs.filter(role=role)
-        return apply_ordering(qs, self.request.query_params, {
-            'username': 'username',
-            'full_name': 'full_name',
-            'role': 'role',
-            'date_joined': 'date_joined',
-        }, default='username')
+        from .selectors import list_queryset
+        return list_queryset(self.request.user, self.request.query_params)
 
     def perform_create(self, serializer):
         user = self.service.create_user(

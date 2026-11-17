@@ -24,6 +24,7 @@ class ReferralLetterView(APIView):
         )
         if pdf:
             response = HttpResponse(pdf, content_type='application/pdf')
+            response._receipt_reference = getattr(pdf, 'receipt_reference', None)
             response['Content-Disposition'] = f'attachment; filename="referral_{visit_id}.pdf"'
             return response
         return error_response(503, 'تعذر إنشاء ملف PDF؛ تحقق من إعدادات مولد المستندات وحاول مجدداً', {})

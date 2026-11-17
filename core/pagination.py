@@ -43,6 +43,8 @@ class StandardResultsSetPagination(CursorPagination):
                 'data': {
                     'items': data,
                     'meta': {
+                        'pagination': 'cursor',
+                        'per_page': self.page_size,
                         'next_cursor': self._extract_cursor_token(self.get_next_link()),
                         'previous_cursor': self._extract_cursor_token(self.get_previous_link()),
                         'has_more': self.has_next,

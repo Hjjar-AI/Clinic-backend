@@ -21,7 +21,11 @@ def prescription_history(actor, patient_id, params):
     raw = params.get('offset', '0')
     if not isinstance(raw, str) or not raw.isdecimal() or len(raw) > 9:
         raise ValidationError({'offset': ['أدخل إزاحة صحيحة غير سالبة']})
-    offset, limit = int(raw), 20
+    offset = int(raw)
+    try:
+        limit = max(1, min(int(params.get('per_page', 20)), 200))
+    except (ValueError, TypeError):
+        raise ValidationError({'per_page': ['حجم صفحة غير صالح']})
     documents = prescriptions_for(actor).filter(revision__visit__patient=patient).order_by('-issued_at', '-id')
     if params.get('visit_id'):
         raw_visit = params['visit_id']
@@ -49,3 +53,13 @@ def render_patient_instructions(document):
         'prescription': document.snapshot, 'document_id': document.pk,
         'issued_at': document.issued_at, 'revision_number': document.revision.number,
     }))
+
+
+def issued_document(actor, document_id):
+    from django.core.exceptions import PermissionDenied
+    document = get_object_or_404(IssuedDocument.objects.select_related('revision').filter(
+        revision__visit__in=accessible_visits(actor)), pk=document_id)
+    permission = 'export_pdf' if document.document_type == 'prescription' else 'view_referrals'
+    if not actor.has_perm('view_visits') or not actor.has_perm(permission):
+        raise PermissionDenied('غير مصرح بتنزيل المستند')
+    return document

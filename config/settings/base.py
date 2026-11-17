@@ -27,6 +27,7 @@ if not DEBUG:
         )
 
 BACKUP_DIR = BASE_DIR / 'backups'
+OPERATION_RESPONSE_DIR = os.environ.get('OPERATION_RESPONSE_DIR', '').strip() or None
 CLINIC_NAME = os.environ.get('CLINIC_NAME', 'عيادة الإتزان')
 CLINIC_ADDRESS = os.environ.get('CLINIC_ADDRESS', '')
 CLINIC_PHONE = os.environ.get('CLINIC_PHONE', '')
@@ -47,8 +48,10 @@ MAX_APPOINTMENTS_PER_VIEW = int(os.environ.get('MAX_APPOINTMENTS_PER_VIEW', 500)
 
 MAX_BULK_IMPORT_SIZE = int(os.environ.get('MAX_BULK_IMPORT_SIZE', 200)) * 1024 * 1024
 MAX_ATTACHMENT_SIZE = int(os.environ.get('MAX_ATTACHMENT_SIZE', 10)) * 1024 * 1024
-FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.environ.get('MAX_CONTENT_LENGTH', 210)) * 1024 * 1024
-DATA_UPLOAD_MAX_MEMORY_SIZE = FILE_UPLOAD_MAX_MEMORY_SIZE
+MAX_REQUEST_BODY_SIZE = int(os.environ.get('MAX_CONTENT_LENGTH', 210)) * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2621440
+DATA_UPLOAD_MAX_MEMORY_SIZE = 2621440
+CSRF_FAILURE_VIEW = 'core.errors.csrf_failure'
 
 # ---------------------------------------------------------------------
 # Scheduler & backup retention
@@ -133,9 +136,12 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     # Session revocation must run after AuthenticationMiddleware so request.user is available
     'core.middleware.SessionRevocationMiddleware',
+    'core.session_activity.SessionIdleMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middleware.RequestContextMiddleware',
+    'core.middleware.PasswordChangeMiddleware',
+    'core.middleware.IdempotencyMiddleware',
 ]
 WHITENOISE_USE_FINDERS = True
 WHITENOISE_AUTOREFRESH = True
@@ -146,7 +152,7 @@ TEMPLATES = [
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         'DIRS': [
             BASE_DIR / 'templates',
-            BASE_DIR.parent / 'frontend' / 'dist',
+            Path(os.environ.get('FRONTEND_DIST', str(BASE_DIR.parent / 'frontend' / 'dist'))),
         ],
         'APP_DIRS': True,
         'OPTIONS': {
@@ -187,7 +193,7 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
-    BASE_DIR.parent / 'frontend' / 'dist',
+    Path(os.environ.get('FRONTEND_DIST', str(BASE_DIR.parent / 'frontend' / 'dist'))),
 ]
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
@@ -199,7 +205,7 @@ AUTH_USER_MODEL = 'accounts.User'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
+        'core.authentication.ClinicSessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',

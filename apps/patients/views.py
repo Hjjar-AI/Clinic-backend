@@ -77,21 +77,8 @@ class PatientViewSet(PatientRecordsMixin, viewsets.ModelViewSet):
         return Patient.objects.none()
 
     def _paginate_queryset(self, qs, request):
-        # F7: The frontend apiClient rewrites GET `limit` -> `per_page`. Read
-        # `per_page` first so caller intent is honored; fall back to `limit`.
-        raw_limit = request.query_params.get('per_page') or request.query_params.get('limit', 20)
-        try:
-            limit = int(raw_limit)
-            limit = max(1, min(limit, 200))
-        except (ValueError, TypeError):
-            limit = 20
-        try:
-            offset = max(0, int(request.query_params.get('offset', 0)))
-        except (ValueError, TypeError):
-            offset = 0
-        total = qs.count()
-        items = list(qs[offset:offset + limit])
-        return items, total, limit, offset
+        from core.collections import offset_page
+        return offset_page(qs, request.query_params)
 
     def perform_create(self, serializer):
         instance = self.service.create_patient(serializer.validated_data, self.request.user)
@@ -147,7 +134,7 @@ class PatientViewSet(PatientRecordsMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='all_light')
     def all_light(self, request):
         try:
-            limit = int(request.query_params.get('limit', 1000))
+            limit = int(request.query_params.get('per_page', 1000))
             limit = max(1, min(limit, 5000))
         except ValueError:
             limit = 1000
@@ -157,6 +144,9 @@ class PatientViewSet(PatientRecordsMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def anonymize(self, request, pk=None):
+        from core.permissions import IsAdminRole
+        if not IsAdminRole().has_permission(request, self):
+            self.permission_denied(request)
         patient = self.get_object()
         self.service.anonymize(patient, request.user, request_version(request))
         return Response({'message': 'تم تقييد الهوية؛ تحتفظ المستندات المعتمدة ببياناتها التاريخية'})
@@ -175,44 +165,14 @@ class PatientViewSet(PatientRecordsMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def risk_history(self, request, pk=None):
         patient = self.get_object()
-        visits = patient.visits.filter(deleted_at__isnull=True).order_by('-visit_date')
-        items, total, limit, offset = self._paginate_queryset(visits, request)
-        history = [{
-            'visit_id': v.id,
-            'visit_date': v.visit_date,
-            'suicide_risk_level': v.suicide_risk_level,
-            'violence_risk_level': v.violence_risk_level,
-            'firearm_access': v.firearm_access,
-        } for v in items]
-        return Response({
-            'data': {
-                'risk_history': history,
-                'meta': {'total': total, 'limit': limit, 'offset': offset}
-            }
-        })
+        from .history import risk_history
+        return Response({'data': risk_history(patient, request.user, request.query_params)})
 
     @action(detail=True, methods=['get'])
     def timeline(self, request, pk=None):
         patient = self.get_object()
-        visits = patient.visits.filter(deleted_at__isnull=True).select_related('follow_up').prefetch_related(
-            'visit_diagnoses__diagnosis',
-            'visit_medications__medication',
-        ).order_by('-visit_date')
-        items, total, limit, offset = self._paginate_queryset(visits, request)
-        timeline = [{
-            'id': v.id,
-            'visit_date': v.visit_date,
-            'main_complaints': v.main_complaints,
-            'diagnoses': v.get_diagnoses(),
-            'medications': v.get_medications(),
-            'follow_up': follow_up_data(v.follow_up),
-        } for v in items]
-        return Response({
-            'data': {
-                'timeline': timeline,
-                'meta': {'total': total, 'limit': limit, 'offset': offset}
-            }
-        })
+        from .history import timeline
+        return Response({'data': timeline(patient, request.user, request.query_params)})
 
     @action(detail=True, methods=['get'])
     def care_team(self, request, pk=None):

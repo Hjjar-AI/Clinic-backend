@@ -44,7 +44,14 @@ def authorize_replay(request, operation):
     visit_id = match.kwargs.get('visit_id') or api_request.data.get('visit_id')
     if visit_id and not accessible_visits(api_request.user).filter(pk=visit_id).exists():
         raise PermissionDenied()
+    from .response_store import REFERENCE
+    reference = operation.response_headers.get(REFERENCE, {})
+    if reference.get('kind') == 'issued_document':
+        from apps.prescriptions.models import IssuedDocument
+        document = IssuedDocument.objects.filter(pk=reference.get('id')).first()
+        if document is not None and not accessible_visits(api_request.user).filter(pk=document.revision.visit_id).exists():
+            raise PermissionDenied()
     # Issuance services impose an additional clinician/edit requirement.
-    if request.path.startswith(('/api/v1/prescription/', '/api/v1/referrals/')):
+    if request.path.startswith(('/api/v1/prescription/generate/', '/api/v1/referrals/')):
         if api_request.user.role not in {'doctor', 'admin'} or not api_request.user.has_perm('edit_visit'):
             raise PermissionDenied()

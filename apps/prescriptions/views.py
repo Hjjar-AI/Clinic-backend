@@ -44,6 +44,7 @@ class PrescriptionGenerateView(APIView):
         result = self.service.issue_prescription(visit, request.user, preview_token, signature_data, stamp_data, **options)
         if isinstance(result, bytes):
             response = HttpResponse(result, content_type='application/pdf')
+            response._receipt_reference = getattr(result, 'receipt_reference', None)
             response['Content-Disposition'] = f'attachment; filename="prescription_{visit_id}.pdf"'
             return response
         return error_response(503, 'تعذر إنشاء ملف PDF؛ تحقق من إعدادات مولد المستندات وحاول مجدداً', {})
@@ -89,6 +90,7 @@ class ClinicalHandoverView(APIView):
             if not isinstance(result, bytes):
                 return error_response(503, 'تعذر إنشاء ملخص التسليم', {})
             response = HttpResponse(result, content_type='application/pdf')
+            response._receipt_reference = getattr(result, 'receipt_reference', None)
             response['Content-Disposition'] = f'attachment; filename="handover_{visit_id}_revision_{data["revision_number"]}.pdf"'
         else:
             response = Response({'data': data})
@@ -111,4 +113,17 @@ class PrescriptionDocumentView(APIView):
         response['Cache-Control'] = 'no-store'
         if not instructions:
             response['X-Document-Checksum'] = document.checksum
+        return response
+
+
+class IssuedDocumentView(APIView):
+    permission_classes = [IsAuthenticated, HasViewVisits]
+
+    def get(self, request, document_id):
+        from .history import issued_document
+        document = issued_document(request.user, document_id)
+        response = HttpResponse(bytes(document.pdf_data), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{document.document_type}_{document.pk}.pdf"'
+        response['Cache-Control'] = 'no-store'
+        response['X-Document-Checksum'] = document.checksum
         return response

@@ -82,12 +82,12 @@ class ReferralService:
         })
         pdf = render_pdf_from_html(html)
         if pdf:
-            from apps.prescriptions.issuance import record_document
+            from apps.prescriptions.issuance import record_document, IssuedPdf
             with transaction.atomic():
-                record_document(visit, actor, 'referral', snapshot, pdf)
+                document = record_document(visit, actor, 'referral', snapshot, pdf)
                 log_action(actor.pk, 'generate_referral', 'Visit', visit.pk, {
                     'summary': f'Generated referral from visit version {visit.version}',
                     'visit_version': visit.version,
                     'template_version': snapshot['template_version'],
                 })
-        return pdf
+        return IssuedPdf(pdf, document) if pdf else pdf

@@ -46,44 +46,8 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Invoice.objects.select_related('patient', 'visit').prefetch_related('lines')
-        from core.access import accessible_invoices
-        qs = qs.filter(pk__in=accessible_invoices(user).values('pk'))
-
-        status_param = self.request.query_params.get('status')
-        if status_param == 'overdue':
-            qs = qs.filter(status='issued', due_date__lt=timezone.localdate())
-        elif status_param:
-            qs = qs.filter(status=status_param)
-
-        date_from = self.request.query_params.get('date_from')
-        if date_from:
-            try:
-                date_from_parsed = datetime.strptime(date_from, '%Y-%m-%d').date()
-                qs = qs.filter(issued_date__gte=date_from_parsed)
-            except ValueError:
-                raise ValidationError({'date_from': ['صيغة التاريخ يجب أن تكون YYYY-MM-DD']})
-
-        date_to = self.request.query_params.get('date_to')
-        if date_to:
-            try:
-                date_to_parsed = datetime.strptime(date_to, '%Y-%m-%d').date()
-                qs = qs.filter(issued_date__lte=date_to_parsed)
-            except ValueError:
-                raise ValidationError({'date_to': ['صيغة التاريخ يجب أن تكون YYYY-MM-DD']})
-
-        search = self.request.query_params.get('search', '').strip()
-        if search:
-            qs = qs.filter(
-                Q(invoice_number__icontains=search)
-                | Q(patient__first_name__icontains=search)
-                | Q(patient__surname__icontains=search)
-            )
-        return apply_ordering(qs, self.request.query_params, {
-            'invoice_number': 'invoice_number', 'patient': 'patient__surname',
-            'amount': 'final_amount', 'status': 'status', 'issued_date': 'issued_date',
-        })
+        from .selectors import list_queryset
+        return list_queryset(self.request.user, self.request.query_params, self.kwargs)
 
     def perform_create(self, serializer):
         instance = self.service.create_invoice(serializer.validated_data, self.request.user)
@@ -120,45 +84,16 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             patient_id = int(patient_id)
         except (TypeError, ValueError):
             return error_response(400, 'patient_id must be an integer', {})
-        patient = Patient.objects.filter(id=patient_id).first()
-        if not patient:
-            return error_response(404, 'المريض غير موجود', {})
-        user = self.request.user
-        from core.access import accessible_patients, accessible_visits
-        if not accessible_patients(user).filter(pk=patient.pk).exists():
-            return error_response(403, 'غير مصرح', {})
-        qs = accessible_visits(user).filter(patient_id=patient_id)
-        # Billing only needs a small visit selector. Do not expose the full
-        # clinical visit serializer (notes, diagnoses, risk data) here.
-        visits = list(qs.order_by('-visit_date').values(
-            'id', 'visit_date', 'status'
-        ))
-        return Response({'data': {'visits': visits}})
+        from .selectors import visits_for_patient
+        return Response({'data': visits_for_patient(request.user, patient_id)})
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         invoice = self.get_object()
-        clinic_info = invoice.issue_snapshot.get('clinic') or SettingsService().get_clinic_info()
-        clinic = {
-            'name': clinic_info.get('clinic_name', ''),
-            'address': clinic_info.get('clinic_address', ''),
-            'phone': clinic_info.get('clinic_phone', ''),
-        }
-        html = render_to_string('billing/invoice_pdf.html', {
-            'invoice': invoice,
-            'billed_patient_name': invoice.issue_snapshot.get('patient_name') or invoice.patient.get_full_name(),
-            'clinic': clinic,
-            'generated_at': timezone.localtime().strftime('%d/%m/%Y %H:%M'),
-            'timezone': timezone.get_current_timezone_name(),
-            'status_label': STATUS_PRESENTATION['invoice'][invoice.status]['label'],
-        })
-        pdf = render_pdf_from_html(html)
+        from .documents import invoice_pdf
+        pdf = invoice_pdf(invoice, request.user)
         if not pdf:
             return error_response(503, 'تعذر إنشاء ملف الفاتورة', {})
-        log_action(request.user.id, 'export', 'Invoice', invoice.id, {
-            'summary': f'Invoice PDF export {invoice.invoice_number}',
-            'version': invoice.version,
-        })
         response = HttpResponse(pdf, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="invoice_{invoice.invoice_number}.pdf"'
         return response

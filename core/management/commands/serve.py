@@ -36,4 +36,4 @@ class Command(BaseCommand):
         if settings.DEBUG:
             self.stdout.write(self.style.WARNING('Development settings are active; production requires explicit production settings.'))
         serve(get_wsgi_application(), host=options['host'], port=options['port'], threads=options['threads'],
-              max_request_body_size=settings.FILE_UPLOAD_MAX_MEMORY_SIZE, expose_tracebacks=False)
+              max_request_body_size=settings.MAX_REQUEST_BODY_SIZE, expose_tracebacks=False)

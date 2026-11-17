@@ -49,22 +49,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
-        if self.request.user.has_perm(PERM_VIEW_APPOINTMENTS):
-            qs = self.service.get_accessible_appointments(self.request.user)
-            patient_id = self.request.query_params.get('patient_id')
-            if patient_id:
-                qs = qs.filter(patient_id=patient_id)
-            status_param = self.request.query_params.get('status')
-            if status_param:
-                qs = qs.filter(status=status_param)
-            search = self.request.query_params.get('search', '').strip()
-            if search:
-                qs = qs.filter(Q(patient__first_name__icontains=search) | Q(patient__surname__icontains=search))
-            return apply_ordering(qs, self.request.query_params, {
-                'date': 'appointment_date', 'time': 'appointment_time',
-                'status': 'status', 'patient': 'patient__surname', 'created_at': 'created_at',
-            }, default='-appointment_date')
-        return Appointment.objects.none()
+        from .selectors import list_queryset
+        return list_queryset(self.request.user, self.request.query_params, self.kwargs)
 
     def perform_create(self, serializer):
         patient = serializer.validated_data['patient']
@@ -88,132 +74,28 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         self.service.archive(instance, self._required_version(self.request), actor=self.request.user)
 
     def _paginate_queryset(self, qs, request):
-        """
-        Offset/limit pagination helper.
-
-        F7: The frontend apiClient interceptor rewrites GET `params.limit` into
-        `params.per_page`, so the canonical key on the wire is `per_page`.
-        Read it first; fall back to `limit` for direct API clients.
-        """
-        raw_limit = request.query_params.get('per_page') or request.query_params.get('limit', 20)
-        try:
-            limit = int(raw_limit)
-            limit = max(1, min(limit, 200))
-        except (ValueError, TypeError):
-            limit = 20
-        try:
-            offset = max(0, int(request.query_params.get('offset', 0)))
-        except (ValueError, TypeError):
-            offset = 0
-        total = qs.count()
-        items = list(qs[offset:offset + limit])
-        return items, total, limit, offset
+        from core.collections import offset_page
+        return offset_page(qs, request.query_params)
 
     @action(detail=False, methods=['get'])
     def raw(self, request):
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        doctor_id = request.query_params.get('doctor_id')
-        if not start_date or not end_date:
-            return error_response(400, 'start_date and end_date required', {})
-        # Item #5: guard parsing so malformed query params return 400, not 500.
-        try:
-            start = datetime.strptime(start_date, '%Y-%m-%d').date()
-            end = datetime.strptime(end_date, '%Y-%m-%d').date()
-        except (ValueError, TypeError):
-            return error_response(400, 'Invalid date format; expected YYYY-MM-DD', {})
-        if start >= end:
-            return error_response(400, 'end_date must be after start_date', {})
-        if (end - start).days > 366:
-            return error_response(400, 'Date range cannot exceed 366 days', {})
-        if doctor_id:
-            try:
-                doctor_id = int(doctor_id)
-            except (ValueError, TypeError):
-                return error_response(400, 'doctor_id must be an integer', {})
-        qs = self.service.get_accessible_appointments(request.user)
-        qs = qs.filter(appointment_date__gte=start, appointment_date__lt=end)
-        if doctor_id and request.user.role == 'admin':
-            qs = qs.filter(doctor_id=doctor_id)
-
-        items, total, limit, offset = self._paginate_queryset(qs, request)
-        serializer = self.get_serializer(items, many=True)
-        return Response({
-            'data': {
-                'appointments': serializer.data,
-                'meta': {
-                    'total': total,
-                    'limit': limit,
-                    'offset': offset,
-                }
-            }
-        })
+        from .selectors import raw_queryset
+        items, total, limit, offset = self._paginate_queryset(raw_queryset(request.user, request.query_params), request)
+        return Response({'data': {'items': self.get_serializer(items, many=True).data,
+            'meta': {'pagination': 'offset', 'total': total, 'per_page': limit, 'offset': offset}}})
 
     @action(detail=False, methods=['get'])
     def calendar(self, request):
-        view = request.query_params.get('view', 'week')
-        if view not in {'day', 'week', 'month'}:
-            return error_response(400, 'view must be day, week, or month', {})
-        date_str = request.query_params.get('date')
-        doctor_id = request.query_params.get('doctor_id')
-        # Item #5: guard date parsing so malformed `date=` returns 400, not 500.
-        if date_str:
-            try:
-                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-            except (ValueError, TypeError):
-                return error_response(400, 'Invalid date format; expected YYYY-MM-DD', {})
-        else:
-            date_obj = timezone.localdate()
-        # Validate doctor_id is numeric up-front, but pass the original string
-        # through so the response shape is unchanged.
-        if doctor_id:
-            try:
-                int(doctor_id)
-            except (ValueError, TypeError):
-                return error_response(400, 'doctor_id must be an integer', {})
-        appointments = self.service.get_calendar(request.user, view, date_obj, doctor_id)
-
-        items, total, limit, offset = self._paginate_queryset(appointments, request)
-        serializer = self.get_serializer(items, many=True)
-        return Response({
-            'data': {
-                'view': view,
-                'date': date_obj.isoformat(),
-                'doctor_id': doctor_id,
-                'appointments': serializer.data,
-                'meta': {
-                    'total': total,
-                    'limit': limit,
-                    'offset': offset,
-                }
-            }
-        })
+        from .selectors import calendar_queryset
+        rows, context = calendar_queryset(request.user, request.query_params)
+        items, total, limit, offset = self._paginate_queryset(rows, request)
+        return Response({'data': {'items': self.get_serializer(items, many=True).data,
+            'meta': {**context, 'pagination': 'offset', 'total': total, 'per_page': limit, 'offset': offset}}})
 
     @action(detail=False, methods=['get'])
     def availability(self, request):
-        doctor_id = request.query_params.get('doctor_id')
-        date_str = request.query_params.get('date')
-        duration_raw = request.query_params.get('duration', settings.DEFAULT_APPOINTMENT_DURATION)
-        if not doctor_id or not date_str:
-            return error_response(400, 'doctor_id and date required', {})
-        # Item #5: guard parsing of doctor_id, duration, and date.
-        try:
-            doctor_id_int = int(doctor_id)
-        except (ValueError, TypeError):
-            return error_response(400, 'doctor_id must be an integer', {})
-        try:
-            duration = int(duration_raw)
-        except (ValueError, TypeError):
-            return error_response(400, 'duration must be an integer', {})
-        self.service._validate_duration(duration)
-        try:
-            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-        except (ValueError, TypeError):
-            return error_response(400, 'Invalid date format; expected YYYY-MM-DD', {})
-        if request.user.role == 'doctor' and doctor_id_int != request.user.id:
-            return error_response(403, 'غير مصرح', {})
-        slots = self.service.generate_time_slots(doctor_id_int, date_obj, duration)
-        return Response({'data': {'slots': slots}})
+        from .selectors import availability
+        return Response({'data': {'items': availability(request.user, request.query_params), 'meta': {'pagination': 'none'}}})
 
     @action(detail=True, methods=['put'])
     def cancel(self, request, pk=None):
@@ -281,18 +163,5 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             return error_response(400, 'patient_id must be an integer', {})
 
-        accessible_patients = self.patient_service.list_patients(request.user, {})
-        patient_obj = accessible_patients.filter(id=patient_id_int).first()
-        if not patient_obj:
-            return error_response(404, 'المريض غير موجود أو غير مصرح', {})
-
-        from django.db.models import Q
-        now = timezone.localtime()
-        next_apt = self.service.get_accessible_appointments(request.user).filter(
-            patient_id=patient_id_int,
-            status__in=['scheduled', 'confirmed'],
-        ).filter(Q(appointment_date__gt=now.date()) |
-            Q(appointment_date=now.date(), appointment_time__gte=now.time().replace(tzinfo=None))).order_by('appointment_date', 'appointment_time', 'pk').first()
-        if next_apt:
-            return Response({'data': {'date': next_apt.appointment_date, 'time': next_apt.appointment_time}})
-        return Response({'data': {'date': None}})
+        from .selectors import next_appointment
+        return Response({'data': next_appointment(request.user, patient_id_int)})

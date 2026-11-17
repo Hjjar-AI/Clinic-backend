@@ -15,10 +15,13 @@ class EnvelopeJSONRenderer(JSONRenderer):
             # These statuses cannot carry an envelope. Sending JSON after a
             # 204 breaks persistent HTTP connections and proxy parsing.
             return b''
-        # Check if data is already an envelope
+        from .collections import normalize_collection
+        request = (renderer_context or {}).get('request')
+        if request and request.method == 'GET' and response is not None and response.status_code < 300:
+            if isinstance(data, dict) and 'data' in data:
+                data = {**data, 'data': normalize_collection(data['data'], request)}
+            else:
+                data = normalize_collection(data, request)
         if isinstance(data, dict) and ('data' in data or 'error' in data):
             return super().render(data, accepted_media_type, renderer_context)
-
-        # Wrap plain data
-        wrapped_data = {'data': data}
-        return super().render(wrapped_data, accepted_media_type, renderer_context)
+        return super().render({'data': data}, accepted_media_type, renderer_context)

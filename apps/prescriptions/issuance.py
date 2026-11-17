@@ -50,3 +50,11 @@ def record_document(visit, actor, kind, snapshot, pdf, signature='', stamp=''):
     document.full_clean()
     document.save()
     return document
+
+
+class IssuedPdf(bytes):
+    """Keep byte-returning service compatibility while carrying the saved identity."""
+    def __new__(cls, pdf, document):
+        value = super().__new__(cls, pdf)
+        value.receipt_reference = {'kind': 'issued_document', 'id': document.pk, 'checksum': document.checksum}
+        return value

@@ -23,8 +23,18 @@ if not ALLOWED_HOSTS:
         '  DJANGO_ALLOWED_HOSTS=clinic.example.com,www.clinic.example.com'
     )
 
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+# HTTP is an explicit supported LAN profile; HTTPS remains the default.
+CLINIC_TRANSPORT = os.environ.get('CLINIC_TRANSPORT', 'https').lower()
+if CLINIC_TRANSPORT not in {'http', 'https'}:
+    raise RuntimeError('CLINIC_TRANSPORT must be http or https')
+SESSION_COOKIE_SECURE = CLINIC_TRANSPORT == 'https'
+CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
+SECURE_SSL_REDIRECT = False
+if os.environ.get('TRUST_PROXY_HTTPS', 'false').lower() == 'true':
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+WHITENOISE_USE_FINDERS = False
+WHITENOISE_AUTOREFRESH = False
+REST_FRAMEWORK = {**REST_FRAMEWORK, 'DEFAULT_RENDERER_CLASSES': ['core.renderers.EnvelopeJSONRenderer']}
 
 # ---------------------------------------------------------------------
 # Production safety rails

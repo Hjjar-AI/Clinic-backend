@@ -1,7 +1,8 @@
 from django.urls import path
-from .views import PrescriptionPreviewView, PrescriptionGenerateView, PrescriptionCalibrationView, PrescriptionHistoryView, PrescriptionDocumentView, ClinicalHandoverView
+from .views import PrescriptionPreviewView, PrescriptionGenerateView, PrescriptionCalibrationView, PrescriptionHistoryView, PrescriptionDocumentView, ClinicalHandoverView, IssuedDocumentView
 
 urlpatterns = [
+    path('issued-documents/<int:document_id>/pdf/', IssuedDocumentView.as_view(), name='issued-document-pdf'),
     path('patient/<int:patient_id>/handover/', ClinicalHandoverView.as_view(), name='latest-clinical-handover'),
     path('visit/<int:visit_id>/handover/', ClinicalHandoverView.as_view(), name='clinical-handover'),
     path('visit/<int:visit_id>/handover/pdf/', ClinicalHandoverView.as_view(), {'pdf': True}, name='clinical-handover-pdf'),

@@ -2,6 +2,7 @@ from django.urls import path
 from .views import AuthViewSet, UserViewSet
 
 urlpatterns = [
+    path('activity/', AuthViewSet.as_view({'post': 'activity'}), name='activity'),
     path('login/', AuthViewSet.as_view({'post': 'login'}), name='login'),
     path('logout/', AuthViewSet.as_view({'post': 'logout'}), name='logout'),
     path('me/', AuthViewSet.as_view({'get': 'me'}), name='me'),

@@ -4,6 +4,7 @@ from django.db import IntegrityError
 from rest_framework.views import exception_handler
 from rest_framework.response import Response
 from rest_framework import status
+from .errors import error_payload
 
 
 class ConflictError(Exception):
@@ -20,13 +21,7 @@ def error_response(code, message, errors=None, status_code=None):
     """
     if status_code is None:
         status_code = code if isinstance(code, int) else status.HTTP_400_BAD_REQUEST
-    data = {
-        'error': {
-            'code': code,
-            'message': message,
-            'errors': errors or {},
-        }
-    }
+    data = error_payload(code, message, status_code, errors)
     return Response(data, status=status_code)
 
 
@@ -55,7 +50,7 @@ def custom_exception_handler(exc, context):
     # ---------------------------------------------------------------
     if isinstance(exc, ConflictError):
         return error_response(
-            code=status.HTTP_409_CONFLICT,
+            code='version_conflict', status_code=409,
             message=str(exc),
             errors={}
         )
@@ -128,5 +123,6 @@ def custom_exception_handler(exc, context):
                 data['error']['message'] = str(detail)
         else:
             data['error']['message'] = str(exc)
-        response.data = data
+        response.data = error_payload(getattr(exc, 'default_code', response.status_code),
+            data['error']['message'], response.status_code, data['error'].get('errors'))
     return response

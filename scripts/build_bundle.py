@@ -77,7 +77,7 @@ def main():
         spec.write_text('''from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 hidden = MODULES
 datas = [(RESOURCES, 'resources')]
-for package in ('rest_framework', 'corsheaders', 'whitenoise', 'phonenumber_field', 'weasyprint', 'psycopg', 'redis'):
+for package in ('rest_framework', 'corsheaders', 'whitenoise', 'phonenumber_field', 'weasyprint', 'psycopg', 'redis', 'tzdata'):
     hidden += collect_submodules(package)
     datas += collect_data_files(package)
 for distribution in ('waitress', 'python-magic', 'weasyprint', 'tzdata'):
@@ -94,7 +94,7 @@ collection = COLLECT(exe, a.binaries, a.datas, name='Clinic')
             .replace('NATIVE', repr(str(native)) if native else 'None')
             .replace('STAGE', repr(str(stage))))
         environment = {**os.environ, 'DJANGO_SETTINGS_MODULE': 'config.settings.bundle_check',
-                       'PYTHONPATH': str(stage)}
+                       'PYTHONPATH': os.pathsep.join(filter(None, [str(stage), os.environ.get('PYTHONPATH')]))}
         subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
                         '--distpath', str(output), '--workpath', str(Path(workspace) / 'work'), str(spec)],
                        cwd=stage, env=environment, check=True)

@@ -2,6 +2,8 @@
 
 [Entry commands](../README.md) · [Operations](operations.md) · [Verification](verification.md). Current dependencies target Python 3.12–3.14 (3.14 recommended), Django 6.1.2 and DRF 3.18.3; Windows 10/11 x64/Linux. Python 3.10/3.11 are no longer supported by this dependency profile. Windows 7/Python 3.8 unsupported; macOS unverified.
 
+[GitHub automation](automation.md) owns CI setup and repository access; [executable bundles](bundles.md) owns Windows/Linux downloads and their production configuration.
+
 Linux Python 3.14.4 has focused runtime and real launcher/HTTP/shutdown verification. Other interpreter/platform combinations and broader clinical regressions have not been reverified on the updated pins; see [evidence and limits](doneCurrent.md#python-314-compatibility-and-launch-2026-11-11).
 
 ## Local launcher

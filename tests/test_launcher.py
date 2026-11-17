@@ -121,10 +121,17 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(command.call_args.args[0], ['python', '-B', 'manage.py', 'check_runtime', '--render-pdf'])
 
     def test_preflight_rejects_unsupported_python_missing_packages_or_keys(self):
-        for outputs in (['[3,14]'], ['[3,12]', '["django"]'], ['[3,12]', 'unexpected'], ['[3,12]', '[]', 'false']):
+        for outputs in (['[3,11]'], ['[3,15]'], ['[3,12]', '["django"]'], ['[3,12]', 'unexpected'], ['[3,12]', '[]', 'false']):
             with self.subTest(outputs=outputs):
                 config = self.config()
                 with self.preflight_tools(config, outputs), self.assertRaises(launch.LaunchError):
+                    launch.preflight(config)
+
+    def test_preflight_accepts_supported_python_versions(self):
+        for version in ('[3,12]', '[3,13]', '[3,14]'):
+            with self.subTest(version=version):
+                config = self.config()
+                with self.preflight_tools(config, [version, '[]', 'true', 'v24.21.0']):
                     launch.preflight(config)
 
     def test_preflight_rejects_unsupported_node_versions(self):

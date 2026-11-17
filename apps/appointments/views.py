@@ -138,18 +138,6 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         new_time = request.data.get('time')
         if not new_date or not new_time:
             return error_response(400, 'date and time required', {})
-        # Item #5: validate date and time formats before hitting the service.
-        try:
-            datetime.strptime(new_date, '%Y-%m-%d')
-        except (ValueError, TypeError):
-            return error_response(400, 'Invalid date format; expected YYYY-MM-DD', {})
-        try:
-            datetime.strptime(new_time, '%H:%M')
-        except (ValueError, TypeError):
-            try:
-                datetime.strptime(new_time, '%H:%M:%S')
-            except (ValueError, TypeError):
-                return error_response(400, 'Invalid time format; expected HH:MM', {})
         version = request_version(request)
         updated = self.service.reschedule(apt, new_date, new_time, version, actor=request.user)
         return Response({'data': self.get_serializer(updated).data, 'message': 'تم نقل الموعد'})

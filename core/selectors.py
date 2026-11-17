@@ -9,7 +9,6 @@ def list_queryset(actor, params):
         qs = AuditLog.objects.all()
     else:
         qs = AuditLog.objects.filter(user=user)
-    params = params
     if params.get('entity_type'):
         qs = qs.filter(entity_type=params['entity_type'])
     if params.get('entity_id', '').isdigit():

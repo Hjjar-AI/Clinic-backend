@@ -100,9 +100,8 @@ class PatientViewSet(PatientRecordsMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def team_candidates(self, request):
-        from apps.accounts.models import User
-        rows = User.objects.filter(is_active=True).order_by('full_name', 'id')
-        return Response({'data': [{'id': user.pk, 'full_name': user.full_name or user.username, 'role': user.role} for user in rows]})
+        from .history import team_candidates
+        return Response({'data': team_candidates()})
 
     @action(detail=False, methods=['post'])
     def duplicates(self, request):

@@ -66,6 +66,7 @@ class IdempotencyMiddleware:
         key = request.headers.get('X-Idempotency-Key', '')
         if not re.fullmatch(r'[A-Za-z0-9_.:-]{8,100}', key):
             return self._error('idempotency_key_required', 'A valid X-Idempotency-Key header is required', 400)
+        raw_body = None if request.content_type == 'multipart/form-data' else request.body
         from django.middleware.csrf import CsrfViewMiddleware
         checker = CsrfViewMiddleware(lambda req: None)
         checker.process_request(request)
@@ -86,11 +87,11 @@ class IdempotencyMiddleware:
         elif request.content_type == 'application/json':
             import json
             try:
-                body_hash = hashlib.sha256(json.dumps(json.loads(request.body), sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()).digest()
+                body_hash = hashlib.sha256(json.dumps(json.loads(raw_body), sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()).digest()
             except (ValueError, UnicodeError):
-                body_hash = hashlib.sha256(request.body).digest()
+                body_hash = hashlib.sha256(raw_body).digest()
         else:
-            body_hash = hashlib.sha256(request.body).digest()
+            body_hash = hashlib.sha256(raw_body).digest()
         fingerprint = hashlib.sha256(request.method.encode() + b'\0' +
             request.get_full_path().encode() + b'\0' + body_hash).hexdigest()
         if request.path == '/api/v1/backup/restore/execute/':

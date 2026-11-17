@@ -65,24 +65,8 @@ class PatientRecordsMixin:
 
     @action(detail=True, methods=['get'])
     def corrections(self, request, pk=None):
-        patient = self.get_object()
-        require_access(patient, request.user)
-        history_ids = history_patient_ids(patient)
-        rows = PatientCorrection.objects.filter(patient_id__in=history_ids).select_related('actor', 'patient').order_by('-created_at', '-pk')
-        merges = PatientMerge.objects.filter(Q(source_id__in=history_ids) | Q(survivor_id__in=history_ids)).select_related('actor', 'source', 'survivor').order_by('-created_at', '-pk')
-        if not request.user.has_perm('view_visits'):
-            rows = rows.exclude(record_type__in=CLINICAL_KINDS | {'clinical-profile'})
-        try:
-            offset = max(0, int(request.query_params.get('offset', 0)))
-            limit = max(1, min(int(request.query_params.get('per_page', 100)), 200))
-        except (TypeError, ValueError):
-            raise ValidationError('إزاحة غير صالحة')
-        return Response({'data': {'items': [{'id': row.pk, 'actor': row.actor.full_name or row.actor.username,
-            'reason': row.reason, 'record_type': row.record_type, 'record_id': row.record_id, 'patient_number': row.patient.patient_number,
-            'changes': row.changes, 'created_at': row.created_at} for row in rows[offset:offset + limit]],
-            'total': rows.count(), 'offset': offset, 'limit': limit, 'merges': [{'id': event.pk, 'source': event.source.patient_number,
-                'survivor': event.survivor.patient_number, 'actor': event.actor.full_name or event.actor.username,
-                'reason': event.reason, 'created_at': event.created_at} for event in merges[:100]]}})
+        from .history import correction_history
+        return Response({'data': correction_history(self.get_object(), request.user, request.query_params)})
 
     @action(detail=True, methods=['post'])
     def duplicate_review(self, request, pk=None):

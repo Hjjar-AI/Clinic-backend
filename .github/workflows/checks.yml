@@ -3,6 +3,8 @@ name: Backend checks
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '37 4 * * 1'
   workflow_dispatch:
     inputs:
       frontend_ref:

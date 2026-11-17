@@ -1,0 +1,58 @@
+name: Verify downloaded archives
+
+on:
+  workflow_call:
+    inputs:
+      run_id:
+        required: true
+        type: string
+      backend_sha:
+        required: true
+        type: string
+      frontend_sha:
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Linux native prerequisites
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/native-dependencies
+      - uses: actions/download-artifact@v4
+        with:
+          name: Clinic-${{ runner.os }}-x64-${{ inputs.run_id }}
+          path: downloaded
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+      - name: Verify checksum, extract and run the downloaded executable
+        shell: bash
+        env:
+          BACKEND_SHA: ${{ inputs.backend_sha }}
+          FRONTEND_SHA: ${{ inputs.frontend_sha }}
+        run: |
+          archive="downloaded/Clinic-$RUNNER_OS-x64.tar.gz"
+          if [ "$RUNNER_OS" = "Windows" ]; then archive="downloaded/Clinic-Windows-x64.zip"; fi
+          python -B scripts/verify_archive.py --archive "$archive" --backend-sha "$BACKEND_SHA" --frontend-sha "$FRONTEND_SHA" --report "downloaded/verification-$RUNNER_OS.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-${{ runner.os }}-${{ github.run_id }}
+          path: downloaded/
+          if-no-files-found: error
+          retention-days: 30

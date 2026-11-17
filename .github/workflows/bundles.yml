@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   bundle:
@@ -99,3 +100,11 @@ jobs:
             Clinic-*.sha256
           if-no-files-found: error
           retention-days: 30
+
+  verify-archives:
+    needs: bundle
+    uses: ./.github/workflows/verify-bundles.yml
+    with:
+      run_id: ${{ github.run_id }}
+      backend_sha: ${{ github.sha }}
+      frontend_sha: ${{ inputs.frontend_ref }}

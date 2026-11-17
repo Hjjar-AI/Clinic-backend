@@ -1,6 +1,16 @@
 # Verification evidence
 
-Updated **2026-11-11**. [Remaining work](workCurrent.md) · [Contracts](contracts.md) · [Check procedures](verification.md). Results belong to the dated runtime/storage profile below; they are not whole-app certification.
+Updated **2026-11-17**. [Remaining work](workCurrent.md) · [Contracts](contracts.md) · [Check procedures](verification.md). Results belong to the dated runtime/storage profile below; they are not whole-app certification.
+
+## GitHub workflows and Linux bundle (2026-11-17)
+
+Added automatic Windows/Linux SQLite/native/HTTP checks and an owned Linux PostgreSQL job; manual executable packaging checks out an exact frontend SHA, gates packaging on frontend/backend regressions and uploads checksummed archives. Public sibling repositories use the ordinary job token, with no custom secret/variable setup. [Automation](automation.md) and [bundle guide](bundles.md) own usage and platform limits.
+
+Linux Python **3.14.4**, Django **6.1.2**, DRF **3.18.3**, WeasyPrint **70.0**: SQLite **310 run, 18 skipped, zero failures**; PostgreSQL 18 **310 passed**, including concurrency/process-failure coverage. Corrected a stale launcher test rejecting supported Python 3.14 and covered both unsupported boundaries plus all supported minor versions. The first default-system-Python probe lacked project dependencies; verification used the configured project interpreter. Native/PDF and disposable HTTP start/access-denial/stop checks passed.
+
+PyInstaller **6.22.3**, psycopg **3.3.9**, Redis client **8.1.0** and tzdata were installed only in `/tmp` for packaging verification. A first frozen check caught missing dynamic `magic` inclusion; the corrected Linux executable built and passed locks/MIME/fonts/time zones, in-memory Arabic/Latin PDF, HTTP config, anonymous patient denial, packaged HTML/font retrieval and shutdown from outside the source directory. Application code/templates/frontend assets are staged without clinic configuration, databases, media, backups, suites or application migration directories. Production serving preserves PostgreSQL/shared-cache guards and requires external configuration/data paths; schema setup/upgrades remain separate.
+
+All workflow files passed actionlint **1.7.7**, YAML/Python source checks and diff/reference checks. No application dependency/lockfile/version changes or clinic storage operations. Isolated suites used synthetic temporary schema/storage without application migration inspection/changes. GitHub-hosted execution, Windows binaries, authenticated packaged deployment, exhaustive layout/PDF appearance, native dialogs and physical printing remain unverified. Frontend unit/build/component evidence belongs in its [log](../../frontend/docs/doneCurrent.md). Temporary logs/artifacts: `/tmp/clinic-workflows-*`; they may disappear.
 
 ## Python 3.14 compatibility and launch (2026-11-11)
 

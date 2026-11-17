@@ -1,0 +1,19 @@
+name: Frontend/backend compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_ref:
+        description: Exact frontend commit SHA to test with the selected backend revision
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    uses: Hjjar-AI/Clinic-frontend/.github/workflows/browser.yml@main
+    with:
+      backend_ref: ${{ github.sha }}
+      frontend_ref: ${{ inputs.frontend_ref }}

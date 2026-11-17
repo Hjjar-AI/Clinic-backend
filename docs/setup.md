@@ -4,7 +4,7 @@
 
 [GitHub automation](automation.md) owns CI setup and repository access; [executable bundles](bundles.md) owns Windows/Linux downloads and their production configuration.
 
-Linux Python 3.14.4 has focused runtime and real launcher/HTTP/shutdown verification. Other interpreter/platform combinations and broader clinical regressions have not been reverified on the updated pins; see [evidence and limits](doneCurrent.md#python-314-compatibility-and-launch-2026-11-11).
+Linux Python 3.14.4 has runtime/launcher checks and current-profile SQLite/PostgreSQL regression evidence; see [workflow verification](doneCurrent.md#github-workflows-and-linux-bundle-2026-11-17). Other interpreter/platform combinations remain unverified.
 
 ## Local launcher
 

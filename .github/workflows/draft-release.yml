@@ -1,0 +1,84 @@
+name: Prepare draft release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_run_id:
+        description: Successful Windows and Linux bundles workflow run ID
+        required: true
+        type: string
+      tag:
+        description: Existing tag pointing to that bundle's backend commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: draft-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      backend_sha: ${{ steps.run.outputs.backend_sha }}
+    steps:
+      - name: Require a successful bundle run from this repository
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUNDLE_RUN_ID: ${{ inputs.bundle_run_id }}
+        shell: python
+        run: |
+          import json, os, re, subprocess
+          run_id = os.environ['BUNDLE_RUN_ID']
+          if not re.fullmatch(r'[1-9][0-9]*', run_id):
+              raise SystemExit('Expected a positive bundle run ID')
+          run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GH_REPO"]}/actions/runs/{run_id}']))
+          if run['path'] != '.github/workflows/bundles.yml' or run['event'] != 'workflow_dispatch' or run['conclusion'] != 'success':
+              raise SystemExit('Select a successful manually dispatched bundle workflow run')
+          if not re.fullmatch(r'[0-9a-f]{40}', run['head_sha']):
+              raise SystemExit('Bundle run has no exact source revision')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('backend_sha=' + run['head_sha'] + '\n')
+
+  verify:
+    needs: source
+    uses: ./.github/workflows/verify-bundles.yml
+    with:
+      run_id: ${{ inputs.bundle_run_id }}
+      backend_sha: ${{ needs.source.outputs.backend_sha }}
+
+  draft:
+    needs: [source, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: verified-*-${{ github.run_id }}
+          merge-multiple: true
+          path: verified
+      - name: Prepare notes and check existing tag/source consistency
+        env:
+          BACKEND_SHA: ${{ needs.source.outputs.backend_sha }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          BUNDLE_RUN_ID: ${{ inputs.bundle_run_id }}
+        run: python -B scripts/prepare_draft_release.py --directory verified --backend-sha "$BACKEND_SHA" --tag "$RELEASE_TAG" --run-id "$BUNDLE_RUN_ID" --repository "$GITHUB_REPOSITORY" --notes release-notes.md
+      - name: Create a draft with the verified archives and evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: gh release create "$RELEASE_TAG" verified/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "Clinic $RELEASE_TAG" --notes-file release-notes.md

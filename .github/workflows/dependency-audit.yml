@@ -41,7 +41,10 @@ jobs:
         shell: bash
         env:
           AUDIT_PROFILE: ${{ matrix.profile }}
-        run: python -m pip_audit -r requirements.txt -r "requirements/$AUDIT_PROFILE.txt" --format json --output dependency-audit.json --progress-spinner off
+        run: |
+          audit_requirements=(-r "requirements/$AUDIT_PROFILE.txt")
+          if [[ "$AUDIT_PROFILE" == cache-* ]]; then audit_requirements+=(-r requirements.txt); fi
+          python -m pip_audit "${audit_requirements[@]}" --format json --output dependency-audit.json --progress-spinner off
       - uses: actions/upload-artifact@v4
         if: always()
         with:

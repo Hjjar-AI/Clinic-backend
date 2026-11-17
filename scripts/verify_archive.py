@@ -52,6 +52,8 @@ def main():
     for value in (args.backend_sha, args.frontend_sha):
         if value and not re.fullmatch(r'[0-9a-fA-F]{40}', value):
             parser.error('Source revisions must be full commit SHAs')
+    args.backend_sha = args.backend_sha.lower()
+    args.frontend_sha = args.frontend_sha.lower()
     archive = args.archive.resolve()
     checksum = verify_checksum(archive)
     with TemporaryDirectory(prefix='clinic archive check ') as workspace:

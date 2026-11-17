@@ -1,6 +1,14 @@
 # Verification evidence
 
-Updated **2026-11-17**. [Remaining work](workCurrent.md) · [Contracts](contracts.md) · [Check procedures](verification.md). Results belong to the dated runtime/storage profile below; they are not whole-app certification.
+Updated **2026-11-18**. [Remaining work](workCurrent.md) · [Contracts](contracts.md) · [Check procedures](verification.md). Results belong to the dated runtime/storage profile below; they are not whole-app certification.
+
+## Review fixes and contract handoff (2026-11-18)
+
+Implemented reference/checksum receipts for exact issued PDFs and private generated artifacts using existing fields, legacy buffered replay, current authorization and exclusive reference-aware cleanup. Split context/password/idempotency handling; standardized string error codes/JSON security failures and API 404; added explicit human-activity idle sessions with 401 expiry. Collection reads use common items/metadata and explicit per-page inputs. Upload hashing and macro detection use seekable temporary files; the **2.5 MiB** memory threshold is separate from the total HTTP request cap.
+
+Added scoped approved risk/timeline selectors, paged revision/issued-document histories, exact saved-document downloads and next-appointment IDs. Moved reviewed visit/billing/appointment/account/audit/patient-history queries and invoice rendering out of views. Added configurable frontend/private-response paths, explicit HTTP/LAN versus HTTPS/proxy settings, Waitress proxy trust and immutable bundled static serving. No schema or model-field changes; fresh-only setup, signed evidence, lifecycle/locking and receptionist draft permissions remain intact. [Contracts](contracts.md#review-contract-handoff-2026-11-18) own wire behavior; frontend owns screens and longer client waits.
+
+Source-only Linux Python **3.14.4** checks: **232 production modules** parsed with AST, **701 local module references** resolved; no app imports, database or runtime execution for verification. Frontend source/formatting-rollback evidence is in its [log](../../frontend/docs/doneCurrent.md#review-fixes-and-missing-workflows-2026-11-18). No tests/builds, compilation/packaging, migration inspection/changes, dependency/version changes, deployment or clinic-storage operations. Concurrency, replay after process failure, memory, session timing, PDF/UI appearance and actual hosting remain unverified. Deliver both repositories together.
 
 ## GitHub workflows and Linux bundle (2026-11-17)
 

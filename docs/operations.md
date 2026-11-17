@@ -38,7 +38,7 @@ Use systemd/cron or Windows Task Scheduler with explicit interpreter/cwd/product
 | `send_appointment_reminders` | Scheduled/confirmed local day/hour windows, 60-minute late grace; stable occurrence dedupe. |
 | `send_task_reminders` | Open/in-progress due tasks; terminal tasks stop delivery. |
 | `run_scheduler` | Poll within half hour-window, minimum 60s; separate backup cadence; failures isolated. |
-| `cleanup_operations` | 30-day completed receipts; retain interrupted ones, never reuse expired keys. |
+| `cleanup_operations` | Expire 30-day completed receipts and old unreferenced retry artifacts under the exclusive gate; retain interrupted receipts and authoritative issued documents, never reuse expired keys. |
 | `reconcile_media --older-than-hours 24` | Missing/orphan report; `--delete` requires removal scope. |
 | `reset_admin_password --username NAME [--qr]` | Locked versioned reset, private one-time password, rotation cleared/sessions revoked. |
 | `system/health[/full]/` | Inspect `data.status`/`data.database` as well as HTTP status: degraded DB health can still return HTTP 200. `full/` also reports maintenance. |

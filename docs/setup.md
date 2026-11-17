@@ -80,7 +80,7 @@ For normal SQLite file paths, `serve` refuses startup when the configured file i
 
 ## Production
 
-Use `DJANGO_SETTINGS_MODULE=config.settings.production`, debug/demo/auto-seed off, explicit hosts, external DB/shared cache, HTTPS/secure cookies and protected secrets. Non-PostgreSQL requires explicit shared lock storage. Production rejects SQLite/LocMemCache. Shared cache carries cross-worker previews/state; DB-backed generations alone do not replace it.
+Use `DJANGO_SETTINGS_MODULE=config.settings.production`, debug/demo/auto-seed off, explicit hosts, external DB/shared cache and protected secrets. HTTPS/secure cookies remain the default; set `CLINIC_TRANSPORT=http` explicitly for HTTP on the local computer or clinic network. This does not relax host/origin/CSRF checks. Non-PostgreSQL requires explicit shared lock storage. Production rejects SQLite/LocMemCache. Shared cache carries cross-worker previews/state; DB-backed generations alone do not replace it.
 
 ```bash
 python manage.py serve --settings=config.settings.production --host 127.0.0.1 --port 5019 --threads 8
@@ -88,6 +88,11 @@ python manage.py serve --settings=config.settings.production --host 127.0.0.1 --
 
 Configure systemd or a Windows service supervisor with the intended interpreter, backend working directory/environment, restart policy and dependencies. Waitress checks runtime/source, never migrates/seeds or terminates HTTPS; eight threads is an example, not capacity evidence.
 
-Proxy HTTPS to 5019 with Host/real-IP/forwarded headers; allow uploads at least 210 MB (e.g. 220M), serve collected `/static/`, deny direct `/media/`. Django serves existing frontend index after API/admin routes; direct SPA hosting needs explicit API/admin proxy and history fallback. Never turn unknown API errors into SPA success.
+For proxy HTTPS, set `TRUST_PROXY_HTTPS=true` and `CLINIC_TRUSTED_PROXY` to the specific proxy address (wildcards are rejected). Waitress trusts only that proxy’s forwarded scheme; the proxy must replace incoming forwarded headers and preserve the intended Host. Configure `CSRF_TRUSTED_ORIGINS`/`CORS_ORIGINS` for actual browser origins and keep `DJANGO_ALLOWED_HOSTS` explicit. Proxy HTTPS to 5019; allow uploads at least 210 MB (e.g. 220M), serve collected `/static/`, deny direct `/media/`. Django serves existing frontend index after API/admin routes; direct SPA hosting needs explicit API/admin proxy and history fallback. Never turn unknown API errors into SPA success.
 
 Authorized asset order: frontend frozen install/build, then collectstatic. Existing Vite output includes sourcemaps and disables JS/CSS minification. Use individual scheduled jobs, not the development scheduler. Keep last-good code/config and authenticated off-site backups; schema/assets/deploy/rollback require their own scope. [Release procedure](verification.md#release-checks).
+
+
+`FRONTEND_DIST` optionally selects the frontend distribution directory; the default is sibling `frontend/dist`, or bundled frontend resources in a frozen executable. Production disables browsable API/static development finders and auto-refresh; frozen assets are served from their immutable resource root. Ordinary source hosting uses the documented build/collectstatic procedure when separately authorized.
+
+`MAX_CONTENT_LENGTH` remains the total Waitress request cap in MiB (default 210); it is separate from the 2.5 MiB Django upload-memory threshold. Larger valid uploads spool to temporary disk. Provision protected temporary storage and a protected shared `OPERATION_RESPONSE_DIR` when workers run on multiple hosts; otherwise retry files default beneath `BACKUP_DIR`. Never publish either directory through static/media hosting. No local configuration or deployment is changed merely by these source options.

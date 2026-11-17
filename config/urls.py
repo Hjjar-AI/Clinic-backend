@@ -16,3 +16,4 @@ urlpatterns += [
     re_path(r'^(?!(?:api|admin|static|media)(?:/|$)).*$', TemplateView.as_view(template_name='index.html')),
 ]
 handler400 = 'core.errors.bad_request'
+handler500 = 'core.errors.server_error'

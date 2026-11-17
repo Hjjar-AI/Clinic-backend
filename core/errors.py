@@ -31,3 +31,10 @@ def bad_request(request, exception):
         return json_error('validation_error', 'الطلب غير صالح أو يتجاوز الحجم المسموح', 400)
     from django.views.defaults import bad_request as django_bad_request
     return django_bad_request(request, exception)
+
+
+def server_error(request):
+    if request.path.startswith('/api/'):
+        return json_error('internal_error', 'تعذر تأكيد العملية؛ راجع النتيجة قبل إعادة التنفيذ', 500)
+    from django.views.defaults import server_error as django_server_error
+    return django_server_error(request)

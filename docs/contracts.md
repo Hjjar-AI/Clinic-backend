@@ -13,6 +13,22 @@ Django/DRF `apps/`, shared `core/`, configuration `config/`. Services own valida
 - Model cache ownership/ audit fields have single registries. DB `CacheGeneration` commits with mutations; cache failures become misses, never lost receipts. Raw restore explicitly invalidates groups. Clinical text stays in protected domain history; audit stores allowed metadata.
 - [Runtime](setup.md#native-libraries-by-os): fail closed without native locking/MIME/PDF; platform setup never weakens these contracts.
 
+## Review contract handoff (2026-11-18)
+
+Frontend/backend changes must ship together. Collection reads use `{data:{items,meta}}`; `meta.pagination` is `cursor`, `offset` or `none`. Preserve cursor tokens/`has_more`, offset/total/`per_page`, unread counts, calendar context, register parent `version` and correction `merges` in metadata. Use explicit `per_page`; no global query-parameter rewriting. Aggregated reports, clinical snapshots and nested clinical arrays keep their domain structures.
+
+Errors use `{error:{code,status,message,errors}}` with string `code` and numeric HTTP `status`. `version_conflict` alone identifies optimistic-lock refresh; reused/interrupted/expired receipts, unavailable saved results and recovery reconciliation have distinct messages. Expired/missing session authentication is 401; authorization and CSRF failures remain 403. Unknown API paths return JSON 404 without SPA fallback.
+
+Login/`auth/me/` include `session:{expires_at,server_now,session_lifetime}`. CSRF-protected POST `auth/activity/` renews the default three-hour idle clock; passive reads/polling do not. Browser activity is throttled to one heartbeat per minute per tab and shared across tabs. Remembered cookies do not bypass server inactivity expiry. The client sends every versioned mutation's explicit opening version; later reads never supply it implicitly. Unsafe requests carry stable keys, with server enforcement remaining endpoint-specific.
+
+Signed PDFs stay once in `IssuedDocument`; new retry receipts hold only a private reference/checksum. Other generated downloads use checksum-named private artifacts under `OPERATION_RESPONSE_DIR` or `BACKUP_DIR/operation-responses`. Replays reauthorize current action/resource access, verify bytes and return 410 `operation_result_unavailable` for missing/corrupt results without regenerating or issuing. Existing buffered receipts remain readable. Cleanup holds the exclusive operation gate, expires completed receipts and removes only old unreferenced temporary artifacts; it never removes signed documents. Ordinary mutation/reservation/receipt commits remain atomic; long transactions still require runtime assessment.
+
+Frontend waits up to five minutes for document operations and thirty minutes for backup/restore/import, retaining the normal fifteen-second default elsewhere. Timeout is an uncertain outcome, with same-payload retry identity retained in the current session; it never proves rollback. Multipart fingerprinting and macro inspection use seekable upload files; 2.5 MiB is the RAM threshold, separate from the existing total HTTP request cap.
+
+Visit attachment upload accepts one `file` plus opening visit `version`; sequential uploads use each returned `X-Resource-Version`. Removal uses the current opening visit version and retains historical evidence. Approved visit attachments are read-only until documented amendment. Read-only revision/issued-document lists are paginated. GET `prescription/issued-documents/{id}/pdf/` returns either saved prescription or referral bytes under current clinical/resource/type-specific permission; prescription handouts keep their separate route.
+
+Patient `risk_history/` projects the latest approved revision per encounter, ordered by approved date; amendments retain prior approved risk until re-signing. `timeline/` marks approved snapshot content versus unsigned working content. `appointments/next/{patient_id}/` includes the appointment `id` and date/time under current scope. Patient restoration remains admin/grant/version controlled and rejects merged sources. Identity restriction explicitly retains signed identities and audit/correction/merge history. Receptionist draft creation and clinician-only signing are unchanged.
+
 ## Patient identity and ownership
 
 Names required; birth optional **year-only**; gender/ID/phone may be unknown. `patient_number` permanent/unique. Cross-person duplicate IDs/phones warn without suffixing/blocking. Completeness recommends birth/gender/registration, optionally ID/phone/team/language; it is not validity.
@@ -40,9 +56,9 @@ Under `/patients/{id}/`:
 
 | Endpoint | Shape / policy |
 | --- | --- |
-| GET `records/` | `kind,offset` → `{items,total,version}`, 100/page including retired identifiers/contacts/representatives/allergies/medications/follow-ups. |
+| GET `records/` | `kind,offset` → `{items,meta:{total,version,offset,per_page,…}}`, default 100/page including retired identifiers/contacts/representatives/allergies/medications/follow-ups. |
 | POST `records/` | `{kind,record_id?,operation:save/retire/select_primary,fields,reason,version}` → `{record,version}`. Primary selection: existing identifier, empty fields/reason; `is_primary`/outcome/completion metadata read-only. |
-| GET `corrections/` | Offset → `{items,total,merges}`; 100 corrections/page/latest 100 merges, original source history retained. |
+| GET `corrections/` | Offset → `{items,meta:{total,merges,offset,per_page,…}}`; default 100 corrections/page/latest 100 merges, original source history retained. |
 | POST `duplicate_review/` | `{other_id,status:dismissed/different,reason,version}`; optional, dismissible, repeatable display. |
 | POST `merge_preview/`, `merge/` | Source URL/target ID; 10-minute token binds actor/both versions/content/team/access impact. Execute token/reason/versions, admin edit+archive grants and explicit consent. |
 | Team/documents | `team_candidates/` returns minimal eligible users. Team edits use patient version/reason; documents their own version. |
@@ -59,7 +75,7 @@ Visits own working narrative/diagnoses/medications/labs/scales/files; draft/fina
 
 Prescription `print_options`: blank/preprinted, width 80–216 mm, height 120–350 mm, offsets −5…5 mm (positive right/down), finite max two decimals. UI/default options A6 105×148; omitted API options A4. Blank offsets normalize zero. Retain options/date/exact bytes; preprinted artwork never enters PDF. Repeat identity/signature/date and page numbering; reject overflow rather than truncate. Auth/export-protected POST `/prescription/calibration/` produces patient-free crosses/50 mm ruler without issuance/preview consumption.
 
-Under `/prescription/`: GET `patient/{id}/history/` returns `{items,total,offset,limit}`, newest first, 20/page, optional same-patient visit filter. GET `documents/{id}/pdf/` returns retained bytes; `documents/{id}/instructions/` creates separate A4 snapshot handout, no issuance/inferred schedule/duration. All require current clinical-view/export/scope, prescription kind and `no-store`; copies remain readable during amendment.
+Under `/prescription/`: GET `patient/{id}/history/` returns `{items,meta:{pagination:"offset",total,offset,per_page,…}}`, newest first, 20/page, optional same-patient visit filter. GET `documents/{id}/pdf/` returns retained bytes; `documents/{id}/instructions/` creates separate A4 snapshot handout, no issuance/inferred schedule/duration. All require current clinical-view/export/scope, prescription kind and `no-store`; copies remain readable during amendment.
 
 GET `visit/{id}/handover/` (optional `pdf/`) uses latest approved revision; `patient/{id}/handover/` picks latest approved encounter, optionally excluding current. Order by signed snapshot date, ties signing time/revision (handover) or encounter ID (risk); unsigned dates cannot reorder history. JSON needs clinical-view/scope, PDF also export. Optional `clinical_data.instruction_acknowledgement`: aware nonfuture `explained_at`, patient/representative/both recipient, optional name/notes, nullable boolean `clarification_needed`. Service owns recorder/time, ignores forgery/preserves unchanged stamps; include in signed revision.
 

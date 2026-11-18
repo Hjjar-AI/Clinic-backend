@@ -1,17 +1,14 @@
 name: Windows and Linux bundles
-
-on:
+'on':
   workflow_dispatch:
     inputs:
       frontend_ref:
         description: Exact frontend commit SHA to package with this backend revision
         required: true
         type: string
-
 permissions:
   contents: read
   actions: read
-
 jobs:
   bundle:
     name: Build and smoke-check (${{ matrix.os }})
@@ -20,87 +17,180 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2022]
+        os:
+        - ubuntu-24.04
+        - windows-2022
     steps:
-      - name: Require an immutable frontend revision
-        shell: python
-        env:
-          FRONTEND_REF: ${{ inputs.frontend_ref }}
-        run: |
-          import os, re
-          if not re.fullmatch(r'[0-9a-fA-F]{40}', os.environ['FRONTEND_REF']):
-              raise SystemExit('frontend_ref must be an exact 40-character commit SHA')
-      - uses: actions/checkout@v6
-        with:
-          path: backend
-          persist-credentials: false
-      - uses: actions/checkout@v6
-        with:
-          repository: Hjjar-AI/Clinic-frontend
-          ref: ${{ inputs.frontend_ref }}
-          path: frontend
-          persist-credentials: false
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.14'
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24.21.0'
-      - uses: pnpm/action-setup@v4
-        with:
-          version: '12.10.1'
-          package_json_file: frontend/package.json
-      - uses: ./backend/.github/actions/native-dependencies
-      - name: Install runtime and packaging tools
-        run: python -m pip install -r backend/requirements/postgresql.txt -r backend/requirements/cache-redis.txt PyInstaller==6.22.3 tzdata
-      - run: pnpm install --frozen-lockfile
-        working-directory: frontend
-      - run: pnpm test:unit
-        working-directory: frontend
-      - name: Component regression gate
-        env:
-          CLINIC_VITEST_CACHE: ${{ runner.temp }}/clinic-vitest-cache
-        run: node node_modules/vitest/vitest.mjs run --configLoader runner --cache=false --fsModuleCachePath "${{ runner.temp }}/clinic-vitest-modules"
-        working-directory: frontend
-      - run: pnpm run build
-        working-directory: frontend
-      - name: Backend regression gate
-        working-directory: backend
-        run: python -B tests/run.py
-      - name: PostgreSQL regression gate
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y postgresql
-          cd backend
-          python -B tests/run_postgres.py
-      - name: Build executable folder
-        run: python -B backend/scripts/build_bundle.py --frontend frontend --output release
-      - name: Smoke-check frozen runtime away from source
-        shell: bash
-        run: |
-          executable="$GITHUB_WORKSPACE/release/Clinic/Clinic"
-          if [ "$RUNNER_OS" = "Windows" ]; then executable="$executable.exe"; fi
-          python -B backend/scripts/runtime_smoke.py --executable "$executable"
-      - name: Archive and checksum
-        shell: python
-        run: |
-          import hashlib
-          from pathlib import Path
-          import shutil
-          import platform
-          name = 'Clinic-' + platform.system() + '-x64'
-          archive = Path(shutil.make_archive(name, 'zip' if platform.system() == 'Windows' else 'gztar', 'release', 'Clinic'))
-          Path(str(archive) + '.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Clinic-${{ runner.os }}-x64-${{ github.run_id }}
-          path: |
-            Clinic-*.zip
-            Clinic-*.tar.gz
-            Clinic-*.sha256
-          if-no-files-found: error
-          retention-days: 30
-
+    - name: Require an immutable frontend revision
+      shell: python
+      env:
+        FRONTEND_REF: ${{ inputs.frontend_ref }}
+      run: |
+        import os, re
+        if not re.fullmatch(r'[0-9a-fA-F]{40}', os.environ['FRONTEND_REF']):
+            raise SystemExit('frontend_ref must be an exact 40-character commit SHA')
+      id: require_an_immutable_frontend_revision
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      with:
+        path: backend
+        persist-credentials: false
+      id: checkout
+    - name: Record checked-out revisions
+      shell: python
+      env:
+        CI_REPOSITORIES: '{"backend": "backend"}'
+      run: |
+        import json, os, re, subprocess
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+            summary.write('### Checked-out source revisions\n\n')
+            for name, directory in json.loads(os.environ['CI_REPOSITORIES']).items():
+                result = subprocess.run(['git', '-C', directory, 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True, timeout=10)
+                sha = result.stdout.strip()
+                if not re.fullmatch(r'[0-9a-fA-F]{40}', sha):
+                    raise SystemExit('Invalid checked-out revision')
+                summary.write(f'- {name}: `{sha}`\n')
+      id: record_checked_out_revisions
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      with:
+        repository: Hjjar-AI/Clinic-frontend
+        ref: ${{ inputs.frontend_ref }}
+        path: frontend
+        persist-credentials: false
+      id: checkout_2
+    - name: Record checked-out revisions
+      shell: python
+      env:
+        CI_REPOSITORIES: '{"frontend": "frontend"}'
+      run: |
+        import json, os, re, subprocess
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+            summary.write('### Checked-out source revisions\n\n')
+            for name, directory in json.loads(os.environ['CI_REPOSITORIES']).items():
+                result = subprocess.run(['git', '-C', directory, 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True, timeout=10)
+                sha = result.stdout.strip()
+                if not re.fullmatch(r'[0-9a-fA-F]{40}', sha):
+                    raise SystemExit('Invalid checked-out revision')
+                summary.write(f'- {name}: `{sha}`\n')
+      id: record_checked_out_revisions_2
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      with:
+        python-version: '3.14'
+        cache: pip
+        cache-dependency-path: |
+          backend/requirements.txt
+          backend/requirements/*.txt
+      id: setup_python
+    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      with:
+        version: 12.10.1
+        package_json_file: frontend/package.json
+      id: action_setup
+    - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      with:
+        node-version: 24.21.0
+        cache: pnpm
+        cache-dependency-path: frontend/pnpm-lock.yaml
+      id: setup_node
+    - uses: ./backend/.github/actions/native-dependencies
+      id: native_dependencies
+    - name: Install runtime and packaging tools
+      run: python -m pip install -r backend/requirements/postgresql.txt -r backend/requirements/cache-redis.txt PyInstaller==6.22.3 tzdata
+      id: install_runtime_and_packaging_tools
+    - run: pnpm install --frozen-lockfile
+      working-directory: frontend
+      id: install_frontend
+    - run: pnpm test:unit
+      working-directory: frontend
+      id: unit_tests
+    - name: Component regression gate
+      env:
+        CLINIC_VITEST_CACHE: ${{ runner.temp }}/clinic-vitest-cache
+      run: node node_modules/vitest/vitest.mjs run --configLoader runner --cache=false --fsModuleCachePath "${{ runner.temp }}/clinic-vitest-modules"
+      working-directory: frontend
+      id: component_regression_gate
+    - run: pnpm run build
+      working-directory: frontend
+      id: frontend_build
+    - name: Backend regression gate
+      working-directory: backend
+      run: python -B tests/run.py
+      id: backend_regression_gate
+    - name: PostgreSQL regression gate
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get install -y postgresql
+        cd backend
+        python -B tests/run_postgres.py
+      id: postgresql_regression_gate
+    - name: Build executable folder
+      run: python -B backend/scripts/build_bundle.py --frontend frontend --output release
+      id: build_executable_folder
+    - name: Smoke-check frozen runtime away from source
+      shell: bash
+      run: |
+        executable="$GITHUB_WORKSPACE/release/Clinic/Clinic"
+        if [ "$RUNNER_OS" = "Windows" ]; then executable="$executable.exe"; fi
+        python -B backend/scripts/runtime_smoke.py --executable "$executable"
+      id: smoke_check_frozen_runtime_away_from_source
+    - name: Archive and checksum
+      shell: python
+      run: |
+        import hashlib
+        from pathlib import Path
+        import shutil
+        import platform
+        name = 'Clinic-' + platform.system() + '-x64'
+        archive = Path(shutil.make_archive(name, 'zip' if platform.system() == 'Windows' else 'gztar', 'release', 'Clinic'))
+        Path(str(archive) + '.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
+      id: archive_and_checksum
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: Clinic-${{ runner.os }}-x64-${{ github.run_id }}
+        path: |
+          Clinic-*.zip
+          Clinic-*.tar.gz
+          Clinic-*.sha256
+        if-no-files-found: error
+        retention-days: 30
+      id: upload_artifact
+    - name: Summarize results
+      if: always()
+      shell: python
+      env:
+        CI_REPOSITORIES: '{"backend": "backend", "frontend": "frontend"}'
+        CI_JOB_STATUS: ${{ job.status }}
+        CI_STEPS_JSON: ${{ toJSON(steps) }}
+      run: |
+        import json, os, re, subprocess
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+            summary.write('### Job results\n\n')
+            summary.write(f'Runner: {os.environ["RUNNER_OS"]}; status: {os.environ["CI_JOB_STATUS"]}\n\n')
+            for name, directory in json.loads(os.environ['CI_REPOSITORIES']).items():
+                try:
+                    result = subprocess.run(['git', '-C', directory, 'rev-parse', '--verify', 'HEAD'], capture_output=True, text=True, check=True, timeout=10)
+                    sha = result.stdout.strip()
+                    if not re.fullmatch(r'[0-9a-fA-F]{40}', sha):
+                        sha = 'unavailable'
+                except (OSError, subprocess.SubprocessError):
+                    sha = 'unavailable'
+                summary.write(f'- {name}: `{sha}`\n')
+            for name in ('BACKEND', 'FRONTEND'):
+                sha = os.environ.get('CI_EXPECTED_' + name + '_SHA', '')
+                if sha:
+                    sha = sha if re.fullmatch(r'[0-9a-fA-F]{40}', sha) else 'unavailable'
+                    summary.write(f'- requested {name.lower()}: `{sha}`\n')
+            summary.write('\n| Step | Outcome |\n| --- | --- |\n')
+            artifacts = []
+            for name, step in json.loads(os.environ['CI_STEPS_JSON']).items():
+                outcome = step.get('outcome', step.get('result', 'unknown'))
+                summary.write(f'| {name} | {outcome} |\n')
+                outputs = step.get('outputs', {})
+                artifact_id = str(outputs.get('artifact-id', ''))
+                url = outputs.get('artifact-url', '')
+                if re.fullmatch(r'[0-9]+', artifact_id):
+                    label = f'{name}: artifact {artifact_id}'
+                    artifacts.append(f'- [{label}]({url})' if re.fullmatch(r'https://github\.com/[\w./-]+', url) else f'- {label}')
+            summary.write('\nUploaded artifacts:\n\n' + '\n'.join(artifacts or ['- None recorded for this job.']) + '\n')
   verify-archives:
     needs: bundle
     uses: ./.github/workflows/verify-bundles.yml

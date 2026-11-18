@@ -2,6 +2,14 @@
 
 Updated **2026-11-18**. [Remaining work](workCurrent.md) · [Contracts](contracts.md) · [Check procedures](verification.md). Results belong to the dated runtime/storage profile below; they are not whole-app certification.
 
+## Logic review corrections (2026-11-18)
+
+Implemented the approved source-only fix plan. Retention recognizes both legacy and current microsecond/UUID backup filenames. Browser-opening serving now uses `MAX_REQUEST_BODY_SIZE`, preserving the separate upload RAM threshold. XLSX datetimes serialize to the accepted space-separated, whole-second format before patient date parsing. Diagnosis/medication exports annotate and allow `usage_count` ordering with the same relations as their list endpoints. Clinic defaults use `get_or_create` to preserve configured settings. Dashboard high-risk rows include approved suicide/violence risk annotations, consumed by the coordinated frontend; [contracts](contracts.md#review-contract-handoff-2026-11-18) record the shape.
+
+Linux Python **3.14.4** source-only checks passed: **six changed Python modules** parsed with AST, without application imports or bytecode generation. Extracted production functions with synthetic inputs/doubles verified XLSX datetime conversion including fractional seconds, accepted text dates/invalid-date rejection, both backup filename formats/unrelated-file rejection, approved-risk serialization, preservation of existing/default creation of missing clinic settings, and catalog export preparation/usage-count ordering in both directions while rejecting unsupported fields. The serving request-limit selection was checked with AST. No backup retention, seed, serving or application commands ran; query doubles do not verify ORM SQL. Both repositories passed diff whitespace and changed-document reference checks. Frontend checks are in its [evidence](../../frontend/docs/doneCurrent.md#logic-review-corrections-2026-11-18).
+
+No suite inspection/execution/changes, builds/compilation/packaging, browser work, migration inspection/changes, dependencies/lockfiles, or clinic-storage access. Runtime HTTP/upload behavior, backup deletion, real database ordering, rendered UI/date-picker behavior and packaged deployment remain unverified. Deliver backend/frontend together for the approved-risk response change.
+
 ## Review fixes and contract handoff (2026-11-18)
 
 Implemented reference/checksum receipts for exact issued PDFs and private generated artifacts using existing fields, legacy buffered replay, current authorization and exclusive reference-aware cleanup. Split context/password/idempotency handling; standardized string error codes/JSON security failures and API 404; added explicit human-activity idle sessions with 401 expiry. Collection reads use common items/metadata and explicit per-page inputs. Upload hashing and macro detection use seekable temporary files; the **2.5 MiB** memory threshold is separate from the total HTTP request cap.

@@ -101,7 +101,7 @@ class DashboardService:
             'overdue_followups': self._serialize_follow_ups(overdue_followups),
             'upcoming_followups': self._serialize_follow_ups(upcoming_followups),
             'pending_tasks': self._serialize_tasks(pending_tasks),
-            'high_risk_patients': self._serialize_patients(high_risk),
+            'high_risk_patients': self._serialize_patients(high_risk, include_approved_risk=True),
             'upcoming_appointments': self._serialize_appointments(upcoming_appointments),
             'today_appointments': self._serialize_appointments(today_appointments),
             'appointments_today': self.stats.get_appointments_today(user),
@@ -143,7 +143,7 @@ class DashboardService:
                  'title': row.title, 'due_date': row.due_date, 'status': row.status,
                  'owner_name': row.owner.full_name if row.owner else '', 'source_visit': row.source_visit_id} for row in qs]
 
-    def _serialize_patients(self, qs):
+    def _serialize_patients(self, qs, include_approved_risk=False):
         return [{
             'id': p.id,
             'first_name': p.first_name,
@@ -158,6 +158,10 @@ class DashboardService:
             'patient_number': p.patient_number,
             'care_team_names': care_team_names(p),
             'created_at': p.created_at.isoformat() if p.created_at else None,
+            **({'approved_risk': {
+                'suicide_risk_level': p.latest_suicide,
+                'violence_risk_level': p.latest_violence,
+            }} if include_approved_risk else {}),
         } for p in qs]
 
     def _serialize_visits(self, qs):

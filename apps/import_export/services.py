@@ -53,7 +53,7 @@ class BulkImportService:
                         raise ValidationError('عدد الصفوف يتجاوز الحد المسموح')
                     if any(isinstance(v, str) and v.startswith('=') for v in row):
                         raise ValidationError('استبدل الصيغ في ملف الاستيراد بقيم نصية')
-                    rows.append(['' if v is None else v.isoformat() if isinstance(v, datetime) else str(v) for v in row])
+                    rows.append(['' if v is None else v.isoformat(sep=' ', timespec='seconds') if isinstance(v, datetime) else str(v) for v in row])
             finally:
                 wb.close()
         else:

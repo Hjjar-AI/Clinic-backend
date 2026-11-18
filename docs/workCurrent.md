@@ -2,7 +2,7 @@
 
 [Current behavior](contracts.md) · [Dated evidence and limits](doneCurrent.md) · [Frontend work](../../frontend/docs/workCurrent.md).
 
-1. Review-fix implementation is source-complete. When separately authorized, verify session activity/expiry, referenced file replay/cleanup, recovery/process failures, collection compatibility and HTTP/proxy/bundle serving with the coordinated frontend. Tests/builds were expressly excluded; see [source evidence](doneCurrent.md#review-fixes-and-contract-handoff-2026-11-18).
+1. Review-fix implementation is source-complete. When separately authorized, verify session activity/expiry, referenced file replay/cleanup, recovery/process failures, collection compatibility and HTTP/proxy/bundle serving with the coordinated frontend. The [remaining logic corrections](doneCurrent.md#logic-review-corrections-2026-11-18) also need isolated runtime checks for upload limits, backup retention, XLSX patient dates, catalog usage-count exports, seed-setting preservation and approved dashboard risk. Tests/builds were expressly excluded; see [source evidence](doneCurrent.md#review-fixes-and-contract-handoff-2026-11-18). No clinic-storage operation is authorized by these follow-ups.
 
 2. Run the new [GitHub workflows](automation.md) after both repositories are pushed. Verify Windows/downloaded archives, scheduled checks, compatibility/audit jobs and manual draft preparation with an existing matching tag; production topology remains separate. Local Linux evidence is in [completed work](doneCurrent.md#github-workflows-and-linux-bundle-2026-11-17).
 3. Confirm supported currencies/precision and quantity limits; current billing uses two-place half-up arithmetic and full payments.

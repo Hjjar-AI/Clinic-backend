@@ -29,6 +29,8 @@ Visit attachment upload accepts one `file` plus opening visit `version`; sequent
 
 Patient `risk_history/` projects the latest approved revision per encounter, ordered by approved date; amendments retain prior approved risk until re-signing. `timeline/` marks approved snapshot content versus unsigned working content. `appointments/next/{patient_id}/` includes the appointment `id` and date/time under current scope. Patient restoration remains admin/grant/version controlled and rejects merged sources. Identity restriction explicitly retains signed identities and audit/correction/merge history. Receptionist draft creation and clinician-only signing are unchanged.
 
+Dashboard `high_risk_patients` rows include `approved_risk: {suicide_risk_level, violence_risk_level}`, taken from the same latest-approved revision annotations used to select the list; either value may be null. Recent-patient rows do not expose that projection. Catalog Excel exports accept `usage_count` sorting with the same counting relations as catalog lists; unsupported sort fields remain errors.
+
 ## Patient identity and ownership
 
 Names required; birth optional **year-only**; gender/ID/phone may be unknown. `patient_number` permanent/unique. Cross-person duplicate IDs/phones warn without suffixing/blocking. Completeness recommends birth/gender/registration, optionally ID/phone/team/language; it is not validity.

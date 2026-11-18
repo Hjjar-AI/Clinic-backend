@@ -21,7 +21,9 @@ from datetime import datetime, timedelta
 from django.conf import settings
 
 # Filename format written by core/management/commands/auto_backup.py.
-BACKUP_FILENAME_PATTERN = re.compile(r'^clinic_backup_(\d{8})_(\d{6})\.zip$')
+BACKUP_FILENAME_PATTERN = re.compile(
+    r'^clinic_backup_(\d{8})_(\d{6})(?:_\d{6}_[0-9a-f]{8})?\.zip$'
+)
 
 
 def _days(setting_name, default):

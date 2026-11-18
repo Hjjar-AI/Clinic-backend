@@ -2,7 +2,7 @@
 from openpyxl import Workbook
 from core.spreadsheets import csv_cell, text_cells
 from django.http import HttpResponse
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.clinical.models import DiagnosisOption, MedicationOption
@@ -20,6 +20,7 @@ class ClinicalDataExportService:
     def export_diagnoses_excel(self, filters=None, include_inactive=False):
         filters = filters or {}
         diagnoses = DiagnosisOption.all_objects.all() if include_inactive else DiagnosisOption.objects.all()
+        diagnoses = diagnoses.annotate(usage_count=Count('visitdiagnosis'))
         search = str(filters.get('search', '')).strip()
         if search:
             diagnoses = diagnoses.filter(
@@ -35,6 +36,7 @@ class ClinicalDataExportService:
         diagnoses = apply_ordering(diagnoses, filters, {
             'order': 'order', 'code': 'code',
             'english_name': 'english_name', 'arabic_name': 'arabic_name',
+            'usage_count': 'usage_count',
         }, default='order')
         wb = Workbook()
         ws = wb.active
@@ -53,6 +55,7 @@ class ClinicalDataExportService:
     def export_medications_excel(self, filters=None, include_inactive=False):
         filters = filters or {}
         meds = MedicationOption.all_objects.all() if include_inactive else MedicationOption.objects.all()
+        meds = meds.annotate(usage_count=Count('visitmedication'))
         search = str(filters.get('search', '')).strip()
         if search:
             meds = meds.filter(
@@ -71,6 +74,7 @@ class ClinicalDataExportService:
             'order': 'order', 'generic_english': 'generic_english',
             'generic_arabic': 'generic_arabic', 'dosage': 'dosage',
             'brand_english': 'brand_english', 'brand_arabic': 'brand_arabic',
+            'usage_count': 'usage_count',
         }, default='order')
         wb = Workbook()
         ws = wb.active

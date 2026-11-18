@@ -129,7 +129,7 @@ class Command(BaseCommand):
             'theme': 'default',
         }
         for key, value in default_settings.items():
-            ClinicSetting.objects.update_or_create(key=key, defaults={'value': value})
+            ClinicSetting.objects.get_or_create(key=key, defaults={'value': value})
         self.stdout.write('Seeded default settings')
 
         # ----- 5. Diagnoses -----

@@ -59,7 +59,7 @@ def main():
             parser.error('Runtime checks failed; run Clinic check.')
         call_command('check')
         server = create_server(get_wsgi_application(), host=args.host, port=args.port,
-                               max_request_body_size=settings.FILE_UPLOAD_MAX_MEMORY_SIZE,
+                               max_request_body_size=settings.MAX_REQUEST_BODY_SIZE,
                                expose_tracebacks=False)
         import webbrowser
         webbrowser.open(f'http://{args.host}:{args.port}/')
